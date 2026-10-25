@@ -1,0 +1,258 @@
+"""整理：按标签把视频移动到标签对应的目标文件夹。
+
+安全性要求：
+  · 先出预览（plan），前端确认后才执行；
+  · 目标重名自动加 " (1)"、" (2)"…，绝不覆盖；
+  · 同盘用 os.replace 原子改名，跨盘走"复制→校验大小→删除源"；
+  · 每一步写 organize_logs，支持整批撤销。
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from .config import Config
+from .db import Database, now_iso
+from .tasks import TaskRegistry
+
+
+class OrganizeError(RuntimeError):
+    pass
+
+
+# ---------- 目标目录 ----------
+def resolve_tag_dir(db: Database, cfg: Config, tag: dict[str, Any],
+                    video_path: str | None = None) -> Path | None:
+    """标签目标目录优先级：标签自定义 > 全局根目录/标签名 > 视频所在源目录/标签名。"""
+    custom = (tag.get("dir_path") or "").strip()
+    if custom:
+        return Path(custom).expanduser()
+    root = (cfg.get("root_dir") or "").strip()
+    if root:
+        return Path(root).expanduser() / str(tag["name"])
+    if video_path:
+        return Path(video_path).parent / str(tag["name"])
+    row = db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1")
+    if row:
+        return Path(row["path"]) / str(tag["name"])
+    return None
+
+
+def default_tag_dir(db: Database, cfg: Config, tag_name: str) -> str:
+    root = (cfg.get("root_dir") or "").strip()
+    if root:
+        return str(Path(root).expanduser() / tag_name)
+    row = db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1")
+    if row:
+        return str(Path(row["path"]) / tag_name)
+    return ""
+
+
+# ---------- 预览 ----------
+def build_plan(db: Database, cfg: Config,
+               tag_ids: list[int] | None = None,
+               video_ids: list[int] | None = None) -> dict[str, Any]:
+    sql = ("SELECT v.*, t.name AS tag_name, t.color AS tag_color, t.dir_path AS tag_dir "
+           "FROM videos v JOIN tags t ON t.id = v.tag_id "
+           "WHERE v.tag_id IS NOT NULL AND v.status IN ('idle','tagged')")
+    params: list[Any] = []
+    if tag_ids:
+        sql += f" AND v.tag_id IN ({','.join('?' * len(tag_ids))})"
+        params += list(tag_ids)
+    if video_ids:
+        sql += f" AND v.id IN ({','.join('?' * len(video_ids))})"
+        params += list(video_ids)
+    sql += " ORDER BY v.tag_id, v.filename"
+    rows = [dict(r) for r in db.query(sql, params)]
+
+    planned: set[str] = set()
+    items: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for v in rows:
+        src = Path(v["path"])
+        if not src.exists():
+            skipped.append({"video_id": v["id"], "name": v["filename"], "reason": "文件不存在"})
+            continue
+        tag = {"name": v["tag_name"], "dir_path": v["tag_dir"]}
+        tdir = resolve_tag_dir(db, cfg, tag, v["path"])
+        if tdir is None:
+            skipped.append({"video_id": v["id"], "name": v["filename"], "reason": "没有可用的目标目录"})
+            continue
+        if src.parent.resolve() == tdir.resolve():
+            skipped.append({"video_id": v["id"], "name": v["filename"], "reason": "已在目标文件夹"})
+            continue
+        target = _unique_target(tdir, v["filename"], planned)
+        planned.add(str(target).lower())
+        items.append({
+            "video_id": v["id"],
+            "name": v["filename"],
+            "size": v["size"],
+            "duration": v["duration"],
+            "tag_id": v["tag_id"],
+            "tag_name": v["tag_name"],
+            "tag_color": v["tag_color"],
+            "from": str(src),
+            "to": str(target),
+            "dir": str(tdir),
+            "renamed": target.name != v["filename"],
+            "cross_device": _cross_device(src, tdir),
+        })
+
+    groups: dict[str, dict[str, Any]] = {}
+    for it in items:
+        g = groups.setdefault(it["dir"], {"dir": it["dir"], "tag_name": it["tag_name"],
+                                          "tag_color": it["tag_color"], "count": 0, "bytes": 0})
+        g["count"] += 1
+        g["bytes"] += int(it["size"] or 0)
+    return {
+        "items": items,
+        "skipped": skipped,
+        "groups": list(groups.values()),
+        "total": len(items),
+        "total_bytes": sum(int(i["size"] or 0) for i in items),
+        "renamed": sum(1 for i in items if i["renamed"]),
+    }
+
+
+def _unique_target(tdir: Path, filename: str, planned: set[str]) -> Path:
+    target = tdir / filename
+    if not target.exists() and str(target).lower() not in planned:
+        return target
+    stem, ext = os.path.splitext(filename)
+    n = 1
+    while True:
+        cand = tdir / f"{stem} ({n}){ext}"
+        if not cand.exists() and str(cand).lower() not in planned:
+            return cand
+        n += 1
+        if n > 9999:
+            raise OrganizeError("同名文件过多，无法生成唯一文件名")
+
+
+def _cross_device(src: Path, dst_dir: Path) -> bool:
+    try:
+        src.parent.mkdir(parents=True, exist_ok=True)
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        return os.stat(src).st_dev != os.stat(dst_dir).st_dev
+    except OSError:
+        return True
+
+
+# ---------- 执行 ----------
+def move_file(src: Path, dst: Path) -> str:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        raise FileExistsError(f"目标已存在：{dst}")
+    try:
+        os.replace(src, dst)
+        return "rename"
+    except OSError:
+        pass
+    tmp = dst.with_name(dst.name + ".vsmoving")
+    try:
+        shutil.copy2(src, tmp)
+        if tmp.stat().st_size != src.stat().st_size:
+            raise OrganizeError(f"复制后大小不一致：{src.name}")
+        os.replace(tmp, dst)
+        src.unlink()
+        return "copy"
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def execute_plan(db: Database, cfg: Config, tasks: TaskRegistry, task_id: str,
+                 tag_ids: list[int] | None = None,
+                 video_ids: list[int] | None = None,
+                 items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    plan = {"items": items, "total": len(items or [])} if items else build_plan(db, cfg, tag_ids, video_ids)
+    items = plan["items"]
+    tasks.update(task_id, total=len(items), message="开始整理…")
+    batch_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+    db.execute("INSERT INTO organize_batches (id, created_at, undone, note) VALUES (?,?,0,?)",
+               (batch_id, now_iso(), f"整理 {len(items)} 个视频"))
+
+    moved: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for it in items:
+        if tasks.is_cancelled(task_id):
+            break
+        src, dst = Path(it["from"]), Path(it["to"])
+        try:
+            if not src.exists():
+                raise FileNotFoundError("源文件已不存在")
+            _unique_target(Path(it["dir"]), it["name"], set())  # 占位，防止并发重名
+            real_dst = dst
+            if real_dst.exists():
+                real_dst = _unique_target(Path(it["dir"]), it["name"], set())
+            how = move_file(src, real_dst)
+            db.execute(
+                "INSERT INTO organize_logs (batch_id, video_id, tag_id, from_path, to_path, moved_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (batch_id, it["video_id"], it["tag_id"], str(src), str(real_dst), now_iso()),
+            )
+            db.execute(
+                "UPDATE videos SET path=?, filename=?, status='organized', organized_at=? WHERE id=?",
+                (str(real_dst), real_dst.name, now_iso(), it["video_id"]),
+            )
+            moved.append({"video_id": it["video_id"], "name": it["name"], "tag_id": it["tag_id"],
+                          "from": str(src), "to": str(real_dst), "how": how})
+            tasks.step(task_id, f"已移动 {real_dst.name}")
+        except Exception as e:  # noqa: BLE001 — 单个文件失败不应中断整批
+            failed.append({"video_id": it["video_id"], "name": it["name"], "error": str(e)})
+            tasks.step(task_id, f"失败 {it['name']}：{e}")
+
+    if not moved and not failed:
+        db.execute("DELETE FROM organize_batches WHERE id=?", (batch_id,))
+    return {"batch_id": batch_id, "moved": len(moved), "failed": failed,
+            "items": moved}
+
+
+# ---------- 撤销 ----------
+def undo_batch(db: Database, batch_id: str) -> dict[str, Any]:
+    batch = db.query_one("SELECT * FROM organize_batches WHERE id=?", (batch_id,))
+    if not batch:
+        raise OrganizeError("找不到这条整理记录")
+    if batch["undone"]:
+        raise OrganizeError("这批已经撤销过了")
+    logs = db.query("SELECT * FROM organize_logs WHERE batch_id=? ORDER BY id DESC", (batch_id,))
+    restored, failed = 0, []
+    for log in logs:
+        to_path, from_path = Path(log["to_path"]), Path(log["from_path"])
+        try:
+            if not to_path.exists():
+                raise FileNotFoundError("文件已不在整理后的位置")
+            if from_path.exists():
+                raise FileExistsError("原位置已存在同名文件")
+            move_file(to_path, from_path)
+            db.execute(
+                "UPDATE videos SET path=?, filename=?, status=CASE WHEN tag_id IS NULL THEN 'idle' ELSE 'tagged' END, "
+                "organized_at=NULL WHERE id=?",
+                (str(from_path), from_path.name, log["video_id"]),
+            )
+            restored += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append({"name": to_path.name, "error": str(e)})
+    db.execute("UPDATE organize_batches SET undone=1 WHERE id=?", (batch_id,))
+    return {"restored": restored, "failed": failed}
+
+
+# ---------- 记录 ----------
+def list_batches(db: Database, limit: int = 50) -> list[dict[str, Any]]:
+    rows = db.query(
+        "SELECT b.*, COUNT(l.id) AS files FROM organize_batches b "
+        "LEFT JOIN organize_logs l ON l.batch_id = b.id "
+        "GROUP BY b.id ORDER BY b.created_at DESC LIMIT ?", (limit,))
+    out = []
+    for r in rows:
+        d = dict(r)
+        dirs = db.query(
+            "SELECT DISTINCT rtrim(SUBSTR(to_path, 1, LENGTH(to_path) - LENGTH(filename))) AS d "
+            "FROM organize_logs l JOIN videos v ON v.id = l.video_id WHERE l.batch_id=?", (r["id"],))
+        d["dirs"] = [x["d"] for x in dirs][:6]
+        out.append(d)
+    return out

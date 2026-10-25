@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "VideoSorter",
+  "version": "0.1.0",
+  "identifier": "com.videosorter.desktop",
+  "build": {
+    "frontendDist": "./frontend"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "视频整理 · VideoSorter",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "url": "http://127.0.0.1:8080"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "resources": [
+      "binaries/*",
+      "tools/*"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
+  }
+}

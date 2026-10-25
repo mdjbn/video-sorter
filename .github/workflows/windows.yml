@@ -1,0 +1,54 @@
+name: windows-desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  tauri:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build web
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build:only
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build python sidecar
+        run: |
+          python -m pip install -U pip pyinstaller
+          pip install -r server/requirements.txt
+          pyinstaller server/videosorter.spec --noconfirm --distpath dist/sidecar
+
+      - name: Stage sidecar + ffmpeg into tauri resources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries, src-tauri/tools | Out-Null
+          Copy-Item dist/sidecar/videosorter-server/* -Recurse -Force src-tauri/binaries/
+          # 精简版 ffmpeg（如果要带进安装包，取消下面注释）
+          # Invoke-WebRequest -Uri https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ffmpeg.zip
+          # Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          # Copy-Item ffmpeg/*/bin/ffmpeg.exe, ffmpeg/*/bin/ffprobe.exe -Destination src-tauri/tools/
+
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build desktop bundle
+        working-directory: src-tauri
+        run: cargo build --release
+      - name: Tauri bundle
+        run: npx --yes @tauri-apps/cli@^2 build --no-bundle || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop
+          path: |
+            src-tauri/target/release/video-sorter-desktop.exe
+            src-tauri/binaries/**

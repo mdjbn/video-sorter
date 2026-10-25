@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# 数据/构建产物
+server/data/
+server/*.log
+web/node_modules/
+web/dist/
+android/.gradle/
+android/local.properties
+android/**/build/
+android/app/release/
+src-tauri/target/
+dist/
+build/
+*.spec.bak
+.DS_Store
+Thumbs.db

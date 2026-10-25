@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>视频整理 · 安卓端 UI 草图</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --ink:#3a4150; --ink2:#6c7484; --line:#c3cad6; --fill:#eef1f6; --fill2:#e2e7ef;
+    --ann:#2f6fed; --bg:#f2f4f7; --white:#fff; --red:#d2453e;
+  }
+  html,body{background:var(--bg);}
+  body{
+    font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--ink);padding:40px 44px 56px;
+  }
+  h1{font-size:22px;font-weight:700;letter-spacing:.01em}
+  .sub{font-size:12.5px;color:var(--ink2);margin-top:8px;line-height:1.7;max-width:760px}
+  .sub b{color:var(--ink)}
+  .board{max-width:1080px;margin:0 auto}
+  .grid{display:grid;grid-template-columns:repeat(3,300px);gap:34px 30px;margin-top:30px;justify-content:center}
+
+  /* ---------- 手机框 ---------- */
+  .cell{width:300px}
+  .phone{
+    width:300px;height:646px;background:var(--white);border:1.5px solid #b6bdc9;border-radius:24px;
+    overflow:hidden;position:relative;box-shadow:0 6px 18px rgba(58,65,80,.08);
+  }
+  .sb{height:22px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:9px;color:var(--ink2);letter-spacing:.04em}
+  .sb i{display:inline-block;width:9px;height:6px;border:1px solid var(--line);border-radius:2px;margin-left:3px}
+
+  /* 通用线框元素 */
+  .wx{border:1.25px dashed #b9c1ce;background:var(--fill);border-radius:8px;display:grid;place-items:center;
+      font-size:11px;color:var(--ink2);letter-spacing:.06em}
+  .btn{border:1.25px solid var(--ink);border-radius:10px;padding:10px 0;text-align:center;font-size:13px;font-weight:600}
+  .btn.solid{background:#dfe4ec}
+  .btn.ghost{border-style:dashed;border-color:#a9b2c1;color:var(--ink2);font-weight:500}
+  .line{height:7px;background:var(--fill2);border-radius:4px}
+  .cap{font-size:11.5px;color:var(--ink2)}
+  .k{font-size:10px;color:#fff;background:var(--ann);border-radius:4px;padding:1px 5px;letter-spacing:.04em}
+
+  /* 画面占位 */
+  .screen{position:relative;height:612px;padding:12px 14px}
+  .screen.dark{background:var(--fill);}
+  .vph{position:absolute;inset:0;background:repeating-linear-gradient(135deg,#e7ebf2 0 12px,#eef1f6 12px 24px)}
+  .vph::after{content:"视频画面（竖屏全屏）";position:absolute;left:50%;top:26%;transform:translate(-50%,-50%);
+    font-size:11px;color:#909aab;letter-spacing:.1em;background:rgba(255,255,255,.8);padding:4px 8px;border-radius:5px}
+
+  /* 叠加层 */
+  .ovtop{position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between}
+  .ovbot{position:absolute;left:0;right:0;bottom:0;z-index:2;padding:14px 14px 16px;
+    background:linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,.94) 34%)}
+  .pillbar{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .tpill{border:1px solid var(--line);border-radius:999px;padding:4px 9px;font-size:10.5px;background:#fff;color:var(--ink2)}
+  .tpill.on{border-color:var(--ink);color:var(--ink);font-weight:600;background:var(--fill)}
+  .tpill.new{border-style:dashed;color:#98a1b0}
+  .prog{height:4px;border-radius:3px;background:var(--fill2);margin-top:12px;overflow:hidden}
+  .prog i{display:block;height:100%;width:34%;background:#a9b4c5;border-radius:3px}
+  .tcode{display:flex;justify-content:space-between;font-size:9.5px;color:var(--ink2);margin-top:5px}
+
+  /* 列表 */
+  .navrow{display:flex;align-items:center;gap:8px;height:34px}
+  .navrow .back{font-size:15px;color:var(--ink)}
+  .navrow .ttl{font-size:13.5px;font-weight:700}
+  .navrow .right{margin-left:auto;font-size:11px;color:var(--ink2)}
+  .litem{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #e8ecf2}
+  .lthumb{width:66px;height:37px;flex:none}
+  .lmeta{min-width:0;flex:1}
+  .lname{font-size:11.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ltag{margin-top:5px;display:flex;gap:5px;align-items:center}
+  .mini{font-size:9.5px;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--ink2)}
+  .mini.solid{background:var(--fill)}
+
+  /* sheet */
+  .dim{position:absolute;left:0;right:0;top:0;height:38%;background:rgba(58,65,80,.16)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;height:62%;background:#fff;border-radius:18px 18px 0 0;
+    border-top:1.25px solid var(--line);padding:10px 16px}
+  .handle{width:38px;height:4px;border-radius:3px;background:var(--fill2);margin:0 auto 12px}
+  .taggrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
+  .tagbig{border:1.25px solid var(--line);border-radius:10px;padding:11px 10px;font-size:11.5px;display:flex;align-items:center;gap:7px}
+  .tagbig.on{border-color:var(--ink);background:var(--fill);font-weight:600}
+  .tagbig .dot{width:7px;height:7px;border-radius:50%;background:#c2c9d5;flex:none}
+  .hint{font-size:10px;color:var(--ink2);line-height:1.6;margin-top:12px}
+
+  /* 整理 */
+  .statrow{display:flex;gap:8px;margin-top:10px}
+  .stat{flex:1;border:1.25px dashed #b9c1ce;border-radius:9px;padding:8px 9px}
+  .stat .v{font-size:15px;font-weight:700}
+  .stat .l{font-size:9.5px;color:var(--ink2);margin-top:2px}
+  .folder{border:1.25px solid var(--line);border-radius:10px;padding:10px 11px;margin-top:9px}
+  .folder .f1{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600}
+  .folder .f1 .mini{margin-left:auto;font-weight:500}
+  .folder .path{font-family:Menlo,Consolas,monospace;font-size:9px;color:var(--ink2);margin-top:6px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .footerbar{position:absolute;left:0;right:0;bottom:0;padding:12px 14px 14px;background:#fff;border-top:1px solid #e8ecf2;display:flex;gap:9px}
+  .footerbar .btn{flex:1}
+  .footerbar .btn.sm{flex:none;width:78px;font-size:11.5px;padding:10px 0;font-weight:500;border-style:dashed}
+
+  /* 设置行 */
+  .srow{display:flex;align-items:center;gap:9px;padding:11px 0;border-bottom:1px solid #e8ecf2;font-size:12px}
+  .srow .ar{margin-left:auto;color:#aab2c0;font-size:12px}
+  .srow .val{margin-left:auto;font-size:10.5px;color:var(--ink2)}
+  .srow.danger{color:var(--red);border-bottom:none}
+
+  /* 标注 */
+  .cap{font-size:11.5px;color:var(--ink2);margin-top:11px;line-height:1.75}
+  .cap .t{display:block;font-size:13px;font-weight:700;color:var(--ink);margin-bottom:4px}
+  .cap .t em{font-style:normal;color:var(--ann);font-weight:700;margin-right:5px;font-size:12px}
+  .cap b{color:var(--ink)}
+  .mark{position:absolute;z-index:5;width:17px;height:17px;border-radius:50%;background:var(--ann);color:#fff;
+    font-size:10px;display:grid;place-items:center;font-weight:700;box-shadow:0 2px 6px rgba(47,111,237,.35)}
+  .arrow{position:absolute;z-index:5;color:var(--ann);font-size:15px;font-weight:700;opacity:.85}
+
+  /* 底部图例 */
+  .legend{margin-top:44px;border-top:1px solid var(--line);padding-top:24px;display:grid;grid-template-columns:1.1fr 1fr;gap:28px}
+  .legend h2{font-size:14px;font-weight:700;margin-bottom:10px}
+  .legend table{width:100%;border-collapse:collapse;font-size:11.5px}
+  .legend td{padding:6px 0;border-bottom:1px dashed #dfe4ec;vertical-align:top;color:var(--ink2)}
+  .legend td:first-child{width:96px;color:var(--ink);font-weight:600}
+  .legend ul{list-style:none;font-size:11.5px;color:var(--ink2);line-height:1.9}
+  .legend li::before{content:"·";color:var(--ann);font-weight:700;margin-right:6px}
+  .legend li b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="board">
+  <h1>视频整理 · 安卓端 UI 草图 <span class="k">v0 线框</span></h1>
+  <p class="sub">
+    低保真线框，只确认<b>信息结构、操作路径与手势</b>，配色和细节等结构定了再做。
+    整体沿用抖音式的全屏竖滑：一个视频占一屏，<b>上下滑切视频</b>，<b>单击暂停</b>，<b>长按 2 倍速、长按后左右拖调速</b>（与网页版一套手势，肌肉记忆通用）。
+    服务器、标签、整理逻辑全部复用网页端，手机端只是"边看边打标签 + 一键整理"。
+  </p>
+
+  <div class="grid">
+
+    <!-- ============ 1 连接服务器 ============ -->
+    <div class="cell">
+      <div class="phone">
+        <div class="sb"><span>9:41</span><span>5G<i></i></span></div>
+        <div class="screen" style="display:flex;flex-direction:column;justify-content:center;padding:0 26px">
+          <div class="wx" style="width:52px;height:52px;border-radius:15px;margin-bottom:18px">LOGO</div>
+          <div style="font-size:16px;font-weight:700">连接到服务器</div>
+          <div class="cap" style="margin:5px 0 22px">第一次打开时填写一次，之后自动记住</div>
+          <div style="font-size:10px;color:var(--ink2);margin-bottom:6px">服务器地址</div>
+          <div class="wx" style="height:38px;justify-content:flex-start;padding:0 11px;font-size:11px;color:var(--ink)">http://192.168.1.8:8080</div>
+          <div class="btn ghost" style="margin-top:8px;font-size:11.5px;padding:8px 0">扫描局域网内的服务器</div>
+          <div style="font-size:10px;color:var(--ink2);margin:16px 0 6px">账号</div>
+          <div class="wx" style="height:34px;justify-content:flex-start;padding:0 11px;font-size:11px">admin</div>
+          <div style="font-size:10px;color:var(--ink2);margin:10px 0 6px">密码</div>
+          <div class="wx" style="height:34px;justify-content:flex-start;padding:0 11px;font-size:11px">••••••••</div>
+          <div class="btn solid" style="margin-top:20px">连接</div>
+          <div class="cap" style="margin-top:12px;text-align:center">与网页端同一个账号，连上后无需重复登录</div>
+        </div>
+      </div>
+      <div class="cap">
+        <span class="t"><em>1</em>连接服务器（仅首次）</span>
+        输入地址或自动扫描局域网；账号密码与网页端统一。<br>
+        连上后写入本地，之后打开 App 直接进播放页。断网时顶部显示一条"离线"提示。
+      </div>
+    </div>
+
+    <!-- ============ 2 播放页 ============ -->
+    <div class="cell">
+      <div class="phone">
+        <div class="vph"></div>
+        <div class="sb" style="position:relative;z-index:2"><span>9:41</span><span>5G<i></i></span></div>
+        <div class="ovtop" style="padding:2px 14px">
+          <div class="mini solid" style="background:rgba(255,255,255,.9)">待整理 7 / 15</div>
+          <div style="display:flex;gap:9px;align-items:center">
+            <div class="wx" style="width:26px;height:26px;border-radius:8px;background:rgba(255,255,255,.9);font-size:9px">标签</div>
+            <div class="wx" style="width:26px;height:26px;border-radius:8px;background:rgba(255,255,255,.9);font-size:9px">⋯</div>
+          </div>
+        </div>
+        <div class="wx" style="position:absolute;left:50%;top:43%;transform:translate(-50%,-50%);z-index:2;width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,.9);font-size:9px">▶</div>
+
+        <div class="arrow" style="right:16px;top:47%">↕</div>
+        <div class="mark" style="left:12px;top:56%">1</div>
+
+        <div class="ovbot">
+          <div style="font-size:12.5px;font-weight:700;color:var(--ink)">东京街头夜景漫步.mp4</div>
+          <div style="font-size:9px;color:#98a1b0;margin-top:3px">/volume1/videos/未整理 · 06:52 · 265 MB</div>
+          <div class="pillbar">
+            <span class="tpill on">● 旅行</span>
+            <span class="tpill">● 美食</span>
+            <span class="tpill">● 运动</span>
+            <span class="tpill">● 学习</span>
+            <span class="tpill">● 待整理</span>
+            <span class="tpill new">＋ 新建</span>
+          </div>
+          <div class="prog"><i></i></div>
+          <div class="tcode"><span>02:19</span><span>06:52</span></div>
+        </div>
+      </div>
+      <div class="cap">
+        <span class="t"><em>2</em>播放页（唯一的主页面）</span>
+        <b>①上下滑</b> 切上一个/下一个视频 · <b>单击</b> 暂停 · <b>长按</b> 2 倍速、<b>长按左右拖</b> 调速（松手固定）<br>
+        顶部左边是"待整理"进度，右上「标签」「⋯」；底部是文件名 + 标签行 + 进度条。整屏没有多余按钮，和网页版手势一致。
+      </div>
+    </div>
+
+    <!-- ============ 3 标签选择 ============ -->
+    <div class="cell">
+      <div class="phone">
+        <div class="vph" style="opacity:.75"></div>
+        <div class="sb" style="position:relative;z-index:2"><span>9:41</span><span>5G<i></i></span></div>
+        <div class="dim"></div>
+        <div class="sheet">
+          <div class="handle"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:14px;font-weight:700">选择标签</div>
+            <div class="mini">当前：旅行</div>
+          </div>
+          <div class="taggrid">
+            <div class="tagbig on"><span class="dot"></span>旅行<span style="margin-left:auto;font-size:9.5px;color:var(--ink2)">23</span></div>
+            <div class="tagbig"><span class="dot"></span>美食<span style="margin-left:auto;font-size:9.5px;color:var(--ink2)">16</span></div>
+            <div class="tagbig"><span class="dot"></span>运动<span style="margin-left:auto;font-size:9.5px;color:var(--ink2)">9</span></div>
+            <div class="tagbig"><span class="dot"></span>学习<span style="margin-left:auto;font-size:9.5px;color:var(--ink2)">7</span></div>
+            <div class="tagbig"><span class="dot"></span>待整理<span style="margin-left:auto;font-size:9.5px;color:var(--ink2)">31</span></div>
+            <div class="tagbig" style="border-style:dashed;color:#98a1b0">＋ 新建标签</div>
+          </div>
+          <div class="hint">选完自动收起并<b>跳到下一个视频</b>，连着标不用来回点。<br>标签的整理路径在网页端设置。</div>
+        </div>
+      </div>
+      <div class="cap">
+        <span class="t"><em>3</em>标签选择（底部弹层）</span>
+        大按钮 2 列，比底部小胶囊更好按；<b>选中即收起 + 自动上滑到下一个</b>，适合一口气刷几十个。<br>
+        新建标签也在这一层，名字 + 颜色，路径沿用网页端默认规则。
+      </div>
+    </div>
+
+    <!-- ============ 4 待整理列表 ============ -->
+    <div class="cell">
+      <div class="phone">
+        <div class="sb"><span>9:41</span><span>5G<i></i></span></div>
+        <div class="screen" style="padding:4px 14px 0">
+          <div class="navrow">
+            <span class="back">‹</span>
+            <span class="ttl">待整理</span>
+            <span class="right">7 个</span>
+          </div>
+          <div style="display:flex;gap:6px;margin:10px 0 6px">
+            <span class="tpill on">待整理</span>
+            <span class="tpill">未标记</span>
+            <span class="tpill">已整理</span>
+            <span class="tpill">全部 15</span>
+          </div>
+          <div class="litem">
+            <div class="wx lthumb">图</div>
+            <div class="lmeta">
+              <div class="lname">海边日落延时摄影.mp4</div>
+              <div class="ltag"><span class="mini solid">● 旅行</span><span class="mini">02:14</span><span class="mini">86 MB</span></div>
+            </div>
+          </div>
+          <div class="litem">
+            <div class="wx lthumb">图</div>
+            <div class="lmeta">
+              <div class="lname">东京街头夜景漫步.mp4</div>
+              <div class="ltag"><span class="mini solid">● 旅行</span><span class="mini">06:52</span><span class="mini">265 MB</span></div>
+            </div>
+          </div>
+          <div class="litem">
+            <div class="wx lthumb">图</div>
+            <div class="lmeta">
+              <div class="lname">家庭聚餐 2025 春节.MOV</div>
+              <div class="ltag"><span class="mini solid">● 美食</span><span class="mini">18:00</span><span class="mini">1.39 GB</span></div>
+            </div>
+          </div>
+          <div class="litem">
+            <div class="wx lthumb">图</div>
+            <div class="lmeta">
+              <div class="lname">晨跑记录 第 12 天.mp4</div>
+              <div class="ltag"><span class="mini solid">● 运动</span><span class="mini">04:06</span><span class="mini">178 MB</span></div>
+            </div>
+          </div>
+          <div class="litem">
+            <div class="wx lthumb">图</div>
+            <div class="lmeta">
+              <div class="lname">Python 异步编程讲解.mp4</div>
+              <div class="ltag"><span class="mini solid">● 学习</span><span class="mini">1:20:20</span><span class="mini">913 MB</span></div>
+            </div>
+          </div>
+          <div class="litem" style="border-bottom:none">
+            <div class="wx lthumb">图</div>
+            <div class="lmeta">
+              <div class="lname">阳台上开的花.mp4</div>
+              <div class="ltag"><span class="mini">未标记</span><span class="mini">00:48</span><span class="mini">25 MB</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="footerbar">
+          <div class="btn sm">全选</div>
+          <div class="btn solid">进入播放，边看边打标签 ›</div>
+        </div>
+      </div>
+      <div class="cap">
+        <span class="t"><em>4</em>视频列表（从「⋯」进入）</span>
+        竖排列表，点任意一条直接全屏播放，<b>从这一条开始往下滑</b>。<br>
+        不是主页面，只用来挑"从哪个视频开始看"，所以做成二级页，不做底部 tab。
+      </div>
+    </div>
+
+    <!-- ============ 5 整理预览 ============ -->
+    <div class="cell">
+      <div class="phone">
+        <div class="sb"><span>9:41</span><span>5G<i></i></span></div>
+        <div class="screen" style="padding:4px 14px 0">
+          <div class="navrow">
+            <span class="back">‹</span>
+            <span class="ttl">整理预览</span>
+            <span class="right">网页端也可操作</span>
+          </div>
+          <div class="statrow">
+            <div class="stat"><div class="v">7</div><div class="l">个视频</div></div>
+            <div class="stat"><div class="v">4</div><div class="l">个目标文件夹</div></div>
+            <div class="stat"><div class="v">1.2 GB</div><div class="l">总大小</div></div>
+          </div>
+          <div class="folder">
+            <div class="f1"><span class="mini solid">旅行</span>→ 旅行<span class="mini">3 个</span></div>
+            <div class="path">/volume1/videos/整理/旅行</div>
+          </div>
+          <div class="folder">
+            <div class="f1"><span class="mini solid">美食</span>→ 美食<span class="mini">2 个</span></div>
+            <div class="path">/volume1/videos/整理/美食</div>
+          </div>
+          <div class="folder">
+            <div class="f1"><span class="mini solid">运动</span>→ 运动<span class="mini">1 个</span></div>
+            <div class="path">/volume1/videos/整理/运动</div>
+          </div>
+          <div class="folder" style="border-style:dashed">
+            <div class="f1"><span class="mini">⚠</span>1 个重名，自动改名</div>
+            <div class="path">…/旅行/海边日落延时摄影 (2).mp4</div>
+          </div>
+          <div class="hint">只移动有标签的视频；未打标签的不动。移动后可撤销。</div>
+        </div>
+        <div class="footerbar">
+          <div class="btn sm">全选</div>
+          <div class="btn solid">确认整理 7 个</div>
+        </div>
+      </div>
+      <div class="cap">
+        <span class="t"><em>5</em>整理预览</span>
+        先按文件夹分组列清楚"哪些文件去哪个目录"，重名冲突单独提示（自动加序号）。<br>
+        确认后原地显示进度条，完成给一条"已移动 7 个 / 撤销"的提示。
+      </div>
+    </div>
+
+    <!-- ============ 6 设置 ============ -->
+    <div class="cell">
+      <div class="phone">
+        <div class="sb"><span>9:41</span><span>5G<i></i></span></div>
+        <div class="screen" style="padding:4px 14px 0">
+          <div class="navrow">
+            <span class="back">‹</span>
+            <span class="ttl">设置</span>
+          </div>
+          <div style="margin-top:12px">
+            <div class="srow">服务器<span class="val">192.168.1.8:8080</span><span class="ar">›</span></div>
+            <div class="srow">账号<span class="val">admin</span><span class="ar">›</span></div>
+            <div class="srow">扫描源文件夹<span class="val">2 个</span><span class="ar">›</span></div>
+            <div class="srow">标签管理<span class="val">5 个</span><span class="ar">›</span></div>
+            <div class="srow">播放历史<span class="val">10 条</span><span class="ar">›</span></div>
+            <div class="srow">缓存与存储<span class="val">1.8 GB</span><span class="ar">›</span></div>
+            <div class="srow">关于项目<span class="val">v0.1.0</span><span class="ar">›</span></div>
+            <div class="srow danger">退出登录</div>
+          </div>
+          <div class="hint">标签路径、扫描目录这些也能在手机上改，但复杂设置建议回网页端。</div>
+        </div>
+      </div>
+      <div class="cap">
+        <span class="t"><em>6</em>设置（从「⋯」进入）</span>
+        服务器 / 账号 / 标签 / 历史 / 退出登录，和网页端一一对应。<br>
+        暂不做多账号、不做消息通知。
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 图例 ==================== -->
+  <div class="legend">
+    <div>
+      <h2>手势与操作约定</h2>
+      <table>
+        <tr><td>上下滑</td><td>切上一个 / 下一个视频，到头轻提示"已经是最后一个了"</td></tr>
+        <tr><td>单击画面</td><td>暂停 / 播放（暂停时中央出现就播图标）</td></tr>
+        <tr><td>长按不动</td><td>0.4 秒后 2.0× 播放，松手回原速（顶部 HUD 提示）</td></tr>
+        <tr><td>长按左右拖</td><td>0.25×–4× 调速，松手固定，右上角速度标常显</td></tr>
+        <tr><td>点标签</td><td>立即生效并自动上滑到下一个视频（可关掉自动跳）</td></tr>
+        <tr><td>右上「标签」</td><td>打开底部弹层批量挑标签（大按钮更好按）</td></tr>
+        <tr><td>右上「⋯」</td><td>菜单：视频列表 / 整理 / 设置 / 退出登录</td></tr>
+      </table>
+    </div>
+    <div>
+      <h2>这一版的想法</h2>
+      <ul>
+        <li><b>只有一个</b>主页面：打开就刷视频，其余都是二级页，符合"刷着顺手"的预期</li>
+        <li>手势和网页版<b>完全一致</b>，电脑和手机来回切换不用重新学</li>
+        <li>不底部堆 tab：播放器要沉浸，切页放「⋯」里，不干扰观看</li>
+        <li>关键操作只有两件：<b>打标签</b>、<b>整理</b>，都放在一眼能看到的位置</li>
+        <li>视频走局域网直连（HTTP 分段），不转码、不占手机存储</li>
+        <li>Kotlin + Media3(ExoPlayer) + 竖向 Pager，原生 App，以后要做"后台刷"也方便</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body>
+</html>

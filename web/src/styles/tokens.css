@@ -1,0 +1,48 @@
+/* ============ 设计令牌：深色为默认，浅色覆盖；--ink 让半透明浮层随主题翻转 ============ */
+:root {
+  --bg: #0a0c0f;
+  --panel: #11141a;
+  --panel-2: #161a21;
+  --line: #232932;
+  --line-2: #2c333e;
+  --text: #e8edf3;
+  --muted: #8d98a8;
+  --muted-2: #69717f;
+  --accent: #35d18a;
+  --accent-2: #2bbd7b;
+  --accent-dim: rgba(53, 209, 138, 0.12);
+  --danger: #ff6b6b;
+  --danger-dim: rgba(255, 107, 107, 0.12);
+  --warn: #f4a259;
+  --ink: 255, 255, 255;
+  --inkinv: 0, 0, 0;
+  --glass: 10, 12, 15;
+  --input-bg: #0d1015;
+  --sidebar: 320px;
+  --radius: 14px;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --panel-2: #f6f8fb;
+  --line: rgba(16, 24, 38, 0.1);
+  --line-2: rgba(16, 24, 38, 0.16);
+  --text: #0f1a29;
+  --muted: #5c6675;
+  --muted-2: #6f7a8b;
+  --accent: #0fa267;
+  --accent-2: #0b8c58;
+  --accent-dim: rgba(15, 162, 103, 0.12);
+  --danger: #d64545;
+  --danger-dim: rgba(214, 69, 69, 0.1);
+  --warn: #b9741f;
+  --ink: 15, 26, 41;
+  --inkinv: 255, 255, 255;
+  --glass: 255, 255, 255;
+  --input-bg: #f2f5fa;
+  --shadow: 0 18px 44px rgba(20, 30, 50, 0.14);
+  color-scheme: light;
+}

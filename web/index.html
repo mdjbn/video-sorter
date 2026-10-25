@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>视频整理</title>
+    <script>
+      // 首屏防闪烁：先按用户上次选择/系统偏好定主题
+      (function () {
+        try {
+          var mode = localStorage.getItem('vs-theme') || 'auto';
+          var light = window.matchMedia('(prefers-color-scheme: light)').matches;
+          var theme = mode === 'auto' ? (light ? 'light' : 'dark') : mode;
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
