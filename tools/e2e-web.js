@@ -1,6 +1,8 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
-const B = 'http://127.0.0.1:18931';
+const B = process.env.VS_BASE || 'http://127.0.0.1:18931';
+const SRC = process.env.VS_SRC || '/tmp/vs-demo/src';
+const SHOTS = process.env.VS_SHOTS || '/tmp';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const R = [];
 const ok = (n, c, extra = '') => { R.push([c, n, extra]); console.log((c ? 'PASS ' : 'FAIL ') + n + (extra ? ' :: ' + extra : '')); };
@@ -26,7 +28,7 @@ const api = async (p, path, opt = {}) => p.evaluate(async (path, opt) => {
   ok('登录后进入播放页', (await p.$('.stage')) !== null);
 
   // 准备数据：添加源 + 扫描
-  await api(p, '/sources', { method: 'POST', body: JSON.stringify({ path: '/tmp/vs-demo/src' }) });
+  await api(p, '/sources', { method: 'POST', body: JSON.stringify({ path: SRC }) });
   const scan = await api(p, '/scan', { method: 'POST', body: JSON.stringify({}) });
   for (let i = 0; i < 40; i++) {
     const t = await api(p, '/tasks/' + scan.body.task_id);
@@ -79,7 +81,7 @@ const api = async (p, path, opt = {}) => p.evaluate(async (path, opt) => {
   await sleep(5000);
   const organized = await api(p, '/videos?status=organized');
   ok('整理执行成功', organized.body.total >= 1, `organized=${organized.body.total} btns=${clicks}`);
-  const dirs = fs.readdirSync('/tmp/vs-demo/src', { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  const dirs = fs.readdirSync(SRC, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
   ok('文件已移动到标签文件夹', dirs.length >= 1, dirs.join(','));
 
   // 管理页
@@ -105,10 +107,10 @@ const api = async (p, path, opt = {}) => p.evaluate(async (path, opt) => {
   await sleep(800);
   const about = await p.evaluate(() => document.querySelector('.about-hero')?.textContent || '');
   ok('关于页显示版本', /0\.1\.0/.test(about) || true, about.replace(/\s+/g, ' ').trim().slice(0, 40));
-  await p.screenshot({ path: '/tmp/e2e-manage.png' });
+  await p.screenshot({ path: SHOTS + '/e2e-manage.png' });
   await p.goto(B + '/', { waitUntil: 'networkidle2' });
   await sleep(1500);
-  await p.screenshot({ path: '/tmp/e2e-player.png' });
+  await p.screenshot({ path: SHOTS + '/e2e-player.png' });
 
   const realErrs = errs.filter((e) => !/favicon|Failed to load resource/.test(e));
   ok('无 JS 报错', realErrs.length === 0, realErrs.slice(0, 3).join(' | '));
