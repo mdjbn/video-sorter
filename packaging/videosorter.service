@@ -1,0 +1,21 @@
+[Unit]
+Description=VideoSorter 视频分类整理服务
+Documentation=https://github.com/your-name/video-sorter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 按实际路径修改：仓库放在哪个目录
+WorkingDirectory=/opt/video-sorter/server
+# 数据目录（SQLite / 缩略图 / HLS 缓存），建议用大盘
+Environment=VIDEOSORTER_DATA=/var/lib/video-sorter
+ExecStart=/opt/video-sorter/server/.venv/bin/python -m videosorter --host 0.0.0.0 --port 8080 --data-dir /var/lib/video-sorter --web-dir /opt/video-sorter/web/dist
+Restart=on-failure
+RestartSec=3
+# 服务要能读视频目录、写整理目标目录：按需改 User/Group
+User=video
+Group=video
+
+[Install]
+WantedBy=multi-user.target

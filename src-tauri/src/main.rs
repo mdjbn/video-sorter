@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::process::{Child, Command};
+
+use tauri::Manager;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 

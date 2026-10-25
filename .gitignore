@@ -20,3 +20,8 @@ build/
 *.spec.bak
 .DS_Store
 Thumbs.db
+
+# Tauri 打包资源（CI 构建时临时生成）
+src-tauri/binaries/
+src-tauri/tools/
+src-tauri/gen/schemas/
