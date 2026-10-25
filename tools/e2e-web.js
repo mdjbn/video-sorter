@@ -98,6 +98,25 @@ const api = async (p, path, opt = {}) => p.evaluate(async (path, opt) => {
   await sleep(800);
   const trows = await p.$$eval('.trow', (e) => e.length);
   ok('标签管理显示 5 个标签', trows === 5, 'rows=' + trows);
+  const tagPaths = await p.$$eval('.trow', (rows) =>
+    rows.map((r) => (r.querySelector('.pth')?.textContent || '').replace(/\s+/g, ' ').trim()));
+  ok('每个标签都有目标文件夹', tagPaths.length === 5 && tagPaths.every((t) => t.length > 3), tagPaths.slice(0, 2).join(' | '));
+
+  // 整理记录 + 撤销（撤销后应回到「待整理」）
+  await p.evaluate(() => [...document.querySelectorAll('.nav-item')].find((e) => /^\s*整理\s*$/.test(e.textContent))?.click());
+  await sleep(1000);
+  const didUndo = await p.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => /撤销/.test(x.textContent));
+    if (!b) return false;
+    b.click();
+    return true;
+  });
+  await sleep(1500);
+  const afterUndo = await api(p, '/videos?status=organized');
+  const taggedBack = await api(p, '/videos?status=tagged');
+  ok('撤销整理成功', didUndo && afterUndo.body.total === 0 && taggedBack.body.total >= 1,
+    `organized=${afterUndo.body.total} tagged=${taggedBack.body.total}`);
+
   await p.evaluate(() => [...document.querySelectorAll('.nav-item')].find((e) => /播放历史/.test(e.textContent))?.click());
   await sleep(800);
   const histCards = await p.$$eval('.vcard', (e) => e.length);
