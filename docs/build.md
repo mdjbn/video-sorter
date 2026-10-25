@@ -127,3 +127,13 @@ App 登录页点「扫描局域网」→ 向 `255.255.255.255:38080` 与各网�
 4. **JDK 版本**：AGP 8.7 需要 **JDK 17 或 21**，用系统自带的 JDK 25 会直接失败。
 5. 不要同时跑 `assembleDebug` 和 `testDebugUnitTest` —— 两个 Gradle 进程会互相覆盖中间产物，
    报一堆莫名其妙的 `Unresolved reference`；串行跑就没问题。
+
+6. **git 也要先修权限**：fNOS 上新建文件是 mode 000，git 会报
+   `error: opening .git/config: Permission denied`；目录属主与当前用户不一致时还会报
+   `detected dubious ownership`。在项目根执行：
+   ```bash
+   bash tools/fix-perms.sh
+   git config --global --add safe.directory "$(pwd)"
+   ```
+7. **本仓库已 `git init` 并提交首次版本**（分支 `main`）；推 GitHub 后即可用
+   `.github/workflows/` 里的流水线出 APK / Windows 安装包。

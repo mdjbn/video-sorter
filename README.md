@@ -162,6 +162,13 @@ node tools/e2e-web.js
 
 实测结果：后端 17 passed、安卓单测 4 passed、网页端 E2E 16 项全绿。
 
+## 在 fNOS 上开发的小提示
+
+这台机器的卷子有点特别：新文件会以 mode 000 落盘，`git` / `gradle` 之类会读不了自己刚写的文件。
+在项目根跑一次 `bash tools/fix-perms.sh` 即可；git 需要
+`git config --global --add safe.directory "$(pwd)"`（父目录属主与当前用户不同）。
+更详细的编译踩坑见 [docs/build.md](docs/build.md)。
+
 ## 安全说明
 
 - 单人使用：一个账号 + PBKDF2 密码哈希，登录态是 HttpOnly Cookie（7 天），所有 `/api/*`（除登录/健康检查）都要求登录。
