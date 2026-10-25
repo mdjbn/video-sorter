@@ -25,3 +25,6 @@ Thumbs.db
 src-tauri/binaries/
 src-tauri/tools/
 src-tauri/gen/schemas/
+# 误生成在 server/ 下的缩略图（历史遗留，已清理）
+server/*.jpg
+server/*.png
