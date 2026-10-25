@@ -1,6 +1,10 @@
 package com.videosorter.app
 
+import com.videosorter.app.data.Api
+import com.videosorter.app.data.FoundServer
 import com.videosorter.app.data.Session
+import com.videosorter.app.data.Video
+import com.videosorter.app.data.parseReply
 import com.videosorter.app.data.VideoPage
 import com.videosorter.app.ui.nextThemeMode
 import com.videosorter.app.ui.themeLabel
@@ -73,5 +77,37 @@ class LogicTest {
         val page = Json { ignoreUnknownKeys = true }.decodeFromString<VideoPage>("{}")
         assertEquals(0, page.items.size)
         assertEquals(0, page.counts.all)
+    }
+
+    // ---------- 局域网发现回包解析 ----------
+    @Test
+    fun parsesDiscoveryReply() {
+        val text = """{"app":"VideoSorter","version":"0.1.0","name":"VideoSorter @ fnos","port":18931,"ip":"192.168.5.100","tls":false}"""
+        val s = parseReply(text)
+        assertEquals(FoundServer("VideoSorter @ fnos", "192.168.5.100", 18931, "0.1.0"), s)
+        assertEquals("192.168.5.100:18931", s!!.address)
+    }
+
+    @Test
+    fun discoveryReplyFallsBackToSenderIpAndDefaultPort() {
+        val s = parseReply("""{"app":"VideoSorter","name":"NAS"}""", senderHint = "10.0.0.9")
+        assertEquals("10.0.0.9", s!!.ip)
+        assertEquals(8080, s.port)
+        assertEquals("NAS", s.name)
+    }
+
+    @Test
+    fun ignoresForeignOrBrokenReplies() {
+        assertEquals(null, parseReply("""{"app":"SomethingElse","port":80}"""))
+        assertEquals(null, parseReply("not json at all"))
+        assertEquals(null, parseReply("""{"app":"VideoSorter","port":99999,"ip":"1.2.3.4"}"""))
+    }
+
+    // ---------- 缩略图 URL ----------
+    @Test
+    fun buildsThumbUrl() {
+        val api = Api("http://192.168.1.8:8080")
+        assertEquals("http://192.168.1.8:8080/api/videos/7/thumb", api.thumbUrl(Video(id = 7, thumbUrl = "/api/videos/7/thumb")))
+        assertEquals("", api.thumbUrl(Video(id = 7, thumbUrl = null)))
     }
 }

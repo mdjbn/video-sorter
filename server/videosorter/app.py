@@ -36,11 +36,17 @@ background:#12161d;border:1px solid #232932;border-radius:14px}}code{{color:#35d
 
 
 def default_web_dir() -> Path | None:
+    """按优先级找一个可用的网页端构建产物目录。"""
     here = Path(__file__).resolve()
     candidates = [
-        here.parent.parent / "web" / "dist",   # server/web/dist（开发时）
-        here.parent.parent.parent / "web" / "dist",  # 仓库根/web/dist
-        here.parent / "webdist",               # 打包进 PyInstaller 时
+        # PyInstaller onedir：可执行文件旁边 / _internal 里
+        Path(sys.executable).parent / "webdist",
+        Path(getattr(sys, "_MEIPASS", here.parent)) / "webdist",
+        here.parent.parent / "webdist",
+        # 开发时：server/web/dist、仓库根/web/dist
+        here.parent.parent / "web" / "dist",
+        here.parent.parent.parent / "web" / "dist",
+        here.parent / "webdist",
     ]
     for c in candidates:
         if (c / "index.html").exists():

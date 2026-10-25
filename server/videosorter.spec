@@ -10,7 +10,10 @@
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+try:
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+except NameError:  # PyInstaller 执行 spec 文件时不会注入 __file__
+    ROOT = os.path.dirname(SPECPATH)
 WEB_DIST = os.path.join(ROOT, "web", "dist")
 
 datas = []

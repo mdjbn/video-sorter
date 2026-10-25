@@ -63,16 +63,31 @@ object LanDiscovery {
                         continue
                     }
                     val text = String(pkt.data, 0, pkt.length, Charsets.UTF_8)
-                    if (!text.contains("VideoSorter")) continue
-                    val obj = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: continue
-                    val ip = obj["ip"]?.jsonPrimitive?.contentOrNull ?: pkt.address.hostAddress ?: continue
-                    val port = obj["port"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 8080
-                    val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: "VideoSorter"
-                    val ver = obj["version"]?.jsonPrimitive?.contentOrNull ?: ""
-                    found["$ip:$port"] = FoundServer(name, ip, port, ver)
+                    val server = parseReply(text, pkt.address.hostAddress) ?: continue
+                    found["${server.ip}:${server.port}"] = server
                 }
             }
         }
         found.values.sortedBy { it.name }
     }
+}
+
+/**
+ * 解析服务器回包。纯函数，方便单测：
+ * ```json
+ * {"app":"VideoSorter","version":"0.1.0","name":"VideoSorter @ fnos","port":8080,"ip":"192.168.1.8"}
+ * ```
+ * 不是 VideoSorter 的回包、或不是合法 JSON 时返回 null；ip 缺失时用发送方地址兜底。
+ */
+internal fun parseReply(text: String, senderHint: String? = null): FoundServer? {
+    if (!text.contains("VideoSorter")) return null
+    val obj = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+    val ip = obj["ip"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        ?: senderHint?.takeIf { it.isNotBlank() }
+        ?: return null
+    val port = obj["port"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 8080
+    if (port !in 1..65535) return null
+    val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: "VideoSorter"
+    val ver = obj["version"]?.jsonPrimitive?.contentOrNull ?: ""
+    return FoundServer(name, ip, port, ver)
 }

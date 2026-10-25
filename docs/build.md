@@ -137,3 +137,18 @@ App 登录页点「扫描局域网」→ 向 `255.255.255.255:38080` 与各网�
    ```
 7. **本仓库已 `git init` 并提交首次版本**（分支 `main`）；推 GitHub 后即可用
    `.github/workflows/` 里的流水线出 APK / Windows 安装包。
+
+## 附：打包相关的两个真实坑（已在代码里修掉）
+
+1. **PyInstaller spec 里不能直接用 `__file__`**：PyInstaller 执行 `.spec` 时不会注入 `__file__`，
+   会报 `NameError: name '__file__' is not defined`（Windows CI 上同样会挂）。现在 `server/videosorter.spec`
+   已改成 `try: ROOT = ... __file__ ... except NameError: ROOT = os.path.dirname(SPECPATH)`。
+2. **打包后的网页端目录探测**：onedir 产物里页面在 `_internal/webdist`（或绿色版里和 exe 同级），
+   而开发时在 `web/dist`。`app.py::default_web_dir()` 现在依次找
+   `exe 同级 webdist` → `sys._MEIPASS/webdist` → `_internal/webdist` → `server/web/dist` → `web/dist`，
+   并有 3 个单测覆盖（`server/tests/test_webfind.py`）。
+3. 在 **Linux 上本地打 sidecar** 还额外需要 binutils（PyInstaller 用 `objcopy` 往 ELF 里加 `pydata` 段）；
+   没装 binutils 时 PyInstaller 直接报 `On Linux, objdump is required`。Windows / macOS 打包不需要它，
+   所以本项目把 sidecar 的构建放在 CI 的 windows runner 上做，Linux 本地只需跑后端测试。
+4. **Tauri 本地编译**需要 rust 工具链 + 系统 webview 依赖（Linux 上是 webkit2gtk-4.1），
+   没装的话 `cargo check` 会先卡在宿主编译器（`linker 'cc' not found`）。所以 Rust 壳的编译验证交给 CI。

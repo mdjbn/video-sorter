@@ -150,17 +150,17 @@ cd web && npm install && npm run dev
 ## 测试
 
 ```bash
-# 后端：17 项接口测试（含 Range、HLS 转码、局域网发现）
+# 后端：20 项测试（接口 + 打包目录探测，含 Range、HLS 转码、局域网发现）
 cd server && .venv/bin/python -m pytest -q
 
-# 安卓：4 项纯 JVM 单元测试（地址归一化 / 主题循环 / 模型解析）
+# 安卓：8 项纯 JVM 单元测试（地址归一化 / 主题循环 / 模型解析 / 局域网回包解析）
 cd android && gradle testDebugUnitTest
 
 # 网页端端到端（需要 puppeteer + 真实 ffmpeg 样片，登录/扫描/播放/打标签/整理/主题/管理页）
 node tools/e2e-web.js
 ```
 
-实测结果：后端 17 passed、安卓单测 4 passed、网页端 E2E 16 项全绿。
+实测结果：后端 20 passed、安卓单测 8 passed、网页端 E2E 16 项全绿。
 
 ## 在 fNOS 上开发的小提示
 
