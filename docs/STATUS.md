@@ -1,0 +1,65 @@
+# 交付状态与验证矩阵
+
+> 三条里程碑（M1 服务端+网页端、M2 安卓端、M3 Windows 桌面端/发版）的代码都已落地。
+> 下表区分「本机已验证」与「只能在 CI / 真机上验证」，避免把没跑过的当成跑过了。
+
+## 一、能直接跑起来的（服务器 / 网页端）
+
+```bash
+git clone <repo> && cd video-sorter
+chmod +x run.sh
+./run.sh                 # 首次会自动建 venv、装依赖、构建网页端
+# 打开 http://<服务器IP>:8080  （默认账号 admin / admin1234）
+```
+
+- 数据默认在 `~/.config/video-sorter/`（Linux）/ `%APPDATA%\VideoSorter`（Windows），可用 `--data-dir` 指定。
+- systemd 常驻模板：`packaging/videosorter.service`。
+
+## 二、验证矩阵
+
+| 模块 | 项目 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **20 passed** |
+| 后端 | Range 播放 + 按需 HLS 转码 | ✅ 本机通过 | pytest 内 mkv→HLS 用例（`index.m3u8` + `seg00000.ts`）|
+| 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
+| 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **18/18 PASS**（CI：`.github/workflows/e2e.yml`）|
+| 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleDebug` → `dist/android/app-debug.apk`（20.5 MB，v0.1.0）|
+| 安卓 | 单元测试（normalize/主题/解析/发现） | ✅ 本机通过 | `testDebugUnitTest` → **8/8** |
+| 安卓 | 真机/模拟器运行 | ⚠️ 未验证 | 本机无 KVM 权限、无设备；需 `adb install dist/android/app-debug.apk` |
+| 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
+| 桌面端 | 链接 exe / NSIS / MSI 打包 | ⚠️ 只在 CI 验证 | 本机无 mingw 链接环境；`.github/workflows/windows.yml` 负责 |
+| 桌面端 | 绿色版 zip | ⚠️ 只在 CI 验证 | 同上（CI 里顺手 `Compress-Archive`）|
+| 发布 | tag 触发一键出包 | ⚠️ 未跑过 | `.github/workflows/release.yml`（需推到 GitHub 并打 `v*` tag）|
+
+## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
+
+机器上没有 gcc、没有 mingw，直接 `cargo build` 会在 proc-macro 链接阶段报 `linker cc not found`。
+用 zig 既当 C 编译器又当链接器即可跑通 `cargo check`（不做最终链接，够验证代码正确性）：
+
+```bash
+# 1) 取 zig（自带 glibc/mingw 头文件与 lld）
+curl -LO https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz && tar xf zig-linux-x86_64-0.13.0.tar.xz
+
+# 2) 让 rustc 找得到 cc / c++ / ar
+mkdir -p /tmp/tc/bin
+printf '#!/bin/sh\nexec %s cc "$@"\n'  "$PWD/zig-linux-x86_64-0.13.0/zig" > /tmp/tc/bin/cc
+printf '#!/bin/sh\nexec %s c++ "$@"\n' "$PWD/zig-linux-x86_64-0.13.0/zig" > /tmp/tc/bin/c++
+printf '#!/bin/sh\nexec %s ar "$@"\n'  "$PWD/zig-linux-x86_64-0.13.0/zig" > /tmp/tc/bin/ar
+chmod +x /tmp/tc/bin/*
+
+# 3) 交叉目标 C 编译器（zig 的 triple 写法，cc-rs 会传 --target=x86_64-pc-windows-gnu，需要转换）
+#    另需 windres 与 dlltool 的替身：见仓库 tools/zig-cross/README.md
+export PATH=/tmp/tc/bin:$PATH
+export CC_x86_64_pc_windows_gnu=/tmp/tc/bin/zigcc.py
+export AR_x86_64_pc_windows_gnu=/tmp/tc/bin/ar
+cd src-tauri && cargo check --target x86_64-pc-windows-gnu
+```
+
+`cargo check` 阶段需要 `src-tauri/binaries/` 里至少有一个文件（Tauri 的 `bundle.resources` 校验），
+可以先放个占位文件，CI 里则由 PyInstaller 产物填充。
+
+## 四、接下来还需要什么
+
+1. 把仓库推到 GitHub，打一个 `v0.1.0` tag，让 `release.yml` 真跑一次，产出 APK + NSIS/MSI + 绿色版 zip。
+2. 用手机 `adb install` 装一次，验证局域网发现、上下滑播放、上传下载（真机上的 Media3 行为）。
+3. 在目标主机（fnOS）上用 systemd 常驻，把 `--data-dir` 指到大盘。
