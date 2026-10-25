@@ -21,6 +21,7 @@ xcopy /E /I /Y web\dist dist\portable\videosorter-server\webdist >nul
 
 echo [4/4] 收尾
 copy /Y packaging\portable-启动.bat dist\portable\videosorter-server\启动.bat >nul
+if not exist dist\portable\videosorter-server\tools mkdir dist\portable\videosorter-server\tools
 if exist server\tools\ffmpeg.exe  copy /Y server\tools\ffmpeg.exe  dist\portable\videosorter-server\tools\ >nul
 if exist server\tools\ffprobe.exe copy /Y server\tools\ffprobe.exe dist\portable\videosorter-server\tools\ >nul
 echo.

@@ -29,8 +29,8 @@
       "msi"
     ],
     "resources": [
-      "binaries/*",
-      "tools/*"
+      "binaries/**",
+      "tools/**"
     ],
     "icon": [
       "icons/32x32.png",

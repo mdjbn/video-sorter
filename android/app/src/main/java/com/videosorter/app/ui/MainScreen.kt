@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.videosorter.app.data.Api
+import com.videosorter.app.data.ApiException
 import com.videosorter.app.data.Counts
 import com.videosorter.app.data.Downloads
 import com.videosorter.app.data.Session
@@ -57,6 +58,21 @@ fun MainScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    fun toast(msg: String) {
+        scope.launch { snackbar.showSnackbar(msg) }
+    }
+
+    /** token 失效时统一回登录页，避免界面上一直报「加载失败」。 */
+    fun authFail(e: Throwable): Boolean {
+        if (e is ApiException && e.code == 401) {
+            session.clearToken(api.base)
+            toast("登录已过期，请重新登录")
+            onLogout()
+            return true
+        }
+        return false
+    }
+
     suspend fun reload(silent: Boolean = false) {
         if (!silent) loading = true
         try {
@@ -67,14 +83,10 @@ fun MainScreen(
             if (playerIndex >= videos.size) playerIndex = 0
             error = null
         } catch (e: Exception) {
-            error = e.message ?: "加载失败"
+            if (!authFail(e)) error = e.message ?: "加载失败"
         } finally {
             loading = false
         }
-    }
-
-    fun toast(msg: String) {
-        scope.launch { snackbar.showSnackbar(msg) }
     }
 
     LaunchedEffect(Unit) { reload() }
@@ -120,14 +132,14 @@ fun MainScreen(
                         scope.launch {
                             runCatching { api.setTag(videoId, tagId) }
                                 .onSuccess { reload(silent = true) }
-                                .onFailure { toast(it.message ?: "标记失败") }
+                                .onFailure { if (!authFail(it)) toast(it.message ?: "标记失败") }
                         }
                     },
                     onCreateTag = { name, color ->
                         scope.launch {
                             runCatching { api.createTag(name, color) }
                                 .onSuccess { reload(silent = true) }
-                                .onFailure { toast(it.message ?: "创建失败") }
+                                .onFailure { if (!authFail(it)) toast(it.message ?: "创建失败") }
                         }
                     },
                 )
@@ -146,7 +158,7 @@ fun MainScreen(
                         scope.launch {
                             runCatching { api.setTag(videoId, tagId) }
                                 .onSuccess { reload(silent = true) }
-                                .onFailure { toast(it.message ?: "标记失败") }
+                                .onFailure { if (!authFail(it)) toast(it.message ?: "标记失败") }
                         }
                     },
                     onRefresh = { scope.launch { reload() } },
@@ -159,7 +171,7 @@ fun MainScreen(
                         scope.launch {
                             runCatching { api.deleteVideo(v.id, false) }
                                 .onSuccess { reload(silent = true); toast("已删除记录") }
-                                .onFailure { toast(it.message ?: "删除失败") }
+                                .onFailure { if (!authFail(it)) toast(it.message ?: "删除失败") }
                         }
                     },
                 )

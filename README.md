@@ -156,11 +156,12 @@ cd server && .venv/bin/python -m pytest -q
 # 安卓：8 项纯 JVM 单元测试（地址归一化 / 主题循环 / 模型解析 / 局域网回包解析）
 cd android && gradle testDebugUnitTest
 
-# 网页端端到端（需要 puppeteer + 真实 ffmpeg 样片，登录/扫描/播放/打标签/整理/主题/管理页）
-node tools/e2e-web.js
+# 网页端端到端（一条命令：自动生成样片 → 起服务 → 真实浏览器点一遍 → 关服务）
+# 需要 puppeteer：npm i puppeteer@23（或用 VS_NODE_PATH 指到已装的 node_modules）
+bash tools/e2e-web.sh
 ```
 
-实测结果：后端 20 passed、安卓单测 8 passed、网页端 E2E 16 项全绿。
+实测结果：后端 20 passed、安卓单测 8 passed、网页端 E2E 16 项全绿（CI 里也跑：`.github/workflows/e2e.yml`）。
 
 ## 在 fNOS 上开发的小提示
 

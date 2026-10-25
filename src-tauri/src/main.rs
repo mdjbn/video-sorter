@@ -17,8 +17,10 @@ fn sidecar_path() -> std::path::PathBuf {
     let name = if cfg!(windows) { "videosorter-server.exe" } else { "videosorter-server" };
     for cand in [
         exe_dir.join("binaries").join(name),
+        exe_dir.join("binaries").join("videosorter-server").join(name),
         exe_dir.join(name.clone()),
         exe_dir.join("resources").join("binaries").join(name),
+        exe_dir.join("resources").join("binaries").join("videosorter-server").join(name),
     ] {
         if cand.exists() {
             return cand;
@@ -33,9 +35,16 @@ fn spawn_server() -> Option<Child> {
         eprintln!("[videosorter] sidecar 未找到：{:?}", exe);
         return None;
     }
-    Command::new(exe)
-        .args(["--host", "127.0.0.1", "--port", "8080"])
-        .spawn()
+    let mut cmd = Command::new(&exe);
+    cmd.args(["--host", "127.0.0.1", "--port", "8080"]);
+    // 网页端默认就在 sidecar 旁边（webdist/），显式传过去最稳
+    if let Some(dir) = exe.parent() {
+        let webdist = dir.join("webdist");
+        if webdist.is_dir() {
+            cmd.arg("--web-dir").arg(&webdist);
+        }
+    }
+    cmd.spawn()
         .map_err(|e| {
             eprintln!("[videosorter] 启动服务失败：{e}");
             e

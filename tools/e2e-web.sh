@@ -11,9 +11,10 @@ DATA="${DATA:-/tmp/vs-e2e-data}"
 SRC="${SRC:-/tmp/vs-e2e-src}"
 MASTER="${MASTER:-/tmp/vs-demo/master}"
 NODE_PATH_MOD="${VS_NODE_PATH:-/tmp/uiprev/node_modules}"
-PY="$ROOT/server/.venv/bin/python"
-
-[ -x "$PY" ] || { echo "先跑一次 ./run.sh 建 venv"; exit 1; }
+# 优先用 run.sh 建好的 venv；CI 里没有 venv 时退回系统的 python3
+PY="${PY:-$ROOT/server/.venv/bin/python}"
+[ -x "$PY" ] || PY="$(command -v python3 || true)"
+[ -n "$PY" ] || { echo "找不到 python，先跑一次 ./run.sh"; exit 1; }
 bash tools/make-demo-videos.sh "$MASTER" >/dev/null   # 每次都重建，保证正好 4 个样片
 
 rm -rf "$DATA" "$SRC"

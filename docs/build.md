@@ -152,3 +152,19 @@ App 登录页点「扫描局域网」→ 向 `255.255.255.255:38080` 与各网�
    所以本项目把 sidecar 的构建放在 CI 的 windows runner 上做，Linux 本地只需跑后端测试。
 4. **Tauri 本地编译**需要 rust 工具链 + 系统 webview 依赖（Linux 上是 webkit2gtk-4.1），
    没装的话 `cargo check` 会先卡在宿主编译器（`linker 'cc' not found`）。所以 Rust 壳的编译验证交给 CI。
+
+## 附：Windows 安装包里都带了什么
+
+`.github/workflows/windows.yml` 现在会自动：
+
+1. 构建网页端（`web/dist`）；
+2. PyInstaller 打出 sidecar（Python 服务 + `_internal/webdist`）；
+3. 下载 ffmpeg essentials 并把 `ffmpeg.exe`、`ffprobe.exe` 放进 `src-tauri/tools/`（安装后位于 `<安装目录>/tools/`，
+   服务端 `media._tool_dirs()` 会把 exe 同级的 `tools/` 也列进去，所以用户不需要自己装 ffmpeg）；
+4. 把 sidecar 与网页端放进 `src-tauri/binaries/`（Tauri 的 `bundle.resources` 用 `binaries/**`、`tools/**`）；
+5. `cargo build --release` + `tauri build` 出 NSIS/MSI；
+6. 另外打一个 `VideoSorter-portable.zip` 绿色版（解压双击「启动.bat」即用）。
+
+Tauri 壳里的 `sidecar_path()` 会依次找
+`<exe>/binaries/videosorter-server.exe`、`<exe>/binaries/videosorter-server/…`、`<exe>/…`、
+`<exe>/resources/binaries/…`，启动时若 sidecar 同级有 `webdist/` 会显式传 `--web-dir`，避免代理/路径两套布局差异。

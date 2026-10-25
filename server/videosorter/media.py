@@ -35,8 +35,12 @@ def _tool_dirs(cfg: Config | None) -> list[Path]:
     if os.environ.get("VIDEOSORTER_TOOLS"):
         dirs.append(Path(os.environ["VIDEOSORTER_TOOLS"]))
     here = Path(__file__).resolve().parent
-    dirs.append(here.parent / "tools")             # server/tools
+    dirs.append(here.parent / "tools")             # server/tools（开发时）
     dirs.append(here / "tools")
+    # 打包后：<安装目录>/tools/ffmpeg.exe（Windows 桌面端与绿色版都这么放）
+    exe_dir = Path(sys.executable).resolve().parent
+    dirs.append(exe_dir / "tools")
+    dirs.append(exe_dir.parent / "tools")
     if getattr(sys, "_MEIPASS", None):             # PyInstaller 解包目录
         dirs.append(Path(sys._MEIPASS) / "tools")
     if cfg is not None:

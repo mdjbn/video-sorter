@@ -1,0 +1,46 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -r server/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build web + install puppeteer
+        working-directory: web
+        run: |
+          npm ci || npm install
+          npm run build
+          npm i puppeteer@23 --no-save
+
+      - name: Run browser E2E
+        env:
+          VS_NODE_PATH: ${{ github.workspace }}/web/node_modules
+          VS_SHOTS: ${{ runner.temp }}
+          PORT: "18931"
+        run: bash tools/e2e-web.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: |
+            ${{ runner.temp }}/e2e-player.png
+            ${{ runner.temp }}/e2e-manage.png
+          if-no-files-found: ignore
