@@ -58,6 +58,28 @@ class Config:
                             self.values[k] = data[k]
             except (json.JSONDecodeError, OSError):
                 pass
+        self._apply_env()
+
+    def _apply_env(self) -> None:
+        """用 VIDEOSORTER_<KEY> 环境变量覆盖配置（fnOS/systemd/CI 等场景）。
+
+        只影响本次进程，不会被 save() 写回 config.json；空字符串视为「未设置」。
+        """
+        for key, default in DEFAULTS.items():
+            raw = os.environ.get(f"VIDEOSORTER_{key.upper()}")
+            if raw is None or raw.strip() == "":
+                continue
+            try:
+                if isinstance(default, bool):
+                    self.values[key] = raw.strip().lower() in ("1", "true", "yes", "on")
+                elif isinstance(default, int):
+                    self.values[key] = int(raw)
+                elif isinstance(default, float):
+                    self.values[key] = float(raw)
+                else:
+                    self.values[key] = raw
+            except ValueError:
+                pass
 
     def save(self) -> None:
         tmp = self.file.with_suffix(".json.tmp")

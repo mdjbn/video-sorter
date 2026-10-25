@@ -1,0 +1,16 @@
+{
+    ".url": {
+        "videosorter.Application": {
+            "title": "视频整理",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "port": "8610",
+            "url": "/",
+            "allUsers": false,
+            "control": {
+                "accessPerm": "readonly"
+            }
+        }
+    }
+}

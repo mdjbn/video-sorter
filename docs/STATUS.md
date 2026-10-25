@@ -19,10 +19,14 @@ chmod +x run.sh
 
 | 模块 | 项目 | 状态 | 证据 |
 | --- | --- | --- | --- |
-| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **20 passed** |
+| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **23 passed** |
 | 后端 | Range 播放 + 按需 HLS 转码 | ✅ 本机通过 | pytest 内 mkv→HLS 用例（`index.m3u8` + `seg00000.ts`）|
 | 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
 | 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **18/18 PASS**（CI：`.github/workflows/e2e.yml`）|
+| fnOS | 打成 `.fpk` 应用包 | ✅ 本机通过 | `bash packaging/fnos/build.sh` → `dist/fnos/videosorter.fpk`（3.5 MB）|
+| fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |
+| fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **18/18 PASS**（含真实文件移动与撤销）|
+| fnOS | 应用中心里真安装 | ⚠️ 未验证 | 需要 NAS 管理员在应用中心手动安装（本机无 root）|
 | 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleDebug` → `dist/android/app-debug.apk`（20.5 MB，v0.1.0）|
 | 安卓 | 单元测试（normalize/主题/解析/发现） | ✅ 本机通过 | `testDebugUnitTest` → **8/8** |
 | 安卓 | 真机/模拟器运行 | ⚠️ 未验证 | 本机无 KVM 权限、无设备；需 `adb install dist/android/app-debug.apk` |
@@ -63,3 +67,13 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 1. 把仓库推到 GitHub，打一个 `v0.1.0` tag，让 `release.yml` 真跑一次，产出 APK + NSIS/MSI + 绿色版 zip。
 2. 用手机 `adb install` 装一次，验证局域网发现、上下滑播放、上传下载（真机上的 Media3 行为）。
 3. 在目标主机（fnOS）上用 systemd 常驻，把 `--data-dir` 指到大盘。
+
+## 五、fnOS 应用包
+
+`packaging/fnos/` 是可直接安装到 fnOS 应用中心的应用工程，
+`bash packaging/fnos/build.sh` 出 `dist/fnos/videosorter.fpk`；安装后桌面出现「视频整理」图标，
+服务跑在 8610（专用应用用户，非 root），数据在 `/var/apps/videosorter/var`，
+手机上传落到共享目录 `videosorter/uploads`。细节与排错见 `docs/build.md` 第 8 节。
+
+包内 payload = `videosorter/`（后端源码）+ `vendor/`（FastAPI/uvicorn 等依赖，pip --target 装好）
++ `webdist/`（网页端构建产物），运行时用 fnOS 自带的 `python3`（3.11）启动，不需要 Docker、不需要联网装依赖。

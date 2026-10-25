@@ -1,8 +1,9 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
+const SHOTS = process.env.VS_SHOTS || '/tmp';
+fs.mkdirSync(SHOTS, { recursive: true });
 const B = process.env.VS_BASE || 'http://127.0.0.1:18931';
 const SRC = process.env.VS_SRC || '/tmp/vs-demo/src';
-const SHOTS = process.env.VS_SHOTS || '/tmp';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const R = [];
 const ok = (n, c, extra = '') => { R.push([c, n, extra]); console.log((c ? 'PASS ' : 'FAIL ') + n + (extra ? ' :: ' + extra : '')); };

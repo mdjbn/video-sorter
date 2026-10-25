@@ -105,6 +105,88 @@ App 登录页点「扫描局域网」→ 向 `255.255.255.255:38080` 与各网�
 
 备份整个目录即可；视频本体不复制，只在整理时移动。
 
+## 8. 打包成 fnOS 应用（.fpk）
+
+`packaging/fnos/` 是 fnOS 应用工程，`packaging/fnos/build.sh` 负责组装 + 调用 `fnpack` 出包。
+
+### 结构与约定
+
+```
+packaging/fnos/
+├── build.sh              组装 payload（源码 + 依赖 + webdist）并 fnpack build
+├── project/              会被原样拷进 .fpk 的骨架
+│   ├── manifest          appname/version/service_port/desktop_* 等
+│   ├── ICON.PNG          ICON_256.PNG      （256×256，由 packaging/gen-fnos-icons.py 生成）
+│   ├── app/ui/config     桌面入口（.url → videosorter.Application，iframe 打开 :8610）
+│   ├── app/ui/images/    icon_64.png / icon_256.png
+│   ├── cmd/main          start|stop|restart|status 生命周期脚本
+│   ├── cmd/*_init|*_callback   其它生命周期占位（直接 exit 0）
+│   ├── config/privilege  {"defaults":{"run-as":"package"}}
+│   ├── config/resource   data-share: videosorter/uploads（手机上传落盘）
+│   └── wizard/           空目录（fnpack 要求存在）
+└── gen-fnos-icons.py     生成上面四个图标
+```
+
+装好之后 fnOS 会把这些目录做成软链：`target→@appcenter`、`etc→@appconf`、`var→@appdata`。
+
+### 构建
+
+```bash
+# 依赖：fnpack（下面这行只需一次）
+curl -fsSL -o /tmp/fnpk/fnpack https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64
+chmod +x /tmp/fnpk/fnpack
+
+bash packaging/fnos/build.sh          # 产物 dist/fnos/videosorter.fpk
+```
+
+脚本做的事：生成图标 → 确保 `web/dist` 存在（不存在就 `npm install && npm run build`）→
+拷 `server/videosorter` 与 `web/dist` → `pip install --target dist/app/vendor -r server/requirements.txt`
+→ 统一权限（NAS 卷上文件权限不可靠，必须在 `/tmp` 的副本里改成 755/644）→ `fnpack build`。
+
+### 运行时怎么起的
+
+`cmd/main` 用的是 fnOS 提供的那套环境变量：
+
+```bash
+cd "$TRIM_APPDEST"
+PYTHONPATH="$APP_DIR:$APP_DIR/vendor" \
+python3 -m videosorter --host 0.0.0.0 --port "$TRIM_SERVICE_PORT" \
+    --data-dir "$TRIM_PKGVAR" --web-dir "$APP_DIR/webdist"
+```
+
+`VIDEOSORTER_UPLOAD_DIR` 指向 `config/resource` 声明出来的共享目录（`$TRIM_DATA_SHARE_PATHS` 第一项），
+`VIDEOSORTER_TOOLS` 指向 `.../target/tools`（放自备 ffmpeg 用）。
+`videosorter/config.py` 支持 `VIDEOSORTER_<KEY>` 覆盖任意配置项（`PORT`/`ROOT_DIR`/`UPLOAD_DIR`/`DISCOVERY`…），空值忽略、不写回 `config.json`。
+
+### 本地验证（没有 root 也能做）
+
+`.fpk` 本质是个 tar.gz：解出来的 `app.tgz` 就是 payload。所以可以直接模拟 fnOS 跑一遍：
+
+```bash
+T=/tmp/fptest; rm -rf $T; mkdir -p $T/pkg $T/apps/videosorter/{target,var,etc,share}
+tar -xzf dist/fnos/videosorter.fpk -C $T/pkg
+tar -xzf $T/pkg/app.tgz -C $T/apps/videosorter/target
+
+APP=$T/apps/videosorter
+TRIM_APPDEST=$APP/target TRIM_PKGVAR=$APP/var TRIM_PKGETC=$APP/etc \
+TRIM_SERVICE_PORT=8612 TRIM_DATA_SHARE_PATHS=$APP/share \
+  bash $T/pkg/cmd/main start
+curl -s http://127.0.0.1:8612/api/health
+```
+
+本仓库实测：这样起起来之后 `VS_BASE=http://127.0.0.1:8612 bash tools/e2e-web.sh` 的
+18 项断言（登录/播放/打标签/整理/撤销/管理页各视图）全部通过，
+说明打包产物不只是能启动，整条链路是通的。
+
+### 常见问题
+
+- **装完应用中心显示「已停止」**：看 `/var/apps/videosorter/var/info.log`，多半是 8610 端口被占
+  （`manifest` 里 `checkport=true`，fnOS 会先检查端口）。
+- **打开页面是空白/404**：`.../target/webdist/index.html` 缺失，说明构建时没带上网页端，重跑 `build.sh`。
+- **扫不到视频**：目录没授权，见 README「装成 fnOS 应用（.fpk）」里的授权说明。
+- **改了 manifest 后 fnpack 报校验失败**：`app/ui/config` 的入口 key 必须等于 `desktop_applaunchname`；
+  `app/{desktop_uidir}/` 必须存在；两个 `ICON*.PNG` 必须存在。
+
 ## 附：本机编译 Android 的踩坑记录（Linux / fNOS）
 
 这台机器实测下来的三个坑，换机器时同样可能遇到：

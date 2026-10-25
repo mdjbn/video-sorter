@@ -58,6 +58,36 @@ python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
 3. 侧栏切到「整理」→ 取消不想动的标签 → 点「开始整理」。
 4. 文件会移动到标签对应文件夹；要反悔就在「整理记录」里撤销。
 
+## 装成 fnOS 应用（.fpk）
+
+打包脚本会把后端、网页端和运行时依赖一起塞进 fnOS 应用包，装完在桌面上就是一个图标，
+不用开终端、不用 Docker、不用手动建 venv。
+
+```bash
+bash packaging/fnos/build.sh
+# 产物：dist/fnos/videosorter.fpk（约 3.5 MB）
+```
+
+安装：fnOS「应用中心」→ 手动安装 → 选择 `videosorter.fpk` → 等待启动完成，
+桌面会出现「视频整理」图标，也可以直接访问 `http://<NAS>:8610`。
+
+安装后的位置与行为：
+
+| 项目 | 位置 / 说明 |
+| --- | --- |
+| 程序 | `/var/apps/videosorter/target`（含 `videosorter/`、`vendor/`、`webdist/`） |
+| 数据（数据库、缩略图、HLS 缓存） | `/var/apps/videosorter/var` |
+| 手机上传落盘 | 共享目录 `videosorter/uploads`（文件管理器里可见） |
+| 端口 | `8610`（在 `packaging/fnos/project/manifest` 的 `service_port` 改） |
+| 运行身份 | 专用应用用户（`config/privilege` 里 `run-as=package`），不是 root |
+| ffmpeg | 用系统自带的；想用自带的版本就把 `ffmpeg`/`ffprobe` 放进 `.../target/tools/` |
+
+> 视频文件访问：fnOS 应用默认只能访问用户授权的目录。第一次使用请在「应用设置 → 授权目录」
+> 里把放视频的目录加进去，或在网页端「概览 → 添加源文件夹」里填该目录。
+
+构建依赖：`python3`（fnOS 自带 3.11）、`npm`（首次构建网页端）、
+[fnpack](https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64)（脚本默认找 `/tmp/fnpk/fnpack`，可用 `FNPACK=` 覆盖）。
+
 ## 目录结构
 
 ```
@@ -161,7 +191,7 @@ cd android && gradle testDebugUnitTest
 bash tools/e2e-web.sh
 ```
 
-实测结果：后端 20 passed、安卓单测 8 passed、网页端 E2E 16 项全绿（CI 里也跑：`.github/workflows/e2e.yml`）。
+实测结果：后端 23 passed、安卓单测 8 passed、网页端 E2E 16 项全绿（CI 里也跑：`.github/workflows/e2e.yml`）。
 
 ## 在 fNOS 上开发的小提示
 

@@ -1,0 +1,119 @@
+#!/bin/bash
+# VideoSorter fnOS 生命周期脚本：start / stop / status / restart
+set -u
+
+APP_DIR="${TRIM_APPDEST:-/var/apps/videosorter/target}"
+VAR_DIR="${TRIM_PKGVAR:-/var/apps/videosorter/var}"
+PORT="${TRIM_SERVICE_PORT:-8610}"
+LOG_FILE="${VAR_DIR}/info.log"
+PID_FILE="${VAR_DIR}/app.pid"
+# 上传落盘目录：优先用 data-share 声明的共享目录，其次变量目录
+SHARE_PATH="${TRIM_DATA_SHARE_PATHS%%:*}"
+UPLOAD_DIR="${SHARE_PATH:-${VAR_DIR}/uploads}"
+
+mkdir -p "$VAR_DIR" "$UPLOAD_DIR" 2>/dev/null
+
+log_msg() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "$LOG_FILE"; }
+fail_msg() {
+    log_msg "ERROR: $*"
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then echo "$*" > "$TRIM_TEMP_LOGFILE"; fi
+    exit 1
+}
+
+read_pid() {
+    [ -r "$PID_FILE" ] || return 1
+    head -n 1 "$PID_FILE" | tr -d '[:space:]'
+}
+
+is_running() {
+    local pid
+    pid="$(read_pid)" || return 1
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+start_process() {
+    if is_running; then
+        log_msg "already running (pid=$(read_pid))"
+        return 0
+    fi
+    [ -x "$(command -v python3)" ] || fail_msg "未找到 python3，无法启动视频整理（本应用依赖服务器的 python3）"
+    [ -d "$APP_DIR/videosorter" ] || fail_msg "应用文件缺失：$APP_DIR/videosorter"
+
+    log_msg "starting on port ${PORT} (data=${VAR_DIR}, uploads=${UPLOAD_DIR})"
+    cd "$APP_DIR" || fail_msg "无法进入应用目录 $APP_DIR"
+    VIDEOSORTER_UPLOAD_DIR="$UPLOAD_DIR" \
+    VIDEOSORTER_TOOLS="$APP_DIR/tools" \
+    PYTHONPATH="$APP_DIR:$APP_DIR/vendor" \
+    nohup python3 -m videosorter \
+        --host 0.0.0.0 \
+        --port "$PORT" \
+        --data-dir "$VAR_DIR" \
+        --web-dir "$APP_DIR/webdist" \
+        >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+    printf "%s" "$pid" > "$PID_FILE"
+
+    local i=0
+    while [ "$i" -lt 20 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$PID_FILE"
+            fail_msg "启动失败，详见 ${LOG_FILE}（最后 20 行已写入日志）"
+        fi
+        if command -v curl >/dev/null 2>&1; then
+            if curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+                log_msg "ready: pid=${pid} port=${PORT}"
+                return 0
+            fi
+        else
+            sleep 1
+            if [ "$i" -ge 3 ]; then log_msg "started: pid=${pid} port=${PORT}"; return 0; fi
+        fi
+        i=$((i + 1))
+        sleep 0.5
+    done
+    log_msg "started (still warming up): pid=${pid} port=${PORT}"
+    return 0
+}
+
+stop_process() {
+    local pid
+    pid="$(read_pid)" || { log_msg "no pid file"; return 0; }
+    if ! is_running; then
+        rm -f "$PID_FILE"
+        log_msg "process not running, removed pid file"
+        return 0
+    fi
+    log_msg "stopping pid=${pid}"
+    kill -TERM "$pid" 2>/dev/null
+    local i=0
+    while [ "$i" -lt 20 ]; do
+        kill -0 "$pid" 2>/dev/null || break
+        i=$((i + 1))
+        sleep 0.5
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        log_msg "force killing pid=${pid}"
+        kill -KILL "$pid" 2>/dev/null
+    fi
+    rm -f "$PID_FILE"
+    log_msg "stopped"
+    return 0
+}
+
+status_process() {
+    if is_running; then
+        return 0
+    fi
+    return 3
+}
+
+case "${1:-}" in
+    start)   start_process ;;
+    stop)    stop_process ;;
+    restart) stop_process; start_process ;;
+    status)  status_process ;;
+    *)
+        fail_msg "未知命令：${1:-}（支持 start|stop|restart|status）"
+        ;;
+esac
