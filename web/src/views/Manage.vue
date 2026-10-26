@@ -686,13 +686,19 @@ onMounted(async () => {
             <div>
               <div style="font-size:17px;font-weight:700">视频整理</div>
               <div style="font-size:12.5px;color:var(--muted);margin-top:3px">VideoSorter · 自托管的视频扫描与标签整理工具</div>
+              <a class="repo-link" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">
+                github.com/mdjbn/video-sorter ↗
+              </a>
             </div>
           </div>
           <div class="split">
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.0' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.1' }}</span></div>
+                <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
+                <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
+                <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
                 <div class="kv"><span class="k">网页端</span><span class="v">Vue 3 + Vite + TypeScript</span></div>
                 <div class="kv"><span class="k">服务端</span><span class="v">Python + FastAPI + SQLite</span></div>
                 <div class="kv"><span class="k">手机端</span><span class="v">Kotlin + Compose + Media3</span></div>
@@ -714,6 +720,7 @@ onMounted(async () => {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.0.1</span><span>关于页展示项目仓库与问题反馈入口；打包信息里的开发者/发布者改为项目作者。</span></div>
               <div class="log-item"><span class="dt">1.0.0</span><span>首个公开版本：扫描源文件夹、播放器打标签、按标签整理并支持撤销、整理预览、播放历史、三档主题；安卓 App、Windows 桌面端、fnOS 应用包。</span></div>
             </div>
           </div>
