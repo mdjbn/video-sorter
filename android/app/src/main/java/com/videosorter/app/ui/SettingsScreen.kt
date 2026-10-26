@@ -320,6 +320,7 @@ private fun AccountPage(api: Api, session: Session, onToast: (String) -> Unit, o
     var editUser by remember { mutableStateOf(false) }
     var userDraft by remember { mutableStateOf(session.lastUser().ifEmpty { "admin" }) }
     var pwd by remember { mutableStateOf(false) }
+    var pwdErr by remember { mutableStateOf("") }
     var oldPwd by remember { mutableStateOf("") }
     var newPwd by remember { mutableStateOf("") }
     var sessions by remember { mutableStateOf<List<SessionRow>>(emptyList()) }
@@ -334,7 +335,7 @@ private fun AccountPage(api: Api, session: Session, onToast: (String) -> Unit, o
                     editUser = true
                 }
                 RowDivider()
-                SettingRow(Icons.Rounded.Person, "修改密码", "至少 6 位") { pwd = true }
+                SettingRow(Icons.Rounded.Person, "修改密码", "至少 6 位") { pwdErr = ""; pwd = true }
             }
             Spacer(Modifier.height(16.dp))
             Text("登录设备（${sessions.size}）", color = t.muted2, fontSize = 11.sp)
@@ -406,18 +407,30 @@ private fun AccountPage(api: Api, session: Session, onToast: (String) -> Unit, o
                     GlassField(oldPwd, { oldPwd = it }, placeholder = "当前密码", password = true)
                     Spacer(Modifier.height(10.dp))
                     GlassField(newPwd, { newPwd = it }, placeholder = "新密码（至少 6 位）", password = true)
+                    if (pwdErr.isNotEmpty()) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(pwdErr, color = t.danger, fontSize = 11.5.sp)
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    pwd = false
+                    // 校验失败时保持弹窗与已输入内容，把错误显示在弹窗里
+                    val o = oldPwd
+                    val n = newPwd
+                    when {
+                        o.isEmpty() -> { pwdErr = "请输入当前密码"; return@TextButton }
+                        n.length < 6 -> { pwdErr = "新密码至少 6 位"; return@TextButton }
+                        n == o -> { pwdErr = "新密码不能与当前密码相同"; return@TextButton }
+                    }
                     scope.launch {
                         try {
-                            api.changePassword(oldPwd, newPwd)
+                            api.changePassword(o, n)
+                            pwd = false
                             onToast("密码已修改，请重新登录")
                             onLogout()
                         } catch (e: Throwable) {
-                            onToast("修改失败：${e.message ?: ""}")
+                            pwdErr = e.message?.takeIf { it.isNotBlank() } ?: "修改失败，请检查当前密码"
                         }
                     }
                 }) { Text("保存", color = t.accent) }
