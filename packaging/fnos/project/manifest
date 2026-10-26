@@ -1,5 +1,5 @@
 appname                    = videosorter
-version                    = 1.0.1
+version               = 1.0.2
 display_name               = 视频整理
 desc                       = 给视频打标签、按标签自动归档的自托管工具。<br>网页端播放/整理，安卓 App 上下滑刷视频，标签名即目标文件夹。
 platform                   = x86
