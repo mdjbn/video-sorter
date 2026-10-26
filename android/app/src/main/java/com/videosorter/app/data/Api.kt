@@ -144,6 +144,13 @@ class Api(baseUrl: String, var token: String? = null) {
     // 服务端是 POST /api/scan
     suspend fun scan(): String = sendJson<ScanOut>("/api/scan", "POST", "{}").taskId
 
+    suspend fun records(): List<BatchRec> = getJson<BatchPage>("/api/organize/records").items
+
+    suspend fun undo(batchId: String) {
+        sendJson<OkOut>("/api/organize/undo/$batchId", "POST", "{}")
+    }
+
+
     /** 上传手机里的视频到服务器 */
     suspend fun upload(resolver: ContentResolver, uri: Uri, fileName: String, tagId: Int? = null): Boolean {
         val bytes = withContext(Dispatchers.IO) { resolver.openInputStream(uri)?.use { it.readBytes() } } ?: return false

@@ -1,21 +1,19 @@
 package com.videosorter.app.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,9 +22,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.ApiException
 import com.videosorter.app.data.Counts
@@ -36,7 +35,7 @@ import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
 import kotlinx.coroutines.launch
 
-private data class TabItem(val label: String, val icon: ImageVector)
+private const val TAB_TRANSFER = 4
 
 @Composable
 fun MainScreen(
@@ -48,11 +47,20 @@ fun MainScreen(
     onSwitchServer: (String) -> Unit = {},
 ) {
     var tab by remember { mutableIntStateOf(0) }
+    var transferOpen by remember { mutableStateOf(false) }
     var videos by remember { mutableStateOf<List<Video>>(emptyList()) }
     var counts by remember { mutableStateOf(Counts()) }
     var tags by remember { mutableStateOf<List<Tag>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var playerIndex by remember { mutableIntStateOf(0) }
+
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sheets = remember { SheetState() }
+    val toastState = remember { ToastState() }
+
+    fun toast(msg: String, err: Boolean = false) = toastState.show(msg, err)
 
     /** 把异常压成一句人话，避免把整段 JSON 解析栈糊在页面上 */
     fun friendlyError(e: Throwable): String {
@@ -60,20 +68,12 @@ fun MainScreen(
         val brief = raw.take(110)
         return "加载失败：$brief" + if (raw.length > 110) "…" else ""
     }
-    var playerIndex by remember { mutableIntStateOf(0) }
-    val ctx = LocalContext.current
-    val snackbar = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-
-    fun toast(msg: String) {
-        scope.launch { snackbar.showSnackbar(msg) }
-    }
 
     /** token 失效时统一回登录页，避免界面上一直报「加载失败」。 */
     fun authFail(e: Throwable): Boolean {
         if (e is ApiException && e.code == 401) {
             session.clearToken(api.base)
-            toast("登录已过期，请重新登录")
+            toast("登录已过期，请重新登录", err = true)
             onLogout()
             return true
         }
@@ -96,38 +96,34 @@ fun MainScreen(
         }
     }
 
+    fun markTag(videoId: Int, tagId: Int?) {
+        scope.launch {
+            runCatching { api.setTag(videoId, tagId) }
+                .onSuccess { reload(silent = true) }
+                .onFailure { if (!authFail(it)) toast(it.message ?: "标记失败", err = true) }
+        }
+    }
+
     LaunchedEffect(Unit) { reload() }
 
-    val tabs = listOf(
-        TabItem("播放", Icons.Default.PlayArrow),
-        TabItem("列表", Icons.Default.List),
-        TabItem("整理", Icons.Default.Sort),
-        TabItem("设置", Icons.Default.Settings),
-    )
+    Box(Modifier.fillMaxSize()) {
+        AmbientBackdrop()
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbar) },
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                tabs.forEachIndexed { i, item ->
-                    NavigationBarItem(
-                        selected = tab == i,
-                        onClick = { tab = i },
-                        icon = { Icon(item.icon, contentDescription = item.label) },
-                        label = null,
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                        ),
-                    )
+        AnimatedContent(
+            targetState = if (transferOpen) TAB_TRANSFER else tab,
+            transitionSpec = {
+                if (targetState == TAB_TRANSFER || initialState == TAB_TRANSFER) {
+                    (slideInHorizontally(tween(260)) { if (targetState == TAB_TRANSFER) it / 3 else -it / 4 } + fadeIn(tween(200)))
+                        .togetherWith(slideOutHorizontally(tween(240)) { if (targetState == TAB_TRANSFER) -it / 5 else it / 4 } + fadeOut(tween(150)))
+                } else {
+                    (fadeIn(tween(220)) + scaleIn(tween(260), initialScale = 0.985f))
+                        .togetherWith(fadeOut(tween(150)) + scaleOut(tween(200), targetScale = 1.01f))
                 }
-            }
-        },
-    ) { pad ->
-        Box(Modifier.padding(pad)) {
-            when (tab) {
+            },
+            modifier = Modifier.fillMaxSize(),
+            label = "tab-content",
+        ) { target ->
+            when (target) {
                 0 -> PlayerScreen(
                     api = api,
                     videos = videos,
@@ -135,20 +131,18 @@ fun MainScreen(
                     counts = counts,
                     startIndex = playerIndex,
                     onIndexChange = { playerIndex = it },
-                    onTag = { videoId, tagId ->
-                        scope.launch {
-                            runCatching { api.setTag(videoId, tagId) }
-                                .onSuccess { reload(silent = true) }
-                                .onFailure { if (!authFail(it)) toast(it.message ?: "标记失败") }
-                        }
-                    },
+                    onTag = { videoId, tagId -> markTag(videoId, tagId) },
                     onCreateTag = { name, color ->
                         scope.launch {
                             runCatching { api.createTag(name, color) }
                                 .onSuccess { reload(silent = true) }
-                                .onFailure { if (!authFail(it)) toast(it.message ?: "创建失败") }
+                                .onFailure { if (!authFail(it)) toast(it.message ?: "创建失败", err = true) }
                         }
                     },
+                    toast = ::toast,
+                    sheets = sheets,
+                    onOpenList = { tab = 1 },
+                    onRefresh = { scope.launch { reload(silent = true) } },
                 )
 
                 1 -> ListScreen(
@@ -159,52 +153,85 @@ fun MainScreen(
                     error = error,
                     onOpen = { id ->
                         val idx = videos.indexOfFirst { it.id == id }
-                        if (idx >= 0) { playerIndex = idx; tab = 0 }
-                    },
-                    onTag = { videoId, tagId ->
-                        scope.launch {
-                            runCatching { api.setTag(videoId, tagId) }
-                                .onSuccess { reload(silent = true) }
-                                .onFailure { if (!authFail(it)) toast(it.message ?: "标记失败") }
+                        if (idx >= 0) {
+                            playerIndex = idx
+                            tab = 0
                         }
                     },
+                    onTag = { videoId, tagId -> markTag(videoId, tagId) },
                     onRefresh = { scope.launch { reload() } },
                     onDownload = { v ->
                         runCatching { Downloads.save(ctx, api, v) }
                             .onSuccess { toast("开始下载：${v.name}") }
-                            .onFailure { toast("下载失败：${it.message}") }
+                            .onFailure { toast("下载失败：${it.message}", err = true) }
                     },
                     onDelete = { v ->
                         scope.launch {
                             runCatching { api.deleteVideo(v.id, false) }
                                 .onSuccess { reload(silent = true); toast("已删除记录") }
-                                .onFailure { if (!authFail(it)) toast(it.message ?: "删除失败") }
+                                .onFailure { if (!authFail(it)) toast(it.message ?: "删除失败", err = true) }
                         }
                     },
+                    onOpenTransfer = { transferOpen = true },
+                    toast = ::toast,
+                    sheets = sheets,
                 )
 
                 2 -> OrganizeScreen(
                     api = api,
-                    onToast = ::toast,
+                    onToast = { toast(it) },
                     onOrganized = { scope.launch { reload(silent = true) } },
                 )
 
-                else -> SettingsScreen(
+                3 -> SettingsScreen(
                     api = api,
                     session = session,
                     tags = tags,
                     themeMode = themeMode,
                     onThemeChange = onThemeChange,
                     counts = counts,
-                    onToast = ::toast,
+                    onToast = { toast(it) },
                     onRefresh = { scope.launch { reload() } },
                     onLogout = {
                         scope.launch { runCatching { api.logout() } }
                         onLogout()
                     },
                     onSwitchServer = onSwitchServer,
+                    onOpenTransfer = { transferOpen = true },
+                )
+
+                else -> TransferScreen(
+                    api = api,
+                    onBack = { transferOpen = false },
+                    onToast = { toast(it) },
                 )
             }
         }
+
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+        ) {
+            LiquidTabBar(
+                current = tab,
+                onSelect = {
+                    transferOpen = false
+                    tab = it
+                },
+                visible = !transferOpen,
+            )
+        }
+
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 152.dp, start = 18.dp, end = 18.dp)
+        ) {
+            ToastHost(toastState)
+        }
+
+        SheetHost(sheets)
     }
 }

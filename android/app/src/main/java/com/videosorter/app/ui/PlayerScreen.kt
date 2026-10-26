@@ -1,40 +1,53 @@
 package com.videosorter.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,15 +59,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -65,28 +84,21 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.Counts
+import com.videosorter.app.data.Downloads
 import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private val TAG_COLORS = listOf(
     "#f4a259", "#ef5b7b", "#4cc9f0", "#9b8cff",
     "#35d18a", "#f2c14e", "#ef7d4f", "#8d98a8",
 )
 
-private fun parseColor(hex: String?): Color = runCatching {
-    Color(android.graphics.Color.parseColor(hex ?: "#8d98a8"))
-}.getOrDefault(Color(0xFF8D98A8))
+private data class HudSpec(val text: String, val label: String, val pct: Float)
 
-private fun fmtTime(sec: Double): String {
-    val s = sec.toInt().coerceAtLeast(0)
-    val h = s / 3600
-    val m = (s % 3600) / 60
-    val ss = s % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, ss) else "%d:%02d".format(m, ss)
-}
-
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlayerScreen(
     api: Api,
@@ -97,8 +109,16 @@ fun PlayerScreen(
     onIndexChange: (Int) -> Unit,
     onTag: (Int, Int?) -> Unit,
     onCreateTag: (String, String) -> Unit,
+    toast: (String) -> Unit,
+    sheets: SheetState,
+    onOpenList: () -> Unit = {},
+    onRefresh: () -> Unit = {},
 ) {
+    val t = tokens()
     val ctx = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val dark = t.dark
+
     // 媒体请求也要带 Bearer 令牌：/api/videos/{id}/raw 与 HLS 分片都要求鉴权，
     // 否则 ExoPlayer 会拿到 401 并报 ERROR_CODE_IO_BAD_HTTP_STATUS。
     val player = remember(api.token) {
@@ -113,23 +133,21 @@ fun PlayerScreen(
             .build()
             .apply { playWhenReady = true }
     }
+
     val count = videos.size
-    val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, (count - 1).coerceAtLeast(0))) { count.coerceAtLeast(1) }
+    val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, (count - 1).coerceAtLeast(0))) {
+        count.coerceAtLeast(1)
+    }
 
     var playing by remember { mutableStateOf(true) }
     var speed by remember { mutableFloatStateOf(1f) }
     var tempSpeed by remember { mutableStateOf<Float?>(null) }
     var position by remember { mutableStateOf(0.0) }
     var duration by remember { mutableStateOf(0.0) }
-    var seeking by remember { mutableStateOf(false) }
-    var hud by remember { mutableStateOf(false) }
+    var hud by remember { mutableStateOf<HudSpec?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var loadingSrc by remember { mutableStateOf(true) }
-    var showNewTag by remember { mutableStateOf(false) }
-    var newTagName by remember { mutableStateOf("") }
-    var newTagColor by remember { mutableIntStateOf(0) }
     var lastLoadedId by remember { mutableIntStateOf(-1) }
-    /** >=0 表示正在等 ffmpeg 转码（长视频/非直放格式首次播放） */
     var transcodePct by remember { mutableIntStateOf(-1) }
 
     val current = videos.getOrNull(pagerState.currentPage)
@@ -170,7 +188,7 @@ fun PlayerScreen(
                     if (st.ready) break
                     transcodePct = st.percent
                 }
-                kotlinx.coroutines.delay(700)
+                delay(700)
             }
             transcodePct = -1
         }
@@ -182,10 +200,12 @@ fun PlayerScreen(
         if (resume > 3) player.seekTo((resume * 1000).toLong())
     }
 
-    // 播放状态 / 进度回调
     DisposableEffect(player) {
         val listener = object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) loadingSrc = false
                 if (state == Player.STATE_ENDED) {
@@ -193,6 +213,7 @@ fun PlayerScreen(
                     if (pagerState.currentPage + 1 < count) onIndexChange(pagerState.currentPage + 1)
                 }
             }
+
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 errorMsg = "播放失败：${error.errorCodeName}"
                 loadingSrc = false
@@ -222,105 +243,353 @@ fun PlayerScreen(
     // 播放器实例会随 token 变化重建，必须按实例释放，否则旧实例泄漏（同时占着解码器）
     DisposableEffect(player) { onDispose { player.release() } }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        // 背景：当前视频封面放大模糊后铺底，宽屏视频上下就不会是死黑一片
-        val bgUrl = current?.let { api.thumbUrl(it) } ?: ""
-        if (bgUrl.isNotEmpty()) {
-            AsyncImage(
-                model = bgUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(28.dp),
-            )
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)))
-        }
-        // 播放器画面
-        AndroidView(
-            factory = { c ->
-                PlayerView(c).apply {
-                    useController = false
-                    this.player = player
-                    setShutterBackgroundColor(android.graphics.Color.BLACK)
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+    fun togglePlay() {
+        tempSpeed = null
+        applySpeed()
+        when {
+            player.isPlaying -> player.pause()
+            player.playbackState == Player.STATE_ENDED -> {
+                player.seekTo(0); player.play()
+            }
 
-        // 手势层
-        Box(
-            Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = {
-                            tempSpeed = null
-                            applySpeed()
-                            when {
-                                player.isPlaying -> player.pause()
-                                // 播完后轻点是「重播」，直接 play() 不会有任何反应
-                                player.playbackState == Player.STATE_ENDED -> { player.seekTo(0); player.play() }
-                                else -> player.play()
-                            }
-                        },
-                        onLongPress = { tempSpeed = 2f; applySpeed(); hud = true },
-                    )
+            else -> player.play()
+        }
+    }
+
+    fun openRename(v: Video) {
+        sheets.open("重命名", "只改文件名，保留扩展名") {
+            var name by remember { mutableStateOf(v.name.substringBeforeLast('.')) }
+            val shape = RoundedCornerShape(11.dp)
+            TextField(
+                value = name,
+                onValueChange = { name = it.take(80) },
+                singleLine = true,
+                placeholder = { Text("文件名", color = t.muted2, fontSize = 13.sp) },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { }),
+                shape = shape,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = t.ink(0.06f),
+                    unfocusedContainerColor = t.ink(0.06f),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = t.text,
+                    unfocusedTextColor = t.text,
+                    cursorColor = t.accent,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp)
+                    .border(1.dp, t.line2, shape),
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                SheetButton("取消", primary = false, modifier = Modifier.weight(1f)) { sheets.close() }
+                SheetButton("保存", primary = true, modifier = Modifier.weight(1f)) {
+                    val newName = name.trim()
+                    sheets.close()
+                    if (newName.isEmpty()) return@SheetButton
+                    scope.launch {
+                        val ext = v.name.substringAfterLast('.', "")
+                        val full = if (ext.isEmpty() || newName.endsWith(".$ext")) newName else "$newName.$ext"
+                        runCatching { api.rename(v.id, full) }
+                            .onSuccess { toast("已重命名"); onRefresh() }
+                            .onFailure { toast("重命名失败：${it.message}") }
+                    }
                 }
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val e = awaitPointerEvent(PointerEventPass.Final)
-                            if (tempSpeed != null && e.changes.isNotEmpty() && e.changes.none { it.pressed }) {
-                                tempSpeed = null
-                                hud = false
-                                player.setPlaybackSpeed(speed)
+            }
+        }
+    }
+
+    fun openMore(v: Video) {
+        sheets.open(v.name, "网页端也能做这些操作") {
+            SheetActionRow(Icons.Rounded.Edit, "重命名") {
+                sheets.close()
+                openRename(v)
+            }
+            SheetActionRow(Icons.Rounded.Download, "下载到手机") {
+                sheets.close()
+                runCatching { Downloads.save(ctx, api, v) }
+                    .onSuccess { toast("开始下载：${v.name}") }
+                    .onFailure { toast("下载失败：${it.message}") }
+            }
+            SheetActionRow(Icons.Rounded.Speed, "倍速 · 当前 ${if (speed == 1f) "1×" else "%.2f×".format(speed).trimEnd('0').trimEnd('.')}×") {
+                speed = when (speed) {
+                    1f -> 1.25f
+                    1.25f -> 1.5f
+                    1.5f -> 2f
+                    2f -> 0.5f
+                    else -> 1f
+                }
+                tempSpeed = null
+                applySpeed()
+                sheets.close()
+                toast("倍速已切换为 ${"%.2f".format(speed).trimEnd('0').trimEnd('.')}×")
+            }
+            SheetActionRow(Icons.Rounded.Delete, "删除视频", danger = true) {
+                sheets.close()
+                sheets.open("删除视频", "会同时删除服务器上的文件，不可恢复") {
+                    Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        SheetButton("取消", primary = false, modifier = Modifier.weight(1f)) { sheets.close() }
+                        SheetButton("删除", primary = true, danger = true, modifier = Modifier.weight(1f)) {
+                            sheets.close()
+                            scope.launch {
+                                runCatching { api.deleteVideo(v.id, true) }
+                                    .onSuccess { toast("已删除"); onRefresh() }
+                                    .onFailure { toast("删除失败：${it.message}") }
                             }
                         }
                     }
                 }
-                .pointerInput(Unit) {
-                    var seekTo = 0.0
-                    detectHorizontalDragGestures(
-                        onDragStart = { seeking = true; seekTo = position },
-                        onHorizontalDrag = { change, delta ->
-                            change.consume()
-                            if (duration > 0) {
-                                seekTo = (seekTo + delta / 300.0 * duration).coerceIn(0.0, duration)
-                                position = seekTo
-                            }
-                        },
-                        onDragEnd = {
-                            if (duration > 0) player.seekTo((seekTo * 1000).toLong())
-                            seeking = false
-                        },
-                        onDragCancel = { seeking = false },
-                    )
-                },
-        )
+            }
+        }
+    }
 
-        // 分页手势层（透明，只负责上下滑切换）
+    fun openNewTag() {
+        sheets.open("新建标签", "标签名就是整理后的文件夹名，路径可在网页端改") {
+            var name by remember { mutableStateOf("") }
+            var colorIdx by remember { mutableIntStateOf(0) }
+            val shape = RoundedCornerShape(11.dp)
+            TextField(
+                value = name,
+                onValueChange = { name = it.take(20) },
+                singleLine = true,
+                placeholder = { Text("例如：宠物 / 2025 旅行", color = t.muted2, fontSize = 13.sp) },
+                shape = shape,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = t.ink(0.06f),
+                    unfocusedContainerColor = t.ink(0.06f),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = t.text,
+                    unfocusedTextColor = t.text,
+                    cursorColor = t.accent,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp)
+                    .border(1.dp, t.line2, shape),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                TAG_COLORS.forEachIndexed { i, hex ->
+                    val c = hexColor(hex)
+                    Box(
+                        Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(c)
+                            .then(
+                                if (i == colorIdx) Modifier.border(2.dp, t.text, CircleShape)
+                                else Modifier
+                            )
+                            .clickable { colorIdx = i }
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                SheetButton("取消", primary = false, modifier = Modifier.weight(1f)) { sheets.close() }
+                SheetButton("创建", primary = true, modifier = Modifier.weight(1f)) {
+                    val n = name.trim()
+                    if (n.isEmpty()) return@SheetButton
+                    onCreateTag(n, TAG_COLORS[colorIdx])
+                    sheets.close()
+                    toast("已创建标签「$n」")
+                }
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // ---------- 分页（视觉 + 上下滑切视频） ----------
         VerticalPager(
             state = pagerState,
             key = { i -> videos.getOrNull(i)?.id ?: i },
             modifier = Modifier.fillMaxSize(),
-            beyondViewportPageCount = 0,
-        ) { _ -> Box(Modifier.fillMaxSize()) }
-
-        // HUD
-        AnimatedVisibility(visible = hud, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.Center)) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("2.0×", fontSize = 40.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Spacer(Modifier.height(4.dp))
-                Text("长按加速 · 松开恢复", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+            beyondViewportPageCount = 1,
+        ) { page ->
+            val v = videos.getOrNull(page)
+            val off = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val a = abs(off).coerceIn(0f, 1f)
+                        scaleX = 1f - 0.06f * a
+                        scaleY = 1f - 0.06f * a
+                        alpha = 1f - 0.55f * a
+                        translationY = off * 24.dp.toPx()
+                    }
+            ) {
+                // 背景：封面模糊 + 渐变压暗，宽屏视频上下不至于死黑
+                if (v != null) {
+                    val bg = api.thumbUrl(v)
+                    Box(Modifier.fillMaxSize().background(gradientFor(v.id)))
+                    AsyncImage(
+                        model = bg,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().blur(38.dp),
+                        // 缩略图放大后颜色非常艳（尤其 B 站类截图），降饱和 + 模糊才像设计稿的“氛围底”
+                        colorFilter = ColorFilter.colorMatrix(
+                            ColorMatrix().apply { setToSaturation(0.28f) }
+                        ),
+                    )
+                    // 压暗：缩略图被放大 30dp 模糊后颜色很艳，不加这层整屏会像调色盘
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.Black.copy(alpha = 0.58f),
+                                        Color.Black.copy(alpha = 0.22f),
+                                        Color.Black.copy(alpha = 0.74f),
+                                    )
+                                )
+                            )
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
+                                    radius = 1100f,
+                                )
+                            )
+                    )
+                }
+                if (page == pagerState.currentPage) {
+                    AndroidView(
+                        factory = { c ->
+                            PlayerView(c).apply {
+                                useController = false
+                                isClickable = false
+                                isFocusable = false
+                                this.player = player
+                                setShutterBackgroundColor(android.graphics.Color.BLACK)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
 
-        if (!playing && !loadingSrc && errorMsg == null) {
-            Box(Modifier.align(Alignment.Center).size(72.dp).background(Color.Black.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+        // ---------- 手势层（在 pager 下面，pager 只吃上下滑） ----------
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(current?.id) {
+                    detectTapGestures(
+                        onTap = { togglePlay() },
+                        onLongPress = {
+                            tempSpeed = 2f
+                            player.setPlaybackSpeed(2f)
+                            hud = HudSpec("2.0×", "加速中 · 松开恢复", 0.4f)
+                        },
+                        onPress = {
+                            // 抬起（或手势取消）后恢复原速
+                            tryAwaitRelease()
+                            if (tempSpeed != null) {
+                                tempSpeed = null
+                                applySpeed()
+                            }
+                            hud = null
+                        },
+                    )
+                }
+        )
+
+        // ---------- 顶部（玻璃） ----------
+        Row(
+            Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlassChip(onClick = onOpenList) {
+                Text("待整理", color = t.ink(0.86f), fontSize = 11.5.sp)
+                Text("${counts.tagged}", color = t.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("/ ${counts.all}", color = t.ink(0.5f), fontSize = 11.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            GlassIconButton(
+                icon = Icons.Rounded.MoreHoriz,
+                onClick = { current?.let { openMore(it) } },
+                contentDescription = "更多",
+            )
+        }
+
+        // ---------- 中央播放键 ----------
+        AnimatedVisibility(
+            visible = !playing && !loadingSrc && errorMsg == null && count > 0,
+            enter = fadeIn(tween(180)) + scaleIn(tween(220), initialScale = 0.86f),
+            exit = fadeOut(tween(140)) + scaleOut(tween(160), targetScale = 0.9f),
+            modifier = Modifier.align(Alignment.Center),
+        ) {
+            Box(
+                Modifier
+                    .size(74.dp)
+                    .clip(CircleShape)
+                    .background(if (dark) Color(0x57121519) else Color(0xA8FFFFFF))
+                    .border(1.dp, t.ink(0.2f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = if (dark) Color.White else t.ink(0.82f),
+                    modifier = Modifier.size(30.dp),
+                )
             }
         }
 
-        // 空态 / 加载态 / 转码态互斥
+        // ---------- HUD（长按 / 调速） ----------
+        AnimatedVisibility(
+            visible = hud != null,
+            enter = fadeIn(tween(140)) + scaleIn(tween(180), initialScale = 0.9f),
+            exit = fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 0.94f),
+            modifier = Modifier.align(Alignment.Center),
+        ) {
+            hud?.let { spec ->
+                Column(
+                    Modifier
+                        .width(150.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(t.glassStrong)
+                        .border(1.dp, t.glassBorder, RoundedCornerShape(18.dp))
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(spec.text, color = t.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(t.ink(0.2f))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(spec.pct)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(t.accent)
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(spec.label, color = t.ink(0.58f), fontSize = 10.5.sp)
+                }
+            }
+        }
+
+        // ---------- 加载 / 转码 / 错误 / 空态 ----------
         val emptyState = count == 0 && !loadingSrc && errorMsg == null
         val noteText = when {
             errorMsg != null -> errorMsg
@@ -332,201 +601,256 @@ fun PlayerScreen(
             Box(
                 Modifier
                     .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(t.glassStrong)
+                    .border(1.dp, t.glassBorder, RoundedCornerShape(12.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center,
             ) {
-                Text(noteText, color = Color.White.copy(alpha = 0.92f), fontSize = 13.sp)
+                Text(noteText, color = t.ink(0.92f), fontSize = 13.sp)
             }
         }
-
         if (emptyState) {
-            Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("还没有视频", color = Color.White, fontSize = 15.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text("先去管理页添加源文件夹并扫描", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
-                }
+            Column(
+                Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("还没有视频", color = t.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text("去网页端添加源文件夹并扫描", color = t.muted, fontSize = 12.sp)
             }
         }
 
-        // 底部信息与控件
+        // ---------- 底部信息 ----------
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f), Color.Black.copy(alpha = 0.9f))
-                    )
-                )
-                .padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 18.dp),
+                .background(Brush.verticalGradient(t.scrim))
+                .navigationBarsPadding()
+                .padding(start = 18.dp, end = 18.dp, top = 30.dp, bottom = 92.dp),
         ) {
             current?.let { v ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        v.name,
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    val stText = if (v.isOrganized) "已整理" else if (v.tagId != null) "待整理" else "未标记"
-                    Text(
-                        stText,
-                        fontSize = 10.sp,
-                        color = if (v.isOrganized) Accent else Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier
-                            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
+                Text(
+                    v.name,
+                    color = t.ink(0.96f),
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(5.dp))
+                val folder = v.path.substringBeforeLast('/', "").substringAfterLast('/')
+                Text(
+                    listOfNotNull(
+                        folder.takeIf { it.isNotEmpty() },
+                        fmtDuration(duration.takeIf { it > 0 } ?: v.duration),
+                        sizeText(v.size),
+                        if (v.isOrganized) "已整理" else if (v.tagId != null) "待整理" else "未标记",
+                    ).joinToString(" · "),
+                    color = t.ink(0.55f),
+                    fontSize = 10.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
 
-                // 标签小胶囊
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        tags.take(5).forEach { t ->
-                            val on = v.tagId == t.id
-                            val c = parseColor(t.color)
-                            Box(
+                Spacer(Modifier.height(12.dp))
+                // 标签胶囊 + 新建
+                Box(Modifier.fillMaxWidth()) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(end = 40.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        items(tags, key = { it.id }) { tag ->
+                            val on = v.tagId == tag.id
+                            val c = hexColor(tag.color)
+                            Row(
                                 Modifier
-                                    .background(if (on) c.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
-                                    .clickable { onTag(v.id, if (on) null else t.id) }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    .height(28.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (on) c else t.glass)
+                                    .border(1.dp, if (on) Color.Transparent else t.glassBorder, RoundedCornerShape(14.dp))
+                                    .clickable { onTag(v.id, if (on) null else tag.id) }
+                                    .padding(horizontal = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
                             ) {
+                                Box(
+                                    Modifier
+                                        .size(5.dp)
+                                        .clip(CircleShape)
+                                        .background(if (on) Color(0xFF062016) else t.ink(0.7f))
+                                )
                                 Text(
-                                    t.name,
+                                    tag.name,
+                                    color = if (on) Color(0xFF062016) else t.ink(0.7f),
                                     fontSize = 11.sp,
-                                    color = if (on) Color(0xFF04160D) else Color.White.copy(alpha = 0.9f),
                                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                                 )
                             }
                         }
                     }
+                    // 右端渐隐 + 新建按钮
                     Box(
                         Modifier
-                            .size(28.dp)
-                            .background(Color.White.copy(alpha = 0.14f), CircleShape)
-                            .clickable { showNewTag = true },
+                            .align(Alignment.CenterEnd)
+                            .width(52.dp)
+                            .height(34.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        (if (dark) Color(0xFF080B10) else Color(0xFFF7FAFF)).copy(alpha = 0f),
+                                        (if (dark) Color(0xFF080B10) else Color(0xFFF7FAFF)).copy(alpha = 0.94f),
+                                    )
+                                )
+                            )
+                    )
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .size(29.dp)
+                            .clip(CircleShape)
+                            .background(t.glass)
+                            .border(1.dp, t.glassBorder, CircleShape)
+                            .clickable { openNewTag() },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "新建标签", tint = Color.White, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Add, contentDescription = "新建标签", tint = t.ink(0.88f), modifier = Modifier.size(15.dp))
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(fmtTime(position), color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
-                    Slider(
-                        value = if (duration > 0) (position / duration).toFloat().coerceIn(0f, 1f) else 0f,
-                        onValueChange = { f ->
-                            if (duration > 0) {
-                                seeking = true
-                                position = (f * duration).coerceIn(0.0, duration)
-                            }
-                        },
-                        onValueChangeFinished = {
-                            if (duration > 0) player.seekTo((position * 1000).toLong())
-                            seeking = false
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = Accent,
-                            activeTrackColor = Accent,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.24f),
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp)
-                            .height(24.dp),
-                    )
-                    Text(fmtTime(duration), color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
+                Spacer(Modifier.height(13.dp))
+                // 进度条
+                var dragging by remember { mutableStateOf(false) }
+                var widthPx by remember { mutableFloatStateOf(1f) }
+                var scrub by remember { mutableFloatStateOf(0f) }
+                val frac = if (duration > 0) {
+                    ((if (dragging) scrub else position.toFloat()) / duration.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    0f
                 }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
-                            .background(Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
-                            .clickable {
-                                speed = when (speed) {
-                                    1f -> 1.25f
-                                    1.25f -> 1.5f
-                                    1.5f -> 2f
-                                    2f -> 0.5f
-                                    0.5f -> 1f
-                                    else -> 1f
+                            .weight(1f)
+                            .height(28.dp)
+                            .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
+                            .pointerInput(duration) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown()
+                                    dragging = true
+                                    scrub = (down.position.x / widthPx).coerceIn(0f, 1f)
+                                    while (true) {
+                                        val e = awaitPointerEvent()
+                                        val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+                                        scrub = (ch.position.x / widthPx).coerceIn(0f, 1f)
+                                        ch.consume()
+                                        if (!ch.pressed) break
+                                    }
+                                    if (duration > 0) player.seekTo((scrub * duration * 1000).toLong())
+                                    position = (scrub * duration)
+                                    dragging = false
                                 }
-                                applySpeed()
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            },
+                        contentAlignment = Alignment.CenterStart,
                     ) {
-                        Text("${speed}×", color = Color.White, fontSize = 11.sp)
+                        val barH by animateDpAsState(if (dragging) 6.dp else 3.5.dp, label = "bar-h")
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(barH)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(t.ink(0.2f))
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth(frac)
+                                .height(barH)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(t.accent)
+                        )
+                        if (dragging) {
+                            Box(
+                                Modifier
+                                    .offset { IntOffset((frac * widthPx - 10f).roundToInt(), 0) }
+                                    .size(11.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White)
+                            )
+                        }
                     }
-                    val pending = counts.tagged
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        "待整理 $pending / ${counts.all}",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.6f),
+                        "${fmtDuration(if (dragging) (scrub * duration) else position)} ",
+                        color = t.ink(0.7f),
+                        fontSize = 10.sp,
                     )
+                    Text("/ ${fmtDuration(duration.takeIf { it > 0 } ?: v.duration)}", color = t.ink(0.42f), fontSize = 10.sp)
                 }
             }
         }
     }
+}
 
-    if (showNewTag) {
-        AlertDialog(
-            onDismissRequest = { showNewTag = false },
-            title = { Text("新建标签") },
-            text = {
-                Column {
-                    Text("标签名将作为整理时的文件夹名，可在管理页修改路径。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = newTagName,
-                        onValueChange = { newTagName = it.take(20) },
-                        singleLine = true,
-                        placeholder = { Text("例如：宠物 / 2025 旅行") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        TAG_COLORS.forEachIndexed { i, hex ->
-                            Box(
-                                Modifier
-                                    .size(26.dp)
-                                    .background(parseColor(hex), CircleShape)
-                                    .clickable { newTagColor = i }
-                                    .padding(0.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (i == newTagColor) {
-                                    Text("✓", color = Color.White, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
+/* ---------------- 弹层里用的两个小组件 ---------------- */
+
+@Composable
+fun SheetActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val t = tokens()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (danger) t.danger else t.ink(0.7f),
+            modifier = Modifier.size(17.dp),
+        )
+        Text(label, color = if (danger) t.danger else t.text, fontSize = 13.sp)
+    }
+    Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+}
+
+@Composable
+fun SheetButton(
+    label: String,
+    primary: Boolean,
+    modifier: Modifier = Modifier,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val t = tokens()
+    val shape = RoundedCornerShape(13.dp)
+    Box(
+        modifier
+            .height(44.dp)
+            .clip(shape)
+            .then(
+                if (primary) Modifier.background(Brush.linearGradient(listOf(Color(0xFF5FECAB), Color(0xFF2FBF7C))))
+                else Modifier.background(t.ink(0.07f)).border(1.dp, t.line2, shape)
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = when {
+                primary && danger -> Color(0xFF7A1010)
+                primary -> Color(0xFF04160D)
+                else -> t.ink(0.7f)
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val name = newTagName.trim()
-                        if (name.isNotEmpty()) {
-                            onCreateTag(name, TAG_COLORS[newTagColor])
-                            newTagName = ""
-                            showNewTag = false
-                        }
-                    },
-                ) { Text("创建并标记") }
-            },
-            dismissButton = { TextButton(onClick = { showNewTag = false }) { Text("取消") } },
+            fontSize = 13.5.sp,
+            fontWeight = if (primary) FontWeight.SemiBold else FontWeight.Normal,
         )
     }
 }

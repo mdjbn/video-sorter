@@ -108,6 +108,18 @@ data class TagIn(val tag_id: Int?)
 data class HistIn(val position: Double, val duration: Double)
 
 @Serializable
+data class BatchRec(
+    val id: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    val undone: Int = 0,
+    val files: Int = 0,
+    val dirs: List<String> = emptyList(),
+)
+
+@Serializable
+data class BatchPage(val items: List<BatchRec> = emptyList())
+
+@Serializable
 data class OkOut(val ok: Boolean = true)
 
 @Serializable

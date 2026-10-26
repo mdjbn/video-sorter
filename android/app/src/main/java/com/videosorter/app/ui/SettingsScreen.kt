@@ -1,10 +1,9 @@
 package com.videosorter.app.ui
 
+import android.content.Intent
 import android.net.Uri
-import android.provider.OpenableColumns
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,16 +15,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,6 +39,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,223 +61,290 @@ fun SettingsScreen(
     api: Api,
     session: Session,
     tags: List<Tag>,
-    counts: Counts,
     themeMode: String,
     onThemeChange: (String) -> Unit,
+    counts: Counts,
     onToast: (String) -> Unit,
     onRefresh: () -> Unit,
     onLogout: () -> Unit,
-    onSwitchServer: (String) -> Unit = {},
+    onSwitchServer: (String) -> Unit,
+    onOpenTransfer: () -> Unit,
 ) {
+    val t = tokens()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf("") }
-    var progress by remember { mutableStateOf(0f) }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val name = runCatching {
-            ctx.contentResolver.query(uri, null, null, null, null)?.use { cur ->
-                val i = cur.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (cur.moveToFirst() && i >= 0) cur.getString(i) else null
-            }
-        }.getOrNull() ?: "upload.mp4"
-        busy = "上传中"
-        scope.launch {
-            val ok = runCatching { api.upload(ctx.contentResolver, uri, name) }.getOrDefault(false)
-            busy = ""
-            onToast(if (ok) "上传完成，正在后台扫描" else "上传失败")
-            if (ok) {
-                runCatching {
-                    val tid = api.scan()
-                    while (true) {
-                        val t = api.task(tid)
-                        progress = (t.percent / 100.0).toFloat()
-                        if (t.status != "running") break
-                        delay(400)
-                    }
-                }
-                progress = 0f
-                onRefresh()
-            }
-        }
-    }
+    var scanning by remember { mutableStateOf(false) }
+    var scanPct by remember { mutableStateOf(0f) }
+    val others = remember(api.base) { session.servers().filter { it != api.base } }
 
     Column(
         Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
+            .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 120.dp)
     ) {
-        Spacer(Modifier.height(12.dp))
-        Text("设置", fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        Text("单人使用 · 数据都在服务器上", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(14.dp))
+        Text("设置", color = t.text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
 
-        // 外观主题
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-                .padding(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("外观主题", fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text(themeLabel(themeMode), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+        // ---------------- 外观主题 ----------------
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("外观主题")
+        GroupCard {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ThemeChip("浅色", themeMode == "light", Modifier.weight(1f)) { onThemeChange("light") }
+                ThemeChip("深色", themeMode == "dark", Modifier.weight(1f)) { onThemeChange("dark") }
+                ThemeChip("跟随系统", themeMode == "auto", Modifier.weight(1f)) { onThemeChange("auto") }
             }
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("light" to "浅色", "dark" to "深色", "auto" to "跟随系统").forEach { (key, label) ->
-                    val on = themeMode == key
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .background(
-                                if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
-                                RoundedCornerShape(10.dp),
-                            )
-                            .clickable { onThemeChange(key) }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            label,
-                            fontSize = 12.sp,
-                            color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                        )
+        }
+
+        // ---------------- 服务器 ----------------
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("服务器")
+        GroupCard {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                RoundIcon(Icons.Rounded.Cloud)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        api.base.removePrefix("http://").removePrefix("https://"),
+                        color = t.text,
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                        Box(Modifier.size(5.dp).clip(RoundedCornerShape(3.dp)).background(t.accent))
+                        Text("已连接 · 局域网直连", color = t.muted2, fontSize = 10.5.sp, modifier = Modifier.padding(start = 5.dp))
                     }
                 }
             }
-        }
-        Spacer(Modifier.height(10.dp))
-
-        // 服务器
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-                .padding(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("服务器", fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Box(Modifier.size(7.dp).background(Accent, CircleShape))
-                Spacer(Modifier.width(6.dp))
-                Text("已连接", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                StatCell("视频", "${counts.all}")
+                StatCell("待整理", "${counts.tagged}")
+                StatCell("已整理", "${counts.organized}")
+                StatCell("标签", "${tags.size}")
             }
-            Spacer(Modifier.height(6.dp))
-            Text(api.base, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("视频 ${counts.all}", fontSize = 12.sp)
-                Text("待整理 ${counts.tagged}", fontSize = 12.sp)
-                Text("已整理 ${counts.organized}", fontSize = 12.sp)
-                Text("标签 ${tags.size}", fontSize = 12.sp)
-            }
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = {
-                    if (busy.isNotEmpty()) return@OutlinedButton
-                    busy = "扫描中"
-                    scope.launch {
-                        try {
-                            val tid = api.scan()
-                            while (true) {
-                                val t = api.task(tid)
-                                progress = (t.percent / 100.0).toFloat()
-                                if (t.status != "running") {
-                                    onToast(t.message.ifBlank { "扫描完成" })
-                                    break
+            RowDivider()
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !scanning) {
+                        scanning = true
+                        scanPct = 0f
+                        scope.launch {
+                            try {
+                                val tid = api.scan()
+                                while (true) {
+                                    val task = api.task(tid)
+                                    scanPct = (task.percent.coerceIn(0.0, 100.0) / 100.0).toFloat()
+                                    if (task.status != "running") {
+                                        onToast(
+                                            if (task.status == "done") "扫描完成 · 新增 ${task.done.coerceAtMost(999)}"
+                                            else task.message.ifEmpty { "扫描失败" }
+                                        )
+                                        onRefresh()
+                                        break
+                                    }
+                                    delay(350)
                                 }
-                                delay(400)
+                            } catch (e: Exception) {
+                                onToast(e.message ?: "扫描失败")
+                            } finally {
+                                scanning = false
                             }
-                        } catch (e: Exception) {
-                            onToast(e.message ?: "扫描失败")
-                        } finally {
-                            busy = ""
-                            progress = 0f
-                            onRefresh()
                         }
                     }
-                },
-                shape = RoundedCornerShape(10.dp),
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
             ) {
-                Text(if (busy == "扫描中") "扫描中…" else "扫描源文件夹", fontSize = 12.sp)
+                RoundIcon(Icons.Rounded.Sync)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (scanning) "正在扫描… ${(scanPct * 100).toInt()}%" else "扫描源文件夹",
+                        color = t.text,
+                        fontSize = 12.5.sp,
+                    )
+                    Text("只扫描新文件，已整理的不动", color = t.muted2, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
+                }
+                Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = t.muted2, modifier = Modifier.size(15.dp))
             }
-            if (busy.isNotEmpty()) {
-                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-            }
-            val others = session.servers().filter { it != api.base }
-            if (others.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                Text("切换服务器", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-                others.take(5).forEach { url ->
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(9.dp))
-                            .clickable { onSwitchServer(url) }
-                            .padding(horizontal = 12.dp, vertical = 9.dp),
-                    ) {
-                        Text(url.removePrefix("http://"), fontSize = 12.sp)
-                    }
+        }
+
+        // ---------------- 传输 ----------------
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("传输")
+        GroupCard {
+            SettingRow(Icons.Rounded.SwapVert, "上传 / 下载", "手机 → 服务器，或服务器 → 手机") { onOpenTransfer() }
+        }
+
+        // ---------------- 切换服务器 ----------------
+        if (others.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            SectionLabel("切换服务器")
+            GroupCard {
+                others.forEach { url ->
+                    SettingRow(Icons.Rounded.Refresh, url.removePrefix("http://"), "已保存的服务器") { onSwitchServer(url) }
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
 
-        // 上传下载
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-                .padding(14.dp),
-        ) {
-            Text("上传下载", fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text("把手机里的视频传到服务器，直接在播放页打标签。", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(10.dp))
-            Button(
-                onClick = { picker.launch(arrayOf("video/*")) },
-                enabled = busy.isEmpty(),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-            ) {
-                Text(if (busy == "上传中") "上传中…" else "选择视频上传", fontSize = 12.sp)
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-
-        // 关于
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-                .padding(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("关于项目", fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text("v" + BuildConfig.VERSION_NAME, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "视频整理 · VideoSorter\n自托管的视频扫描与标签整理工具，数据保存在你自己的服务器上。",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 17.sp,
-            )
-        }
+        // ---------------- 关于 ----------------
         Spacer(Modifier.height(16.dp))
-
-        OutlinedButton(
-            onClick = onLogout,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().height(46.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-        ) {
-            Text("退出登录", fontSize = 13.sp)
+        SectionLabel("关于")
+        GroupCard {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                RoundIcon(Icons.Rounded.Info)
+                Text("版本", color = t.text, fontSize = 12.5.sp)
+                Spacer(Modifier.weight(1f))
+                Text("v${BuildConfig.VERSION_NAME}", color = t.muted2, fontSize = 11.sp)
+            }
+            RowDivider()
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        runCatching {
+                            ctx.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mdjbn/video-sorter"))
+                            )
+                        }
+                    }
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+            ) {
+                RoundIcon(Icons.Rounded.DarkMode)
+                Column(Modifier.weight(1f)) {
+                    Text("项目主页", color = t.text, fontSize = 12.5.sp)
+                    Text("github.com/mdjbn/video-sorter", color = t.muted2, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
+                }
+                Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = t.muted2, modifier = Modifier.size(15.dp))
+            }
         }
-        Spacer(Modifier.height(20.dp))
+
+        // ---------------- 退出 ----------------
+        Spacer(Modifier.height(18.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(t.danger.copy(alpha = 0.1f))
+                .border(1.dp, t.danger.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+                .clickable { onLogout() }
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(Icons.Rounded.Logout, contentDescription = null, tint = t.danger, modifier = Modifier.size(16.dp))
+            Text("退出登录", color = t.danger, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(5.dp).clip(RoundedCornerShape(3.dp)).background(t.muted2))
+            Text("数据保存在服务器端，手机只是遥控器", color = t.muted2, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun GroupCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val t = tokens()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.linearGradient(listOf(t.ink(0.055f), t.ink(0.02f))))
+            .border(1.dp, t.line, RoundedCornerShape(16.dp)),
+        content = content,
+    )
+}
+
+@Composable
+private fun RowDivider() {
+    val t = tokens()
+    Box(Modifier.fillMaxWidth().height(1.dp).padding(start = 14.dp).background(t.line))
+}
+
+@Composable
+private fun RoundIcon(icon: ImageVector, danger: Boolean = false) {
+    val t = tokens()
+    Box(
+        Modifier
+            .size(26.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (danger) t.danger.copy(alpha = 0.14f) else t.ink(0.06f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = if (danger) t.danger else t.ink(0.7f), modifier = Modifier.size(14.dp))
+    }
+}
+
+@Composable
+private fun StatCell(label: String, value: String) {
+    val t = tokens()
+    Column {
+        Text(value, color = t.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = t.muted2, fontSize = 9.5.sp, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+@Composable
+private fun SettingRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val t = tokens()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        RoundIcon(icon, danger)
+        Column(Modifier.weight(1f)) {
+            Text(title, color = if (danger) t.danger else t.text, fontSize = 12.5.sp)
+            Text(subtitle, color = t.muted2, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
+        }
+        Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = t.muted2, modifier = Modifier.size(15.dp))
+    }
+}
+
+@Composable
+private fun ThemeChip(label: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val t = tokens()
+    Box(
+        modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (on) t.accent.copy(alpha = 0.16f) else t.ink(0.05f))
+            .border(1.dp, if (on) t.accent.copy(alpha = 0.45f) else t.line, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (on) t.accent else t.muted,
+            fontSize = 12.sp,
+            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+        )
     }
 }
