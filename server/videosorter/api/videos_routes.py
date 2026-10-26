@@ -208,16 +208,40 @@ def thumb(video_id: int, user: dict[str, Any] = Depends(require_user)):
     row = st.db.query_one("SELECT * FROM videos WHERE id=?", (video_id,))
     if not row:
         raise HTTPException(404, "视频不存在")
-    path = Path(row["thumb"]) if row["thumb"] else st.cfg.thumb_dir / f"{video_id}.jpg"
-    if not path.exists() and st.tools.available:
+    # 规范命名：缩略图永远叫 <video_id>.jpg（历史数据里可能是时间戳名字或绝对路径，
+    # 会在首次访问时按 id 重新生成并修正，从而修好「封面和视频对不上」的旧数据）
+    canonical = st.cfg.thumb_dir / f"{video_id}.jpg"
+    stored = (row["thumb"] or "").strip()
+    legacy: Path | None = None
+    if stored:
+        legacy = Path(stored)
+        if not legacy.is_absolute():
+            legacy = st.cfg.thumb_dir / legacy
+    if not canonical.exists():
         src = Path(row["path"])
-        if src.exists() and make_thumb(st.tools, src, path, row["duration"] or 0,
-                                       st.cfg.get("thumb_position") or 0.15):
-            st.db.execute("UPDATE videos SET thumb=? WHERE id=?", (str(path), video_id))
-    if not path.exists():
-        return JSONResponse({"error": "暂无封面"}, status_code=404)
-    return FileResponse(path, media_type="image/jpeg",
-                        headers={"Cache-Control": "public, max-age=86400"})
+        made = False
+        if st.tools.available and src.exists():
+            made = make_thumb(st.tools, src, canonical, row["duration"] or 0,
+                              st.cfg.get("thumb_position") or 0.15)
+        if not made and legacy is not None and legacy.exists():
+            # 没有 ffmpeg 时退而用旧文件，但改正记录
+            try:
+                shutil.copyfile(legacy, canonical)
+                made = True
+            except OSError:
+                made = False
+        if made:
+            st.db.execute("UPDATE videos SET thumb=? WHERE id=?", (canonical.name, video_id))
+        elif legacy is not None and legacy.exists():
+            return FileResponse(legacy, media_type="image/jpeg",
+                                headers={"Cache-Control": "public, max-age=60"})
+    if canonical.exists():
+        # 规范历史记录里的名字（时间戳名 / 绝对路径 / 空）→ 统一成 <id>.jpg
+        if stored.rsplit("/", 1)[-1] != canonical.name:
+            st.db.execute("UPDATE videos SET thumb=? WHERE id=?", (canonical.name, video_id))
+        return FileResponse(canonical, media_type="image/jpeg",
+                            headers={"Cache-Control": "public, max-age=86400"})
+    return JSONResponse({"error": "暂无封面"}, status_code=404)
 
 
 # ---------- 播放历史 ----------

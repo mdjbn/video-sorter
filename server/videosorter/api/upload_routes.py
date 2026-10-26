@@ -82,6 +82,6 @@ async def upload(file: UploadFile = File(...),
         thumb = st.cfg.thumb_dir / f"{video_id}.jpg"
         if make_thumb(st.tools, dest, thumb, info.get("duration", 0),
                       st.cfg.get("thumb_position") or 0.15):
-            st.db.execute("UPDATE videos SET thumb=? WHERE id=?", (str(thumb), video_id))
+            st.db.execute("UPDATE videos SET thumb=? WHERE id=?", (thumb.name, video_id))
     out = st.db.query_one(VIDEO_SQL + " WHERE v.id=?", (video_id,))
     return {"ok": True, "video": video_dict(out), "path": str(dest)}

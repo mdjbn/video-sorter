@@ -705,7 +705,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.4' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.5' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -730,7 +730,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
-              <div class="log-item"><span class="dt">1.0.4</span><span>修复窗口较矮时左侧栏底部用户栏被裁切（侧栏导航可滚动、用户栏始终可见）。</span></div>
+              <div class="log-item"><span class="dt">1.0.5</span><span>修复视频封面与视频内容错乱：缩略图按视频 id 命名（原来同一毫秒扫描多个文件会撞名）、封面地址带版本号自动破缓存、历史脏封面自动重建。</span></div>
+                <div class="log-item"><span class="dt">1.0.4</span><span>修复窗口较矮时左侧栏底部用户栏被裁切（侧栏导航可滚动、用户栏始终可见）。</span></div>
               <div class="log-item"><span class="dt">1.0.3</span><span>修复 .avi/.wmv 老容器转码失败（copy 失败自动回退完整转码）；静态资源不再被浏览器缓存，升级后立即生效；安卓端真机联调修 12 处。</span></div>
               <div class="log-item"><span class="dt">1.0.1</span><span>关于页展示项目仓库与问题反馈入口；打包信息里的开发者/发布者改为项目作者。</span></div>
               <div class="log-item"><span class="dt">1.0.0</span><span>首个公开版本：扫描源文件夹、播放器打标签、按标签整理并支持撤销、整理预览、播放历史、三档主题；安卓 App、Windows 桌面端、fnOS 应用包。</span></div>

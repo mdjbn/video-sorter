@@ -106,18 +106,17 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                     stats["skipped"] += 1
                     tasks.step(task_id, f"未变化：{p.name}")
                 continue
-            thumb_name = ""
-            try:
-                vid_row = db.query_one("SELECT id FROM videos WHERE path=?", (spath,))
-                vid = int(vid_row["id"]) if vid_row else int(time.time() * 1000) % 10**9
-                thumb_path = cfg.thumb_dir / f"{vid}.jpg"
-                ok = make_thumb(tools, p, thumb_path, float(item.get("duration") or 0),
-                                float(cfg.get("thumb_position", 0.15)))
-                if ok:
-                    thumb_name = thumb_path.name
-            except Exception:
-                thumb_name = ""
-            _upsert(db, p, item, thumb_name)
+            # 先入库拿到真实 id，再用 id 命名缩略图（之前用时间戳当 id，同一毫秒内会撞名 →
+            # 多个视频指向同一张缩略图，表现为「封面和视频对不上」）
+            vid = _upsert(db, p, item, "")
+            if vid:
+                try:
+                    thumb_path = cfg.thumb_dir / f"{vid}.jpg"
+                    if make_thumb(tools, p, thumb_path, float(item.get("duration") or 0),
+                                  float(cfg.get("thumb_position", 0.15))):
+                        db.execute("UPDATE videos SET thumb=? WHERE id=?", (thumb_path.name, vid))
+                except Exception:
+                    pass
             if item["old"] is None:
                 stats["added"] += 1
                 tasks.step(task_id, f"新增：{p.name}")
@@ -153,11 +152,11 @@ def _is_under(path: Path, root: Path) -> bool:
         return False
 
 
-def _upsert(db: Database, p: Path, item: dict[str, Any], thumb: str) -> None:
+def _upsert(db: Database, p: Path, item: dict[str, Any], thumb: str) -> int:
     now = now_iso()
     old = item["old"]
     if old is None:
-        db.execute(
+        new_id = db.execute(
             """INSERT INTO videos (path, filename, ext, size, duration, width, height, vcodec, acodec,
                                    bitrate, thumb, status, direct_play, mtime, scanned_at, added_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?, 'idle', ?, ?, ?, ?)""",
@@ -166,6 +165,7 @@ def _upsert(db: Database, p: Path, item: dict[str, Any], thumb: str) -> None:
              item.get("vcodec", ""), item.get("acodec", ""), int(item.get("bitrate") or 0),
              thumb, item.get("direct", 1), item["mtime"], now, now),
         )
+        return int(new_id or 0)
     else:
         db.execute(
             """UPDATE videos SET size=?, duration=?, width=?, height=?, vcodec=?, acodec=?, bitrate=?,
@@ -177,3 +177,4 @@ def _upsert(db: Database, p: Path, item: dict[str, Any], thumb: str) -> None:
              int(item.get("bitrate") or 0), thumb or old["thumb"], item.get("direct", 1),
              item["mtime"], now, str(p)),
         )
+        return int(old["id"])
