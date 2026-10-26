@@ -210,7 +210,11 @@ fun ListScreen(
             modifier = Modifier.padding(top = 11.dp, bottom = 4.dp),
         ) {
             items(LIST_FILTERS) { pair ->
-                FilterChipView(label = pair.second, on = filter == pair.first) { filter = pair.first }
+                FilterChipView(label = pair.second, on = filter == pair.first) {
+                    filter = pair.first
+                    // 「全部」= 清空所有筛选（含标签筛选），避免点了全部还只剩某个标签
+                    if (pair.first == "all") tagFilter = 0
+                }
             }
             items(tags, key = { "tag-${it.id}" }) { tag ->
                 FilterChipView(label = tag.name, on = tagFilter == tag.id, dot = hexColor(tag.color)) {

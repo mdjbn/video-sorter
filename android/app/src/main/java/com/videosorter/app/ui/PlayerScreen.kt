@@ -11,7 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,6 +87,8 @@ import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -139,9 +140,17 @@ fun PlayerScreen(
         count.coerceAtLeast(1)
     }
 
+    // 外部指定要播第几个（播放历史跳转、整理页跳转、播完自动下一个）→ 同步到 pager
+    LaunchedEffect(startIndex, count) {
+        if (count > 0 && startIndex in 0 until count && startIndex != pagerState.currentPage) {
+            pagerState.animateScrollToPage(startIndex)
+        }
+    }
+
     var playing by remember { mutableStateOf(true) }
     var speed by remember { mutableFloatStateOf(1f) }
     var tempSpeed by remember { mutableStateOf<Float?>(null) }
+    var lockedSpeed by remember { mutableStateOf<Float?>(null) }
     var position by remember { mutableStateOf(0.0) }
     var duration by remember { mutableStateOf(0.0) }
     var hud by remember { mutableStateOf<HudSpec?>(null) }
@@ -152,10 +161,14 @@ fun PlayerScreen(
 
     val current = videos.getOrNull(pagerState.currentPage)
 
-    fun applySpeed() = player.setPlaybackSpeed(tempSpeed ?: speed)
+    fun effSpeed() = tempSpeed ?: lockedSpeed ?: speed
 
-    fun speedText(v: Float): String =
-        if (v == 1f) "1.0×" else "%.2f".format(v).trimEnd('0').trimEnd('.') + "×"
+    fun applySpeed() = player.setPlaybackSpeed(effSpeed())
+
+    fun speedText(v: Float): String {
+        val text = if (v % 1f == 0f) "%.1f".format(v) else "%.2f".format(v).trimEnd('0').trimEnd('.')
+        return "$text×"
+    }
 
     fun cycleSpeed() {
         speed = when (speed) {
@@ -166,6 +179,7 @@ fun PlayerScreen(
             else -> 1f
         }
         tempSpeed = null
+        lockedSpeed = null
         applySpeed()
         toast("倍速已切换为 ${speedText(speed)}")
     }
@@ -326,7 +340,7 @@ fun PlayerScreen(
                 sheets.close()
                 onDownload(v)
             }
-            SheetActionRow(Icons.Rounded.Speed, "倍速 · 当前 ${speedText(speed)}") {
+            SheetActionRow(Icons.Rounded.Speed, "倍速 · 当前 ${speedText(effSpeed())}${if (lockedSpeed != null) "（已固定）" else ""}") {
                 cycleSpeed()
                 sheets.close()
             }
@@ -413,6 +427,7 @@ fun PlayerScreen(
             key = { i -> videos.getOrNull(i)?.id ?: i },
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
+            userScrollEnabled = false,
         ) { page ->
             val v = videos.getOrNull(page)
             val off = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
@@ -483,28 +498,97 @@ fun PlayerScreen(
             }
         }
 
-        // ---------- 手势层（在 pager 下面，pager 只吃上下滑） ----------
+        // ---------- 手势层：轻点播放/暂停、长按 2×、长按后下滑锁定/取消固定、上下滑切视频 ----------
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(current?.id) {
-                    detectTapGestures(
-                        onTap = { togglePlay() },
-                        onLongPress = {
-                            tempSpeed = 2f
-                            player.setPlaybackSpeed(2f)
-                            hud = HudSpec("2.0×", "加速中 · 松开恢复", 0.4f)
-                        },
-                        onPress = {
-                            // 抬起（或手势取消）后恢复原速
-                            tryAwaitRelease()
-                            if (tempSpeed != null) {
-                                tempSpeed = null
-                                applySpeed()
+                .pointerInput(current?.id, lockedSpeed) {
+                    val dragThreshold = 56.dp.toPx()
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val startY = down.position.y
+                        val startX = down.position.x
+                        val longPressMs = viewConfiguration.longPressTimeoutMillis
+                        val slop = viewConfiguration.touchSlop
+                        var longPressed = false
+                        var draggedDown = false
+                        var swipeDir = 0
+                        var done = false
+                        val began = System.currentTimeMillis()
+
+                        while (!done) {
+                            val elapsed = System.currentTimeMillis() - began
+                            val wait = if (longPressed) Long.MAX_VALUE else (longPressMs - elapsed).coerceAtLeast(1L)
+                            val ev = if (wait == Long.MAX_VALUE) awaitPointerEvent()
+                                     else withTimeoutOrNull(wait) { awaitPointerEvent() }
+                            if (ev == null) {
+                                longPressed = true
+                                tempSpeed = 2f
+                                player.setPlaybackSpeed(2f)
+                                hud = HudSpec(
+                                    "2.0×",
+                                    if (lockedSpeed == null) "加速中 · 下滑松手固定" else "加速中 · 下滑松手恢复",
+                                    0.4f,
+                                )
+                                continue
                             }
+                            val ch = ev.changes.firstOrNull() ?: continue
+                            val dy = ch.position.y - startY
+                            val dx = ch.position.x - startX
+                            if (!longPressed) {
+                                if (swipeDir == 0 && abs(dy) > slop && abs(dy) > abs(dx)) {
+                                    swipeDir = if (dy < 0) 1 else -1
+                                }
+                                if (!ch.pressed) {
+                                    if (swipeDir == 0 && !ch.isConsumed) togglePlay()
+                                    done = true
+                                }
+                            } else {
+                                if (ch.pressed) {
+                                    val over = dy > dragThreshold
+                                    if (over != draggedDown) {
+                                        draggedDown = over
+                                        val locked = lockedSpeed != null
+                                        hud = HudSpec(
+                                            "2.0×",
+                                            when {
+                                                over && !locked -> "松手固定 2×"
+                                                over && locked -> "松手恢复 1×"
+                                                locked -> "加速中 · 下滑松手恢复"
+                                                else -> "加速中 · 下滑松手固定"
+                                            },
+                                            if (over) 1f else 0.4f,
+                                        )
+                                    }
+                                } else {
+                                    done = true
+                                }
+                            }
+                        }
+
+                        if (longPressed) {
+                            tempSpeed = null
+                            lockedSpeed = if (draggedDown) {
+                                if (lockedSpeed == null) 2f else null
+                            } else {
+                                lockedSpeed
+                            }
+                            applySpeed()
                             hud = null
-                        },
-                    )
+                            toast(
+                                when {
+                                    draggedDown && lockedSpeed != null -> "已固定 2.0× 倍速"
+                                    draggedDown -> "已取消固定，恢复 ${speedText(speed)} 倍速"
+                                    else -> "已恢复 ${speedText(speed)} 倍速"
+                                },
+                            )
+                        } else if (swipeDir != 0) {
+                            val target = pagerState.currentPage + swipeDir
+                            if (target in 0 until count) {
+                                scope.launch { pagerState.animateScrollToPage(target) }
+                            }
+                        }
+                    }
                 }
         )
 
@@ -667,7 +751,11 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Icon(Icons.Rounded.Speed, null, tint = t.ink(0.72f), modifier = Modifier.size(14.dp))
-                        Text(speedText(speed), color = t.ink(0.88f), fontSize = 11.sp)
+                        Text(
+                            speedText(effSpeed()),
+                            color = if (lockedSpeed != null) t.accent else t.ink(0.88f),
+                            fontSize = 11.sp,
+                        )
                     }
                     Spacer(Modifier.width(6.dp))
                     // 「更多」放在信息区右侧（原在右上角，按设计反馈下移）

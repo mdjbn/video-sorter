@@ -387,7 +387,7 @@ private fun RecRow(rec: BatchRec, onUndo: () -> Unit) {
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
-        if (rec.undone == 0) {
+        if (rec.undone == 0 && rec.files > 0) {
             Row(
                 Modifier
                     .height(26.dp)
