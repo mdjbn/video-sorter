@@ -2,6 +2,7 @@
 
 [![backend](https://github.com/mdjbn/video-sorter/actions/workflows/backend.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/backend.yml)
 [![E2E](https://github.com/mdjbn/video-sorter/actions/workflows/e2e.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/e2e.yml)
+[![android](https://github.com/mdjbn/video-sorter/actions/workflows/android.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/android.yml)
 [![release](https://img.shields.io/github/v/release/mdjbn/video-sorter)](https://github.com/mdjbn/video-sorter/releases)
 [![license](https://img.shields.io/github/license/mdjbn/video-sorter)](LICENSE)
 

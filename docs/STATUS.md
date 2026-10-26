@@ -86,8 +86,8 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 | `web.yml` | push main | `vue-tsc` + `vite build` | ✅ |
 | `e2e.yml` | push main / PR | 起服务 + Puppeteer 真实浏览器 18 项断言 | ✅ |
 | `android.yml` | push main（android/**）/ 手动 | 单测 8 项 + `assembleDebug` → APK artifact | ✅ |
-| `windows.yml` | 手动 / 由 Release 调用 | PyInstaller sidecar + Tauri 打包 → NSIS/MSI + 绿色版 zip | 见 Actions |
+| `windows.yml` | 手动 / 由 Release 调用 | PyInstaller sidecar + Tauri 打包 → NSIS/MSI + 绿色版 zip | ✅ |
 | `fnos.yml` | 手动 / 由 Release 调用 | `fnpack build` → `.fpk` | ✅ |
-| `release.yml` | tag `v*` | 汇总上面全部产物发 Release | 见 Actions |
+| `release.yml` | tag `v*` | 汇总上面全部产物发 Release | ✅ |
 
 发布操作见 [release.md](release.md)。
