@@ -27,13 +27,13 @@ chmod +x run.sh
 | fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |
 | fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **18/18 PASS**（含真实文件移动与撤销）|
 | fnOS | 应用中心里真安装 | ⚠️ 未验证 | 需要 NAS 管理员在应用中心手动安装（本机无 root）|
-| 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleDebug` → `dist/android/app-debug.apk`（20.5 MB，v0.1.0）|
+| 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleDebug` → `dist/android/app-debug.apk`（20 MB，v1.0.0）；CI 也会出 APK artifact|
 | 安卓 | 单元测试（normalize/主题/解析/发现） | ✅ 本机通过 | `testDebugUnitTest` → **8/8** |
 | 安卓 | 真机/模拟器运行 | ⚠️ 未验证 | 本机无 KVM 权限、无设备；需 `adb install dist/android/app-debug.apk` |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
-| 桌面端 | 链接 exe / NSIS / MSI 打包 | ⚠️ 只在 CI 验证 | 本机无 mingw 链接环境；`.github/workflows/windows.yml` 负责 |
-| 桌面端 | 绿色版 zip | ⚠️ 只在 CI 验证 | 同上（CI 里顺手 `Compress-Archive`）|
-| 发布 | tag 触发一键出包 | ⚠️ 未跑过 | `.github/workflows/release.yml`（需推到 GitHub 并打 `v*` tag）|
+| 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
+| 桌面端 | 绿色版 zip | ✅ CI 通过 | `windows.yml` → `VideoSorter-portable.zip` 91 MB |
+| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.0.0` → Release 五个附件（APK / NSIS / MSI / 绿色版 zip / fpk）|
 
 ## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
 
@@ -64,9 +64,10 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 
 ## 四、接下来还需要什么
 
-1. 把仓库推到 GitHub，打一个 `v1.0.0` tag，让 `release.yml` 真跑一次，产出 APK + NSIS/MSI + 绿色版 zip。
-2. 用手机 `adb install` 装一次，验证局域网发现、上下滑播放、上传下载（真机上的 Media3 行为）。
-3. 在目标主机（fnOS）上用 systemd 常驻，把 `--data-dir` 指到大盘。
+1. ✅ 仓库已开源：<https://github.com/mdjbn/video-sorter>，`v1.0.0` 已发布全部安装包。
+2. **手机真机**：`adb install app-debug.apk`，验证局域网发现、上下滑播放、上传下载（Media3 在真机上的行为）。
+3. **fnOS 应用中心**：用管理员在应用中心手动安装 `videosorter.fpk`，验证图标、启动/停止、授权目录。
+4. **Windows 桌面端**：装 NSIS 包，验证 sidecar 起服务、WebView2 加载、退出时子进程被回收。
 
 ## 五、fnOS 应用包
 
