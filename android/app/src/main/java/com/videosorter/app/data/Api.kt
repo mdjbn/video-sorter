@@ -144,6 +144,48 @@ class Api(baseUrl: String, var token: String? = null) {
     // 服务端是 POST /api/scan
     suspend fun scan(): String = sendJson<ScanOut>("/api/scan", "POST", "{}").taskId
 
+    // ---------- 服务器 / 账号 / 标签管理 / 播放历史 / 缓存（设置页二级面板） ----------
+
+    suspend fun serverInfo(): ServerInfo = getJson("/api/info")
+
+    suspend fun history(limit: Int = 60): List<Video> =
+        getJson<ItemsPage>("/api/history?limit=$limit").items
+
+    suspend fun clearHistory() {
+        sendJson<OkOut>("/api/history", "DELETE", "{}")
+    }
+
+    suspend fun cache(): CacheInfo = getJson("/api/cache")
+
+    suspend fun clearCache(target: String = "all"): CacheInfo =
+        sendJson("/api/cache/clear", "POST", """{"target":"$target"}""")
+
+    suspend fun updateTag(id: Int, name: String? = null, color: String? = null, dirPath: String? = null): Tag {
+        val parts = buildList {
+            if (name != null) add("\"name\":${json.encodeToString(name)}")
+            if (color != null) add("\"color\":${json.encodeToString(color)}")
+            if (dirPath != null) add("\"dir_path\":${json.encodeToString(dirPath)}")
+        }
+        return sendJson<TagOut>("/api/tags/$id", "PATCH", "{${parts.joinToString(",")}}").tag
+    }
+
+    suspend fun deleteTag(id: Int) {
+        sendJson<OkOut>("/api/tags/$id", "DELETE", "{}")
+    }
+
+    suspend fun changePassword(old: String, new: String): String =
+        sendJson<MessageOut>("/api/auth/password", "POST",
+            """{"old_password":${json.encodeToString(old)},"new_password":${json.encodeToString(new)}}""").message
+
+    suspend fun changeUsername(name: String): String =
+        sendJson<MessageOut>("/api/auth/username", "POST",
+            """{"username":${json.encodeToString(name)}}""").message
+
+    suspend fun sessions(): List<SessionRow> = getJson<SessionPage>("/api/auth/sessions").sessions
+
+    suspend fun revokeAll(): String =
+        sendJson<MessageOut>("/api/auth/revoke-all", "POST", "{}").message
+
     suspend fun records(): List<BatchRec> = getJson<BatchPage>("/api/organize/records").items
 
     suspend fun undo(batchId: String) {

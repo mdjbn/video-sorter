@@ -305,6 +305,14 @@ class HlsManager:
         t.start()
         return job
 
+    def clear_all(self) -> None:
+        """清空所有转码产物与任务状态（「清除缓存」用）。"""
+        root = self.cfg.hls_dir
+        if root.exists():
+            shutil.rmtree(root, ignore_errors=True)
+        with self.lock:
+            self.jobs.clear()
+
     def cleanup(self, video_id: int) -> None:
         d = self.cfg.hls_dir / str(video_id)
         if d.exists():

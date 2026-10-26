@@ -38,6 +38,7 @@ data class Video(
     @SerialName("raw_url") val rawUrl: String? = null,
     /** 播放进度（秒）；后端在无播放历史时返回 null，不能声明为非空 Double */
     val position: Double? = null,
+    @SerialName("watched_at") val watchedAt: String? = null,
     val organized: Boolean = false,
 ) {
     val isOrganized: Boolean get() = organized || status == "organized"
@@ -56,6 +57,7 @@ data class Tag(
     val name: String,
     val color: String = "#8d98a8",
     val count: Int = 0,
+    @SerialName("dir_path") val dirPath: String? = null,
     @SerialName("effective_dir") val dir: String? = null,
 )
 
@@ -133,3 +135,50 @@ data class HlsStatus(
 
 @Serializable
 data class ScanOut(@SerialName("task_id") val taskId: String = "")
+
+@Serializable
+data class CacheBucket(val count: Int = 0, val bytes: Long = 0)
+
+/** GET /api/cache */
+@Serializable
+data class CacheInfo(
+    val thumbs: CacheBucket = CacheBucket(),
+    val hls: CacheBucket = CacheBucket(),
+    @SerialName("total_bytes") val totalBytes: Long = 0,
+    @SerialName("data_dir") val dataDir: String = "",
+    @SerialName("thumb_dir") val thumbDir: String = "",
+    @SerialName("hls_dir") val hlsDir: String = "",
+)
+
+/** 只关心 items 的列表响应（播放历史） */
+@Serializable
+data class ItemsPage(val items: List<Video> = emptyList())
+
+@Serializable
+data class SessionRow(
+    val token: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("last_used_at") val lastUsedAt: String? = null,
+)
+
+@Serializable
+data class SessionPage(val sessions: List<SessionRow> = emptyList())
+
+/** GET /api/info */
+@Serializable
+data class ServerInfo(
+    val version: String = "",
+    @SerialName("data_dir") val dataDir: String = "",
+    @SerialName("upload_dir") val uploadDir: String = "",
+    @SerialName("web_dir") val webDir: String = "",
+    val platform: String = "",
+    val python: String = "",
+    val ffmpeg: String = "",
+    @SerialName("media_ready") val mediaReady: Boolean = false,
+)
+
+@Serializable
+data class MessageOut(val ok: Boolean = true, val message: String = "")
+
+@Serializable
+data class TagOut(val ok: Boolean = true, val tag: Tag)

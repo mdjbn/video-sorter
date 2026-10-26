@@ -198,6 +198,14 @@ fun MainScreen(
                     },
                     onSwitchServer = onSwitchServer,
                     onOpenTransfer = { transferOpen = true },
+                    onOpenVideo = { id ->
+                        val idx = videos.indexOfFirst { it.id == id }
+                        if (idx >= 0) {
+                            playerIndex = idx
+                            tab = 0
+                        }
+                    },
+                    sheets = sheets,
                 )
 
                 else -> TransferScreen(
