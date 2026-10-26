@@ -47,6 +47,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -60,6 +62,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.Counts
 import com.videosorter.app.data.Tag
@@ -220,6 +223,17 @@ fun PlayerScreen(
     DisposableEffect(player) { onDispose { player.release() } }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // 背景：当前视频封面放大模糊后铺底，宽屏视频上下就不会是死黑一片
+        val bgUrl = current?.let { api.thumbUrl(it) } ?: ""
+        if (bgUrl.isNotEmpty()) {
+            AsyncImage(
+                model = bgUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().blur(28.dp),
+            )
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)))
+        }
         // 播放器画面
         AndroidView(
             factory = { c ->
