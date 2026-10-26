@@ -146,7 +146,12 @@ fun LoginScreen(
 
             // 服务器地址
             FieldLabel("服务器地址")
-            GlassField(value = server, onValueChange = { server = it; err = "" }, placeholder = "192.168.1.8:8080")
+            GlassField(
+                value = server,
+                onValueChange = { server = it; err = "" },
+                placeholder = "192.168.1.8:8080",
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+            )
 
             Row(
                 Modifier.fillMaxWidth().padding(top = 8.dp),

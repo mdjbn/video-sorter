@@ -351,7 +351,12 @@ fun TransferScreen(
                 Column {
                     Text("服务端保存上传文件的目录；留空则用默认目录。", color = t.muted2, fontSize = 11.5.sp)
                     Spacer(Modifier.height(10.dp))
-                    GlassField(pathDraft, { pathDraft = it }, placeholder = "例如 /volume1/videos/上传")
+                    GlassField(
+                        pathDraft,
+                        { pathDraft = it },
+                        placeholder = "例如 /volume1/videos/上传",
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                    )
                 }
             },
             confirmButton = {

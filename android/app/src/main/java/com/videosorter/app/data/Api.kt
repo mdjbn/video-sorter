@@ -95,8 +95,12 @@ class Api(baseUrl: String, var token: String? = null) {
 
     suspend fun tags(): List<Tag> = getJson<TagList>("/api/tags").tags
 
-    suspend fun createTag(name: String, color: String): Tag =
-        sendJson("/api/tags", "POST", json.encodeToString(NewTagIn(name, color)))
+    suspend fun createTag(name: String, color: String, dirPath: String? = null): Tag =
+        sendJson(
+            "/api/tags",
+            "POST",
+            json.encodeToString(NewTagIn(name, color, dirPath?.takeIf { it.isNotBlank() })),
+        )
 
     suspend fun videos(filter: String = "all", q: String = "", tagId: Int? = null): VideoPage {
         val query = buildString {

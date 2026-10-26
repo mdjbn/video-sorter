@@ -643,7 +643,12 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    GlassField(dir, { dir = it }, placeholder = "目标文件夹（可留空）")
+                    GlassField(
+                            dir,
+                            { dir = it },
+                            placeholder = "目标文件夹（可留空）",
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                        )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "留空时按规则：全局根目录/标签名 → 首个源目录/标签名",
@@ -665,7 +670,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                     scope.launch {
                         try {
                             if (target == null) {
-                                api.createTag(n, color)
+                                api.createTag(n, color, dir.trim())
                             } else {
                                 api.updateTag(target.id, n, color, dir.trim())
                             }
