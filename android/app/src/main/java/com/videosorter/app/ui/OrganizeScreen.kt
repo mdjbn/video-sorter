@@ -169,7 +169,7 @@ fun OrganizeScreen(api: Api, onToast: (String) -> Unit, onOrganized: () -> Unit)
                                             )
                                             Text(
                                                 if (it2.size < 1024 * 1024) "${it2.size / 1024} KB"
-                                                else "%.1f MB".format(it2.size / 1024.0 / 1024.0),
+                                                else sizeText(it2.size),
                                                 fontSize = 10.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -221,7 +221,7 @@ fun OrganizeScreen(api: Api, onToast: (String) -> Unit, onOrganized: () -> Unit)
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                     ) {
-                        Text("开始整理 · ${selItems.size} 个 · ${selBytes / 1024 / 1024} MB")
+                        Text("开始整理 · ${selItems.size} 个 · ${sizeText(selBytes)}")
                     }
                 }
                 Spacer(Modifier.height(14.dp))

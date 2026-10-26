@@ -188,7 +188,17 @@ cd web && npm install && npm run dev
 
 ## 界面预览
 
-真机效果（截图由无头浏览器对运行中的服务实拍，见 `docs/screenshots/`）：
+手机端真机（Xiaomi M2104K10AC / Android 13，装在 fnOS 的 `.fpk` 服务上实拍）：
+
+| 播放页 | 视频库 |
+| --- | --- |
+| ![手机播放页](docs/screenshots/mobile-player-dark.png) | ![手机视频库](docs/screenshots/mobile-list-light.png) |
+
+| 整理 | 设置 |
+| --- | --- |
+| ![手机整理](docs/screenshots/mobile-organize-light.png) | ![手机设置](docs/screenshots/mobile-settings-light.png) |
+
+网页端（截图由无头浏览器对运行中的服务实拍，见 `docs/screenshots/`）：
 
 | 播放页（深色） | 播放页（浅色） |
 | --- | --- |
@@ -216,7 +226,7 @@ cd android && gradle testDebugUnitTest
 bash tools/e2e-web.sh
 ```
 
-实测结果：后端 23 passed、安卓单测 8 passed、网页端 E2E 16 项全绿（CI 里也跑：`.github/workflows/e2e.yml`）。
+实测结果：后端 23 passed、安卓单测 8 passed、网页端 E2E 18 项全绿（CI 里也跑：`.github/workflows/e2e.yml`）；手机端已在真机上跑通「局域网发现 → 登录 → 上传 → 播放（含 HLS 转码）→ 打标签 → 整理 → 下载」。
 
 ## 在 fNOS 上开发的小提示
 

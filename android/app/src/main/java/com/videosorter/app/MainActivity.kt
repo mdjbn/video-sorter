@@ -10,17 +10,42 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import coil.Coil
+import coil.ImageLoader
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.Session
 import com.videosorter.app.ui.LoginScreen
 import com.videosorter.app.ui.MainScreen
 import com.videosorter.app.ui.VideoSorterTheme
+import okhttp3.OkHttpClient
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        installImageLoader()
         setContent { AppRoot() }
+    }
+
+    /**
+     * 缩略图接口也要 Bearer 令牌（`/api/videos/{id}/thumb` 未登录返回 401），
+     * 而 Coil 自己的 OkHttpClient 不带任何请求头 → 列表缩略图全空白。
+     * 这里给它挂一个拦截器，token 每次请求时实时读取（登录/切换服务器后自动生效）。
+     */
+    private fun installImageLoader() {
+        val session = Session(this)
+        val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val token = session.token(session.current)
+                if (req.url.encodedPath.startsWith("/api/") && token.isNotEmpty()) {
+                    chain.proceed(req.newBuilder().header("Authorization", "Bearer $token").build())
+                } else {
+                    chain.proceed(req)
+                }
+            }
+            .build()
+        Coil.setImageLoader(ImageLoader.Builder(this).okHttpClient(client).build())
     }
 }
 

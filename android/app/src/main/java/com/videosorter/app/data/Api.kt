@@ -71,7 +71,14 @@ class Api(baseUrl: String, var token: String? = null) {
     private suspend inline fun <reified T> sendJson(path: String, method: String, body: String): T =
         json.decodeFromString(exec(build(path, method, body)))
 
-    suspend fun ping(): Boolean = runCatching { getJson<Map<String, String>>("/api/health"); true }.getOrDefault(false)
+    /**
+     * 健康检查。/api/health 里既有字符串也有布尔/数字，反序列化成 Map<String, String> 会抛
+     * 类型错误（曾导致登录页误报「连不上服务器」），这里按 JsonObject 解析，宽松判定 ok。
+     */
+    suspend fun ping(): Boolean = runCatching {
+        val obj = json.parseToJsonElement(exec(build("/api/health", "GET"))).jsonObject
+        (obj["ok"]?.jsonPrimitive?.content ?: "true") == "true"
+    }.getOrDefault(false)
 
     suspend fun login(user: String, pass: String): AuthOut {
         val out: AuthOut = sendJson("/api/auth/login", "POST", json.encodeToString(LoginIn(user, pass, true)))
@@ -111,12 +118,15 @@ class Api(baseUrl: String, var token: String? = null) {
     }
 
     suspend fun play(videoId: Int): PlayInfo = getJson("/api/videos/$videoId/play")
+    /** HLS 转码进度：非直放格式首次播放要等 ffmpeg 切完片 */
+    suspend fun hlsStatus(videoId: Int): HlsStatus = getJson("/api/videos/$videoId/hlsstatus")
 
     suspend fun saveProgress(videoId: Int, position: Double, duration: Double) {
         runCatching { exec(build("/api/videos/$videoId/history", "POST", json.encodeToString(HistIn(position, duration)))) }
     }
 
-    suspend fun preview(): Plan = getJson("/api/organize/preview")
+    // 服务端是 POST /api/organize/preview（之前写成 GET，手机端一直收到 404「接口不存在」）
+    suspend fun preview(): Plan = sendJson("/api/organize/preview", "POST", "{}")
 
     suspend fun execute(tagIds: List<Int>): ExecOut =
         sendJson("/api/organize/execute", "POST", """{"tag_ids":${json.encodeToString(tagIds)}}""")
@@ -131,7 +141,8 @@ class Api(baseUrl: String, var token: String? = null) {
         exec(build("/api/videos/$videoId?file=$withFile", "DELETE"))
     }
 
-    suspend fun scan(): String = getJson<ScanOut>("/api/scan").taskId
+    // 服务端是 POST /api/scan
+    suspend fun scan(): String = sendJson<ScanOut>("/api/scan", "POST", "{}").taskId
 
     /** 上传手机里的视频到服务器 */
     suspend fun upload(resolver: ContentResolver, uri: Uri, fileName: String, tagId: Int? = null): Boolean {

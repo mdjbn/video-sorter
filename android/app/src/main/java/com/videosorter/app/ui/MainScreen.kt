@@ -53,6 +53,13 @@ fun MainScreen(
     var tags by remember { mutableStateOf<List<Tag>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    /** 把异常压成一句人话，避免把整段 JSON 解析栈糊在页面上 */
+    fun friendlyError(e: Throwable): String {
+        val raw = (e.message ?: e::class.simpleName ?: "未知错误").replace("\n", " ")
+        val brief = raw.take(110)
+        return "加载失败：$brief" + if (raw.length > 110) "…" else ""
+    }
     var playerIndex by remember { mutableIntStateOf(0) }
     val ctx = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -83,7 +90,7 @@ fun MainScreen(
             if (playerIndex >= videos.size) playerIndex = 0
             error = null
         } catch (e: Exception) {
-            if (!authFail(e)) error = e.message ?: "加载失败"
+            if (!authFail(e)) error = friendlyError(e)
         } finally {
             loading = false
         }

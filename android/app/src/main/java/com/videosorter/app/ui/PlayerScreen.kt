@@ -96,7 +96,20 @@ fun PlayerScreen(
     onCreateTag: (String, String) -> Unit,
 ) {
     val ctx = LocalContext.current
-    val player = remember { ExoPlayer.Builder(ctx).build().apply { playWhenReady = true } }
+    // 媒体请求也要带 Bearer 令牌：/api/videos/{id}/raw 与 HLS 分片都要求鉴权，
+    // 否则 ExoPlayer 会拿到 401 并报 ERROR_CODE_IO_BAD_HTTP_STATUS。
+    val player = remember(api.token) {
+        val headers = buildMap {
+            api.token?.takeIf { it.isNotEmpty() }?.let { put("Authorization", "Bearer $it") }
+        }
+        val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(headers)
+            .setAllowCrossProtocolRedirects(true)
+        ExoPlayer.Builder(ctx)
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpFactory))
+            .build()
+            .apply { playWhenReady = true }
+    }
     val count = videos.size
     val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, (count - 1).coerceAtLeast(0))) { count.coerceAtLeast(1) }
 
@@ -113,6 +126,8 @@ fun PlayerScreen(
     var newTagName by remember { mutableStateOf("") }
     var newTagColor by remember { mutableIntStateOf(0) }
     var lastLoadedId by remember { mutableIntStateOf(-1) }
+    /** >=0 表示正在等 ffmpeg 转码（长视频/非直放格式首次播放） */
+    var transcodePct by remember { mutableIntStateOf(-1) }
 
     val current = videos.getOrNull(pagerState.currentPage)
 
@@ -133,11 +148,35 @@ fun PlayerScreen(
             loadingSrc = false
             return@LaunchedEffect
         }
+        // HLS 模式要等切片就绪：直接给 ExoPlayer 一个还没生成的 m3u8 会 404 失败
+        if (info.mode == "hls") {
+            transcodePct = 0
+            var misses = 0
+            while (transcodePct >= 0) {
+                val st = runCatching { api.hlsStatus(v.id) }.getOrNull()
+                if (st == null) {
+                    misses++
+                    if (misses > 6) break
+                } else {
+                    if (st.error.isNotEmpty()) {
+                        errorMsg = "转码失败：${st.error}"
+                        loadingSrc = false
+                        transcodePct = -1
+                        return@LaunchedEffect
+                    }
+                    if (st.ready) break
+                    transcodePct = st.percent
+                }
+                kotlinx.coroutines.delay(700)
+            }
+            transcodePct = -1
+        }
         val url = api.base + (info.url ?: "")
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
         applySpeed()
-        if (v.position > 3) player.seekTo((v.position * 1000).toLong())
+        val resume = v.position ?: 0.0
+        if (resume > 3) player.seekTo((resume * 1000).toLong())
     }
 
     // 播放状态 / 进度回调
@@ -177,7 +216,8 @@ fun PlayerScreen(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { player.release() } }
+    // 播放器实例会随 token 变化重建，必须按实例释放，否则旧实例泄漏（同时占着解码器）
+    DisposableEffect(player) { onDispose { player.release() } }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // 播放器画面
@@ -201,7 +241,12 @@ fun PlayerScreen(
                         onTap = {
                             tempSpeed = null
                             applySpeed()
-                            if (player.isPlaying) player.pause() else player.play()
+                            when {
+                                player.isPlaying -> player.pause()
+                                // 播完后轻点是「重播」，直接 play() 不会有任何反应
+                                player.playbackState == Player.STATE_ENDED -> { player.seekTo(0); player.play() }
+                                else -> player.play()
+                            }
                         },
                         onLongPress = { tempSpeed = 2f; applySpeed(); hud = true },
                     )
@@ -261,13 +306,27 @@ fun PlayerScreen(
             }
         }
 
-        if (errorMsg != null || loadingSrc) {
-            Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) {
-                Text(errorMsg ?: "加载中…", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
+        // 空态 / 加载态 / 转码态互斥
+        val emptyState = count == 0 && !loadingSrc && errorMsg == null
+        val noteText = when {
+            errorMsg != null -> errorMsg
+            transcodePct >= 0 -> "首次播放需转码处理 · ${transcodePct}%"
+            loadingSrc && count > 0 -> "加载中…"
+            else -> null
+        }
+        if (noteText != null) {
+            Box(
+                Modifier
+                    .align(Alignment.Center)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(noteText, color = Color.White.copy(alpha = 0.92f), fontSize = 13.sp)
             }
         }
 
-        if (count == 0) {
+        if (emptyState) {
             Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("还没有视频", color = Color.White, fontSize = 15.sp)

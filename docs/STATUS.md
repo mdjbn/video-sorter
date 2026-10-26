@@ -29,7 +29,7 @@ chmod +x run.sh
 | fnOS | 应用中心里真安装 | ⚠️ 未验证 | 需要 NAS 管理员在应用中心手动安装（本机无 root）|
 | 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleDebug` → `dist/android/app-debug.apk`（20 MB，v1.0.0）；CI 也会出 APK artifact|
 | 安卓 | 单元测试（normalize/主题/解析/发现） | ✅ 本机通过 | `testDebugUnitTest` → **8/8** |
-| 安卓 | 真机/模拟器运行 | ⚠️ 未验证 | 本机无 KVM 权限、无设备；需 `adb install dist/android/app-debug.apk` |
+| 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
 | 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
 | 桌面端 | 绿色版 zip | ✅ CI 通过 | `windows.yml` → `VideoSorter-portable.zip` 91 MB |
@@ -61,6 +61,31 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 
 `cargo check` 阶段需要 `src-tauri/binaries/` 里至少有一个文件（Tauri 的 `bundle.resources` 校验），
 可以先放个占位文件，CI 里则由 PyInstaller 产物填充。
+
+### 安卓真机实测（2026-10-26）
+
+设备：`M2104K10AC`（chopin，Xiaomi，Android 13 / SDK 33，1080×2400），服务端是 fnOS 上的 `.fpk` 实例（`:8610`）。
+跑通链路：UDP 局域网发现 → 登录 → 手机上传（`/api/upload`）→ 播放列表 → 直放 mp4 / HLS 转码 mkv（`.mkv` 需 ffmpeg 切片）→
+播放页打标签 → 整理页执行移动（文件真的进了 `uploads/<标签>/`）→ 列表长按「下载到手机」（DownloadManager + Bearer）→ 三档主题切换。
+
+真机上发现并修掉的问题（都是后端早就对了、手机端自己写错的地方）：
+
+| # | 现象 | 原因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | 登录提示「连不上服务器」 | `ping()` 把 `/api/health` 反序列化成 `Map<String,String>`，里面是 bool/数字 | 改成解析 `JsonObject` 判 `ok` |
+| 2 | 列表页整页崩 | 后端无播放历史时 `position` 是 `null`，模型声明成非空 `Double` | `Double? = null` |
+| 3 | 播放报 `ERROR_CODE_IO_BAD_HTTP_STATUS` | ExoPlayer 请求 `/raw` 没带令牌（401） | `DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)` + `DefaultMediaSourceFactory` |
+| 4 | 整理页提示「接口不存在」 | `preview()` 写成 GET，服务端是 POST | 改 POST |
+| 5 | 设置页「扫描源文件夹」报错 | `scan()` 同样 GET vs POST | 改 POST |
+| 6 | 列表行没有文件名 | 后端字段叫 `filename`，模型字段叫 `name` 又没加 `@SerialName` | 加 `@SerialName("filename")` |
+| 7 | 列表缩略图全空白 | Coil 的 OkHttpClient 不带 `Authorization` → `/thumb` 401 | `MainActivity` 里给 Coil 装带拦截器的 ImageLoader（token 实时读） |
+| 8 | 356 KB 显示成「0 MB」 | 体积格式化只做了 MB 一档 | 抽出 `sizeText()`（B/KB/MB） |
+| 9 | 设置页版本写死 `v0.1.0` | 硬编码字符串 | `BuildConfig.VERSION_NAME` + `buildFeatures.buildConfig = true` |
+| 10 | 播放页空态与「加载中…」同时出现 | 两个分支没互斥 | 统一 `noteText` 互斥渲染 |
+| 11 | mkv 首次播放偶发失败 | 没等 HLS 切片就绪就交给 ExoPlayer | 轮询 `/hlsstatus` + 「首次播放需转码处理 · N%」提示 |
+| 12 | 播完轻点没反应 | `play()` 在 `STATE_ENDED` 下无效 | 先 `seekTo(0)` 再 `play()` |
+
+**安卓端已知限制**：只做了 `assembleDebug`（未配 release 签名与混淆）；`@zseven-w/dsh-android` 插件在本机会话里仍认不出 adb（其 `AdbToolchain` 在插件启动时就缓存了解析结果，需重启宿主服务），调试全程用原始 `adb` 命令。
 
 ## 四、接下来还需要什么
 

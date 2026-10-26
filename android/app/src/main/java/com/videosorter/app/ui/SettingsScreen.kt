@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.videosorter.app.BuildConfig
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.Counts
 import com.videosorter.app.data.Session
@@ -249,7 +250,7 @@ fun SettingsScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("关于项目", fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text("v0.1.0", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("v" + BuildConfig.VERSION_NAME, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(6.dp))
             Text(

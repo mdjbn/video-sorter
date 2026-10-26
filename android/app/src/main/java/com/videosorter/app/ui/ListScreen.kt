@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -49,6 +50,13 @@ import com.videosorter.app.data.Video
 private fun colorOf(hex: String?): Color = runCatching {
     Color(android.graphics.Color.parseColor(hex ?: "#8d98a8"))
 }.getOrDefault(Color(0xFF8D98A8))
+
+/** 文件体积：B / KB / MB 三档，避免 356 KB 显示成 "0 MB" */
+internal fun sizeText(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "${(bytes / 1024.0).toInt()} KB"
+    else -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+}
 
 private fun dur(sec: Double): String {
     val s = sec.toInt()
@@ -120,7 +128,13 @@ fun ListScreen(
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(error, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                    Text(
+                        error,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 28.dp),
+                    )
                     TextButton(onClick = onRefresh) { Text("重试") }
                 }
             }
@@ -206,7 +220,7 @@ fun ListScreen(
                                 }
                                 Spacer(Modifier.weight(1f))
                                 Text(
-                                    "${(v.size / 1024 / 1024.0).let { if (it < 1) "<1" else it.toInt().toString() }} MB",
+                                    sizeText(v.size),
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

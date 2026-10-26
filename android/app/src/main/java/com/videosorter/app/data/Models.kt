@@ -24,7 +24,8 @@ data class Counts(
 @Serializable
 data class Video(
     val id: Int,
-    val name: String = "",
+    /** 后端字段名是 filename（不是 name），不加这个映射文件名永远是空串 */
+    @SerialName("filename") val name: String = "",
     val path: String = "",
     val ext: String = "",
     val duration: Double = 0.0,
@@ -35,7 +36,8 @@ data class Video(
     @SerialName("tag_color") val tagColor: String? = null,
     @SerialName("thumb_url") val thumbUrl: String? = null,
     @SerialName("raw_url") val rawUrl: String? = null,
-    val position: Double = 0.0,
+    /** 播放进度（秒）；后端在无播放历史时返回 null，不能声明为非空 Double */
+    val position: Double? = null,
     val organized: Boolean = false,
 ) {
     val isOrganized: Boolean get() = organized || status == "organized"
@@ -107,6 +109,15 @@ data class HistIn(val position: Double, val duration: Double)
 
 @Serializable
 data class OkOut(val ok: Boolean = true)
+
+@Serializable
+data class HlsStatus(
+    val status: String = "",
+    val percent: Int = 0,
+    val ready: Boolean = false,
+    val finished: Boolean = false,
+    val error: String = "",
+)
 
 @Serializable
 data class ScanOut(@SerialName("task_id") val taskId: String = "")
