@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import { api, fmtDur, fmtSize, fmtTime, waitTask, type HistoryItem, type PlanItem, type Source, type Stats, type Tag, type Video } from '../api'
 import { toast } from '../toast'
-import { nextThemeMode, setThemeMode, themeMode, themeNow } from '../theme'
+import { nextThemeMode, setThemeMode, themeMode, THEME_LABEL } from '../theme'
 import '../styles/manage.css'
 
 const props = defineProps<{ user?: { username: string } | null }>()
@@ -321,7 +321,7 @@ async function doLogout() {
 }
 
 function cycleTheme() { setThemeMode(nextThemeMode()) }
-const themeTitle = computed(() => `切换主题 · 当前：${themeNow.value}`)
+const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeMode.value]}`)
 
 onMounted(async () => {
   acc.username = username.value
@@ -361,7 +361,7 @@ onMounted(async () => {
       <div class="m-top">
         <div class="m-crumb">视频整理 <span style="opacity:.4">/</span> <b>{{ VIEW_TITLE[view] }}</b></div>
         <div class="sp" />
-        <button class="icon-btn" :title="themeTitle" @click="cycleTheme"><Icon :name="themeMode === 'auto' ? 'auto' : themeMode === 'light' ? 'sun' : 'moon'" :size="17" /></button>
+        <button id="btnTheme" class="icon-btn" :title="themeTitle" @click="cycleTheme"><Icon :name="themeMode === 'auto' ? 'auto' : themeMode === 'light' ? 'sun' : 'moon'" :size="17" /></button>
       </div>
 
       <div class="m-scroll">

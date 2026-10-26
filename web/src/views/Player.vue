@@ -833,7 +833,7 @@ defineExpose({ selectVideo })
           </button>
         </div>
         <div class="acts">
-          <button class="icon-btn" :title="`切换主题 · 当前：${THEME_LABEL[themeMode]}`" @click="cycleTheme">
+          <button id="btnTheme" class="icon-btn" :title="`切换主题 · 当前：${THEME_LABEL[themeMode]}`" @click="cycleTheme">
             <Icon :name="themeIcon" :size="16" />
           </button>
           <button id="btnManage" class="icon-btn" title="管理页" @click="toManage"><Icon name="grid" :size="16" /></button>

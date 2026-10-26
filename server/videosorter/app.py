@@ -111,10 +111,14 @@ def create_app(cfg: Config | None = None, web_dir: Path | str | None = None) -> 
         def spa(full_path: str):
             if full_path.startswith("api/"):
                 raise HTTPException(404, "接口不存在")
+            # HTML 一律不缓存：重装/升级后浏览器必须拿到新的 index.html 与新的资源哈希，
+            # 否则用户会看到旧界面（"主题切换没生效"就是这种缓存造成的错觉）。
+            no_cache = {"Cache-Control": "no-store, must-revalidate"}
             target = (wd / full_path).resolve()
             if full_path and target.is_file() and str(target).startswith(str(wd.resolve())):
-                return FileResponse(target)
-            return FileResponse(wd / "index.html")
+                headers = no_cache if target.suffix.lower() in {".html", ".m3u8"} else None
+                return FileResponse(target, headers=headers)
+            return FileResponse(wd / "index.html", headers=no_cache)
     else:
         @app.get("/", include_in_schema=False)
         def placeholder():
