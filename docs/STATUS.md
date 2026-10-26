@@ -77,3 +77,17 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 
 包内 payload = `videosorter/`（后端源码）+ `vendor/`（FastAPI/uvicorn 等依赖，pip --target 装好）
 + `webdist/`（网页端构建产物），运行时用 fnOS 自带的 `python3`（3.11）启动，不需要 Docker、不需要联网装依赖。
+
+## 六、CI 与发布
+
+| 工作流 | 触发 | 内容 | 最近状态 |
+|---|---|---|---|
+| `backend.yml` | push main / PR | `pytest`（23 项） | ✅ |
+| `web.yml` | push main | `vue-tsc` + `vite build` | ✅ |
+| `e2e.yml` | push main / PR | 起服务 + Puppeteer 真实浏览器 18 项断言 | ✅ |
+| `android.yml` | push main（android/**）/ 手动 | 单测 8 项 + `assembleDebug` → APK artifact | ✅ |
+| `windows.yml` | 手动 / 由 Release 调用 | PyInstaller sidecar + Tauri 打包 → NSIS/MSI + 绿色版 zip | 见 Actions |
+| `fnos.yml` | 手动 / 由 Release 调用 | `fnpack build` → `.fpk` | ✅ |
+| `release.yml` | tag `v*` | 汇总上面全部产物发 Release | 见 Actions |
+
+发布操作见 [release.md](release.md)。
