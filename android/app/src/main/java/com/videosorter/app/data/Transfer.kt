@@ -35,6 +35,7 @@ data class TransferItem(
     val ok: Boolean = true,
     val kind: String = "up",          // up | down
     val where: String = "",           // 目标/来源路径
+    val uri: String = "",             // 落盘后的 content:// URI（可用来打开文件）
     val msg: String = "",
 )
 
@@ -152,16 +153,18 @@ object Transfers {
     }
 
     /** 下载到手机：优先用用户选择的 SAF 目录，其次 下载/VideoSorter/。 */
+    data class DownloadResult(val where: String, val uri: String)
+
     suspend fun download(
         ctx: Context,
         api: Api,
         video: Video,
         treeUri: Uri?,
         onProgress: (Float) -> Unit,
-    ): String = withContext(Dispatchers.IO) {
+    ): DownloadResult = withContext(Dispatchers.IO) {
         val resolver = ctx.contentResolver
         val name = uniqueName(video.name)
-        val (out, where) = openSink(ctx, treeUri, name)
+        val (out, where, uriStr) = openSink(ctx, treeUri, name)
         val url = api.base + "/api/videos/${video.id}/raw"
         val req = Request.Builder().url(url)
             .apply { api.token?.takeIf { it.isNotEmpty() }?.let { header("Authorization", "Bearer $it") } }
@@ -182,7 +185,7 @@ object Transfers {
             got = if (total > 0) total else got
             onProgress(1f)
         }
-        where
+        DownloadResult(where, uriStr)
     }
 
     private fun copyWithProgress(input: InputStream, out: OutputStream, total: Long, onProgress: (Float) -> Unit) {
@@ -200,7 +203,7 @@ object Transfers {
 
     private fun uniqueName(name: String): String = name.ifBlank { "video.mp4" }
 
-    private fun openSink(ctx: Context, treeUri: Uri?, name: String): Pair<OutputStream, String> {
+    private fun openSink(ctx: Context, treeUri: Uri?, name: String): Triple<OutputStream, String, String> {
         val resolver = ctx.contentResolver
         if (treeUri != null) {
             runCatching {
@@ -209,7 +212,7 @@ object Transfers {
                 val created = DocumentsContract.createDocument(resolver, parent, "video/mp4", name)
                 if (created != null) {
                     val os = resolver.openOutputStream(created)
-                    if (os != null) return os to "自定义目录/$name"
+                    if (os != null) return Triple(os, "自定义目录/$name", created.toString())
                 }
             }
         }
@@ -223,14 +226,14 @@ object Transfers {
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (uri != null) {
                 val os = resolver.openOutputStream(uri)
-                if (os != null) return os to "下载/VideoSorter/$name"
+                if (os != null) return Triple(os, "下载/VideoSorter/$name", uri.toString())
             }
         }
         @Suppress("DEPRECATION")
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "VideoSorter")
         dir.mkdirs()
         val f = File(dir, name)
-        return FileOutputStream(f) to "下载/VideoSorter/$name"
+        return Triple(FileOutputStream(f), "下载/VideoSorter/$name", "")
     }
 }
 

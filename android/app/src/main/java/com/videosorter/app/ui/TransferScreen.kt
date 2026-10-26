@@ -316,7 +316,7 @@ fun TransferScreen(
                         GroupCard {
                             downHist.forEachIndexed { i, item ->
                                 if (i > 0) RowDivider()
-                                HistRow(item)
+                                HistRow(item) { openDownloaded(ctx, item, onToast) }
                             }
                         }
                     }
@@ -423,10 +423,13 @@ private fun GlassProgress(pct: Float, failed: Boolean) {
 }
 
 @Composable
-private fun HistRow(item: TransferItem) {
+private fun HistRow(item: TransferItem, onClick: (() -> Unit)? = null) {
     val t = tokens()
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -506,4 +509,34 @@ private fun SegButton(label: String, on: Boolean, modifier: Modifier = Modifier,
         Text(label, color = if (on) t.ink(0.9f) else t.muted, fontSize = 12.sp,
             fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
     }
+}
+
+
+/** 点下载历史 → 用系统播放器打开已下载的视频。 */
+private fun openDownloaded(
+    ctx: Context,
+    item: TransferItem,
+    onToast: (String) -> Unit,
+) {
+    if (!item.ok) {
+        onToast("这条记录没有下载成功")
+        return
+    }
+    val uri = item.uri.takeIf { it.isNotEmpty() }?.let { runCatching { Uri.parse(it) }.getOrNull() }
+    if (uri == null) {
+        onToast("找不到文件（可能是旧记录，或文件已被移动）")
+        return
+    }
+    val mime = when {
+        item.name.endsWith(".mkv", true) -> "video/x-matroska"
+        item.name.endsWith(".webm", true) -> "video/webm"
+        item.name.endsWith(".mov", true) -> "video/quicktime"
+        item.name.endsWith(".avi", true) -> "video/x-msvideo"
+        else -> "video/mp4"
+    }
+    val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, mime)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { ctx.startActivity(intent) }
+        .onFailure { onToast("没有可以打开这个视频的应用") }
 }

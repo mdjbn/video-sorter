@@ -49,6 +49,8 @@ fun MainScreen(
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var transferOpen by remember { mutableStateOf(false) }
+    // 设置页是否处于二级页面（二级页面要隐藏 tab 栏）
+    var settingsSub by remember { mutableStateOf(false) }
 
     // 系统返回手势：传输页 → 回到浏览页；其它 tab → 回到播放页；播放页才退出 App
     BackHandler(enabled = transferOpen || tab != 0) {
@@ -115,7 +117,7 @@ fun MainScreen(
         scope.launch {
             val key = TransferHub.start(v.name, "down")
             try {
-                val where = Transfers.download(ctx, api, v, downloadTree(ctx)) { p ->
+                val res = Transfers.download(ctx, api, v, downloadTree(ctx)) { p ->
                     TransferHub.progress(key, p)
                 }
                 com.videosorter.app.data.TransferStore.add(
@@ -126,10 +128,11 @@ fun MainScreen(
                         bytes = v.size,
                         ok = true,
                         kind = "down",
-                        where = where,
+                        where = res.where,
+                        uri = res.uri,
                     ),
                 )
-                toast("已下载：$where")
+                toast("已下载：${res.where}")
             } catch (e: Throwable) {
                 val msg = e.message ?: "下载失败"
                 TransferHub.fail(key, msg)
@@ -242,6 +245,7 @@ fun MainScreen(
                     },
                     onSwitchServer = onSwitchServer,
                     onOpenTransfer = { transferOpen = true },
+                    onSubPage = { settingsSub = it },
                     onOpenVideo = { id ->
                         val idx = videos.indexOfFirst { it.id == id }
                         if (idx >= 0) {
@@ -270,9 +274,10 @@ fun MainScreen(
                 current = tab,
                 onSelect = {
                     transferOpen = false
+                    if (it != 3) settingsSub = false
                     tab = it
                 },
-                visible = !transferOpen && !sheets.visible,
+                visible = !transferOpen && !sheets.visible && !settingsSub,
             )
         }
 

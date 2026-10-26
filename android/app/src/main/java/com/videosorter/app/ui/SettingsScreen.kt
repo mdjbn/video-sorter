@@ -50,6 +50,13 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -102,12 +109,29 @@ fun SettingsScreen(
     onSwitchServer: (String) -> Unit,
     onOpenTransfer: () -> Unit,
     onOpenVideo: (Int) -> Unit,
+    onSubPage: (Boolean) -> Unit = {},
 ) {
     var page by remember { mutableStateOf(SetPage.HOME) }
     BackHandler(enabled = page != SetPage.HOME) { page = SetPage.HOME }
+    LaunchedEffect(page) { onSubPage(page != SetPage.HOME) }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onSubPage(false) } }
 
-    when (page) {
-        SetPage.HOME -> SettingsHome(
+    // 进/退二级页面都走横向滑入滑出（返回时反向）
+    AnimatedContent(
+        targetState = page,
+        transitionSpec = {
+            if (targetState == SetPage.HOME) {
+                (slideInHorizontally(tween(240)) { -it / 4 } + fadeIn(tween(200))) togetherWith
+                    (slideOutHorizontally(tween(240)) { it / 3 } + fadeOut(tween(180)))
+            } else {
+                (slideInHorizontally(tween(240)) { it / 4 } + fadeIn(tween(200))) togetherWith
+                    (slideOutHorizontally(tween(240)) { -it / 3 } + fadeOut(tween(180)))
+            }
+        },
+        label = "settings-page",
+    ) { p ->
+        when (p) {
+            SetPage.HOME -> SettingsHome(
             api = api,
             tags = tags,
             session = session,
@@ -119,13 +143,14 @@ fun SettingsScreen(
             onOpenTransfer = onOpenTransfer,
             onOpen = { page = it },
         )
-        SetPage.SERVER -> ServerPage(api, session, onToast, onSwitchServer) { page = SetPage.HOME }
-        SetPage.ACCOUNT -> AccountPage(api, session, onToast, onLogout) { page = SetPage.HOME }
-        SetPage.SOURCES -> SourcesPage(api, onToast, onRefresh) { page = SetPage.HOME }
-        SetPage.TAGS -> TagsPage(api, tags, onToast, onRefresh) { page = SetPage.HOME }
-        SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) { page = SetPage.HOME }
-        SetPage.CACHE -> CachePage(api, onToast) { page = SetPage.HOME }
-        SetPage.ABOUT -> AboutPage { page = SetPage.HOME }
+            SetPage.SERVER -> ServerPage(api, session, onToast, onSwitchServer) { page = SetPage.HOME }
+            SetPage.ACCOUNT -> AccountPage(api, session, onToast, onLogout) { page = SetPage.HOME }
+            SetPage.SOURCES -> SourcesPage(api, onToast, onRefresh) { page = SetPage.HOME }
+            SetPage.TAGS -> TagsPage(api, tags, onToast, onRefresh) { page = SetPage.HOME }
+            SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) { page = SetPage.HOME }
+            SetPage.CACHE -> CachePage(api, onToast) { page = SetPage.HOME }
+            SetPage.ABOUT -> AboutPage { page = SetPage.HOME }
+        }
     }
 }
 

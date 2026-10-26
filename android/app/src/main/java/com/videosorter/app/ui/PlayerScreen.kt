@@ -154,6 +154,22 @@ fun PlayerScreen(
 
     fun applySpeed() = player.setPlaybackSpeed(tempSpeed ?: speed)
 
+    fun speedText(v: Float): String =
+        if (v == 1f) "1.0×" else "%.2f".format(v).trimEnd('0').trimEnd('.') + "×"
+
+    fun cycleSpeed() {
+        speed = when (speed) {
+            1f -> 1.25f
+            1.25f -> 1.5f
+            1.5f -> 2f
+            2f -> 0.5f
+            else -> 1f
+        }
+        tempSpeed = null
+        applySpeed()
+        toast("倍速已切换为 ${speedText(speed)}")
+    }
+
     // 页面切换 → 换片
     LaunchedEffect(pagerState.currentPage, current?.id) {
         val v = current ?: return@LaunchedEffect
@@ -310,18 +326,9 @@ fun PlayerScreen(
                 sheets.close()
                 onDownload(v)
             }
-            SheetActionRow(Icons.Rounded.Speed, "倍速 · 当前 ${if (speed == 1f) "1.0" else "%.2f".format(speed).trimEnd('0').trimEnd('.')}×") {
-                speed = when (speed) {
-                    1f -> 1.25f
-                    1.25f -> 1.5f
-                    1.5f -> 2f
-                    2f -> 0.5f
-                    else -> 1f
-                }
-                tempSpeed = null
-                applySpeed()
+            SheetActionRow(Icons.Rounded.Speed, "倍速 · 当前 ${speedText(speed)}") {
+                cycleSpeed()
                 sheets.close()
-                toast("倍速已切换为 ${"%.2f".format(speed).trimEnd('0').trimEnd('.')}×")
             }
             SheetActionRow(Icons.Rounded.Delete, "删除视频", danger = true) {
                 sheets.close()
@@ -647,6 +654,22 @@ fun PlayerScreen(
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(8.dp))
+                    // 「更多」左边的倍速快捷按钮：点一次切下一档
+                    Row(
+                        Modifier
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(t.ink(0.08f))
+                            .border(1.dp, t.line, RoundedCornerShape(12.dp))
+                            .clickable { cycleSpeed() }
+                            .padding(horizontal = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(Icons.Rounded.Speed, null, tint = t.ink(0.72f), modifier = Modifier.size(14.dp))
+                        Text(speedText(speed), color = t.ink(0.88f), fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.width(6.dp))
                     // 「更多」放在信息区右侧（原在右上角，按设计反馈下移）
                     GlassIconButton(
                         icon = Icons.Rounded.MoreHoriz,
