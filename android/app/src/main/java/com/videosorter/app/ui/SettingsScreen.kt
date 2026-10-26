@@ -2,51 +2,58 @@ package com.videosorter.app.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Cached
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.CloudUpload
-import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.SettingsBrightness
 import androidx.compose.material.icons.rounded.Storage
-import androidx.compose.material.icons.rounded.Tag
-import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,45 +63,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.videosorter.app.BuildConfig
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.CacheInfo
 import com.videosorter.app.data.Counts
-import com.videosorter.app.data.ServerInfo
 import com.videosorter.app.data.Session
 import com.videosorter.app.data.SessionRow
+import com.videosorter.app.data.Source
 import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-private val TAG_COLORS = listOf(
-    "#f4a259", "#ef5b7b", "#4cc9f0", "#9b8cff",
-    "#8d98a8", "#5fe0a8", "#ffd166", "#ff8fab",
-)
+private enum class SetPage { HOME, SERVER, ACCOUNT, SOURCES, TAGS, HISTORY, CACHE, ABOUT }
 
-private fun bytesText(n: Long): String = when {
-    n <= 0 -> "0 B"
-    n < 1024 -> "$n B"
-    n < 1024 * 1024 -> "${n / 1024} KB"
-    n < 1024L * 1024 * 1024 -> String.format("%.1f MB", n / 1024.0 / 1024.0)
-    else -> String.format("%.2f GB", n / 1024.0 / 1024.0 / 1024.0)
-}
-
-private fun shortTime(iso: String?): String {
-    if (iso.isNullOrBlank()) return ""
-    val s = iso.replace("T", " ")
-    return if (s.length >= 16) s.substring(5, 16) else s
-}
+private val REPO_URL = "https://github.com/mdjbn/video-sorter"
 
 @Composable
 fun SettingsScreen(
@@ -109,751 +101,901 @@ fun SettingsScreen(
     onLogout: () -> Unit,
     onSwitchServer: (String) -> Unit,
     onOpenTransfer: () -> Unit,
-    onOpenVideo: (Int) -> Unit = {},
-    sheets: SheetState,
+    onOpenVideo: (Int) -> Unit,
+) {
+    var page by remember { mutableStateOf(SetPage.HOME) }
+    BackHandler(enabled = page != SetPage.HOME) { page = SetPage.HOME }
+
+    when (page) {
+        SetPage.HOME -> SettingsHome(
+            api = api,
+            tags = tags,
+            session = session,
+            themeMode = themeMode,
+            onThemeChange = onThemeChange,
+            counts = counts,
+            onToast = onToast,
+            onLogout = onLogout,
+            onOpenTransfer = onOpenTransfer,
+            onOpen = { page = it },
+        )
+        SetPage.SERVER -> ServerPage(api, session, onToast, onSwitchServer) { page = SetPage.HOME }
+        SetPage.ACCOUNT -> AccountPage(api, session, onToast, onLogout) { page = SetPage.HOME }
+        SetPage.SOURCES -> SourcesPage(api, onToast, onRefresh) { page = SetPage.HOME }
+        SetPage.TAGS -> TagsPage(api, tags, onToast, onRefresh) { page = SetPage.HOME }
+        SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) { page = SetPage.HOME }
+        SetPage.CACHE -> CachePage(api, onToast) { page = SetPage.HOME }
+        SetPage.ABOUT -> AboutPage { page = SetPage.HOME }
+    }
+}
+
+@Composable
+private fun SettingsHome(
+    api: Api,
+    tags: List<Tag>,
+    session: Session,
+    themeMode: String,
+    onThemeChange: (String) -> Unit,
+    counts: Counts,
+    onToast: (String) -> Unit,
+    onLogout: () -> Unit,
+    onOpenTransfer: () -> Unit,
+    onOpen: (SetPage) -> Unit,
 ) {
     val t = tokens()
-    val scope = rememberCoroutineScope()
-    val ctx = LocalContext.current
-
-    var cache by remember { mutableStateOf<CacheInfo?>(null) }
-    var history by remember { mutableStateOf<List<Video>>(emptyList()) }
-    var sessions by remember { mutableStateOf<List<SessionRow>>(emptyList()) }
-    var server by remember { mutableStateOf<ServerInfo?>(null) }
-    var scanPct by remember { mutableStateOf<Float?>(null) }
-
-    LaunchedEffect(Unit) {
-        runCatching { cache = api.cache() }
-        runCatching { server = api.serverInfo() }
-        runCatching { history = api.history() }
-        runCatching { sessions = api.sessions() }
-    }
-
-    fun reloadCache() {
-        scope.launch { runCatching { cache = api.cache() } }
-    }
-
-    fun scanNow() {
-        scope.launch {
-            val taskId = runCatching { api.scan() }.getOrNull() ?: run {
-                onToast("扫描请求失败"); return@launch
-            }
-            scanPct = 0f
-            repeat(300) {
-                val task = runCatching { api.task(taskId) }.getOrNull() ?: return@repeat
-                scanPct = (task.percent.coerceIn(0.0, 100.0) / 100.0).toFloat()
-                if (task.status != "running") {
-                    scanPct = null
-                    onToast(task.message.ifEmpty { "扫描完成" })
-                    onRefresh()
-                    return@launch
-                }
-                kotlinx.coroutines.delay(350)
-            }
-            scanPct = null
-            onToast("扫描超时")
-        }
-    }
-
     Column(
         Modifier
             .fillMaxSize()
+            .background(t.bg)
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(start = 18.dp, end = 18.dp, top = 52.dp, bottom = 120.dp)
+            .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 120.dp),
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text("设置", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = t.text)
-            Spacer(Modifier.width(10.dp))
-            Text("单人使用", fontSize = 11.sp, color = t.muted2)
-        }
-        Spacer(Modifier.height(16.dp))
+        Text("设置", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = t.text)
+        Spacer(Modifier.height(14.dp))
 
         // 外观主题
         GroupCard {
-            SettingRow(if (themeIsDark(themeMode)) Icons.Rounded.DarkMode else Icons.Rounded.LightMode,
-                "外观主题", themeLabel(themeMode), onClick = null, last = false)
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ThemeChip("浅色", themeMode == "light", Modifier.weight(1f)) { onThemeChange("light") }
-                ThemeChip("深色", themeMode == "dark", Modifier.weight(1f)) { onThemeChange("dark") }
-                ThemeChip("跟随系统", themeMode == "auto", Modifier.weight(1f)) { onThemeChange("auto") }
+            Column(Modifier.padding(14.dp)) {
+                Text("外观主题", color = t.ink(0.9f), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThemeChip("浅色", themeMode == "light", Modifier.weight(1f)) { onThemeChange("light") }
+                    ThemeChip("深色", themeMode == "dark", Modifier.weight(1f)) { onThemeChange("dark") }
+                    ThemeChip("跟随系统", themeMode == "auto", Modifier.weight(1f)) { onThemeChange("auto") }
+                }
             }
         }
+        Spacer(Modifier.height(12.dp))
 
-        // 主要入口
+        // 连接
         GroupCard {
-            SettingRow(Icons.Rounded.Dns, "服务器", api.base.replace("http://", ""), {
-                scope.launch {
-                    runCatching { server = api.serverInfo() }
-                    sheets.open("服务器", "连接 · 状态 · 目录") {
-                        ServerSheet(api, server, session, onSwitchServer, onToast)
-                    }
-                }
-            })
-            SettingRow(Icons.Rounded.Person, "账号", session.lastUser().ifEmpty { "admin" }, {
-                scope.launch {
-                    runCatching { sessions = api.sessions() }
-                    sheets.open("账号", "用户名 · 密码 · 会话") {
-                        AccountSheet(api, session, sessions, onToast, onLogout) { sessions = it }
-                    }
-                }
-            })
-            SettingRow(Icons.Rounded.CloudUpload, "上传下载", "下载 / 上传视频", { onOpenTransfer() })
-            SettingRow(Icons.Rounded.Search, "扫描源文件夹",
-                if (scanPct != null) "${(scanPct!! * 100).toInt()}%" else "重新扫描",
-                { if (scanPct == null) scanNow() })
-            SettingRow(Icons.Rounded.Tag, "标签管理", "${tags.size} 个", {
-                sheets.open("标签管理", "标签名就是整理后的文件夹名") {
-                    TagsSheet(api, tags, onToast, onRefresh)
-                }
-            })
-            SettingRow(Icons.Rounded.History, "播放历史", "${history.size} 条", {
-                scope.launch {
-                    runCatching { history = api.history() }
-                    sheets.open("播放历史", "点一条继续看") {
-                        HistorySheet(api, history, onOpenVideo, onToast) { history = it }
-                    }
-                }
-            })
-            SettingRow(Icons.Rounded.Storage, "缓存与储存",
-                cache?.let { bytesText(it.totalBytes) } ?: "—", {
-                    scope.launch {
-                        runCatching { cache = api.cache() }
-                        sheets.open("缓存与储存", "封面与转码分片") {
-                            CacheSheet(api, cache, onToast) { cache = it }
-                        }
-                    }
-                })
-            SettingRow(Icons.Rounded.Info, "关于项目", "v${BuildConfig.VERSION_NAME}", {
-                sheets.open("关于项目", "开源 · MIT") {
-                    AboutSheet(ctx)
-                }
-            }, last = true)
+            SettingRow(Icons.Rounded.SwapHoriz, "服务器", session.current, onClick = { onOpen(SetPage.SERVER) })
+            RowDivider()
+            SettingRow(Icons.Rounded.Person, "账号", "改用户名 / 改密码 / 登录设备") { onOpen(SetPage.ACCOUNT) }
         }
+        Spacer(Modifier.height(12.dp))
 
-        // 连接状态
+        // 内容
         GroupCard {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 13.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(t.accent)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("已连接 · 局域网直连", fontSize = 11.sp, color = t.muted)
+            SettingRow(Icons.Rounded.FolderOpen, "源文件夹", "管理要整理的目录") { onOpen(SetPage.SOURCES) }
+            RowDivider()
+            SettingRow(Icons.Rounded.Label, "标签管理", tagsSubtitle(tags)) { onOpen(SetPage.TAGS) }
+            RowDivider()
+            SettingRow(Icons.Rounded.History, "播放历史", "小卡片 · 单条或多选删除") { onOpen(SetPage.HISTORY) }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // 系统
+        GroupCard {
+            SettingRow(Icons.Rounded.Download, "上传下载", "进度与历史 · 上传/下载路径") { onOpenTransfer() }
+            RowDivider()
+            SettingRow(Icons.Rounded.Storage, "缓存与储存", "封面与转码缓存") { onOpen(SetPage.CACHE) }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        GroupCard {
+            SettingRow(Icons.Rounded.Info, "关于项目", "v${BuildConfig.VERSION_NAME} · MIT") { onOpen(SetPage.ABOUT) }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        GroupCard {
+            SettingRow(Icons.Rounded.Logout, "退出登录", danger = true, chevron = false) {
+                onToast("已退出登录")
+                onLogout()
             }
         }
-
-        GroupCard {
-            SettingRow(Icons.Rounded.Logout, "退出登录", "", { onLogout() }, danger = true, last = true)
-        }
     }
 }
 
-private fun themeIsDark(mode: String) = mode == "dark"
+private fun tagsSubtitle(tags: List<Tag>): String =
+    if (tags.isEmpty()) "还没有标签，点右上角 ＋ 新建" else "${tags.size} 个标签 · 每个标签一个目标文件夹"
 
-@Composable
-private fun GroupCard(content: @Composable ColumnScope.() -> Unit) {
-    val t = tokens()
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(bottom = 14.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.verticalGradient(
-                    listOf(t.glass, t.glass.copy(alpha = 0.35f))
-                )
-            )
-            .border(1.dp, t.line, RoundedCornerShape(16.dp))
-    ) { content() }
-}
-
-@Composable
-private fun SettingRow(
-    icon: ImageVector,
-    title: String,
-    value: String,
-    onClick: (() -> Unit)?,
-    danger: Boolean = false,
-    last: Boolean = false,
-) {
-    val t = tokens()
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier
-                .size(26.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (danger) t.danger.copy(alpha = 0.14f) else t.glass),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, null, tint = if (danger) t.danger else t.muted, modifier = Modifier.size(15.dp))
-        }
-        Spacer(Modifier.width(11.dp))
-        Text(
-            title, fontSize = 12.5.sp,
-            color = if (danger) t.danger else t.text,
-            modifier = Modifier.weight(1f)
-        )
-        if (value.isNotEmpty()) {
-            Text(value, fontSize = 11.sp, color = t.muted2, maxLines = 1)
-        }
-        if (onClick != null) {
-            Spacer(Modifier.width(6.dp))
-            Icon(Icons.Rounded.ChevronRight, null, tint = t.muted2, modifier = Modifier.size(15.dp))
-        }
-    }
-    if (!last) RowDivider()
-}
-
-@Composable
-private fun RowDivider() {
-    val t = tokens()
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 51.dp)
-            .height(1.dp)
-            .background(t.line)
-    )
-}
-
-@Composable
-private fun ThemeChip(text: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val t = tokens()
-    Box(
-        modifier
-            .height(34.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (on) t.accentDim else t.ink(0.06f))
-            .border(1.dp, if (on) t.accent.copy(alpha = 0.5f) else t.line, RoundedCornerShape(10.dp))
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text, fontSize = 11.5.sp, color = if (on) t.accent else t.muted2,
-            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
-    }
-}
-
-@Composable
-private fun SheetLabel(text: String) {
-    val t = tokens()
-    Text(text, fontSize = 10.5.sp, color = t.muted2, modifier = Modifier.padding(top = 12.dp, bottom = 6.dp))
-}
-
-@Composable
-private fun GlassInput(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    password: Boolean = false,
-    keyboardType: KeyboardType = KeyboardType.Text,
-) {
-    val t = tokens()
-    var show by remember { mutableStateOf(false) }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(42.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(t.glass.copy(alpha = 0.55f))
-            .border(1.dp, t.line2, RoundedCornerShape(11.dp))
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.weight(1f)) {
-            if (value.isEmpty()) Text(placeholder, fontSize = 12.5.sp, color = t.muted2)
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                singleLine = true,
-                textStyle = TextStyle(fontSize = 12.5.sp, color = t.text),
-                cursorBrush = SolidColor(t.accent),
-                visualTransformation = if (password && !show) PasswordVisualTransformation()
-                else VisualTransformation.None,
-                keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        if (password) {
-            Text(
-                if (show) "隐藏" else "显示",
-                fontSize = 10.5.sp,
-                color = t.accent,
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .clickable { show = !show }
-            )
-        }
-    }
-}
-
-@Composable
-private fun SkinButton(text: String, enabled: Boolean = true, danger: Boolean = false, onClick: () -> Unit) {
-    val t = tokens()
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(42.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                when {
-                    !enabled -> SolidColor(t.glass.copy(alpha = 0.35f))
-                    danger -> SolidColor(t.danger.copy(alpha = 0.16f))
-                    else -> Brush.linearGradient(listOf(Color(0xFF5FECAB), Color(0xFF2FBF7C)))
-                }
-            )
-            .border(
-                1.dp,
-                when {
-                    !enabled -> t.line
-                    danger -> t.danger.copy(alpha = 0.4f)
-                    else -> Color.Transparent
-                },
-                RoundedCornerShape(12.dp)
-            )
-            .then(if (enabled) Modifier.clickable { onClick() } else Modifier),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
-            color = when {
-                !enabled -> t.muted2
-                danger -> t.danger
-                else -> Color(0xFF04160D)
-            }
-        )
-    }
+private fun tagsCountLabel(counts: Counts): String {
+    val parts = mutableListOf<String>()
+    parts.add("视频 ${counts.all}")
+    parts.add("待整理 ${counts.tagged}")
+    parts.add("已整理 ${counts.organized}")
+    return parts.joinToString(" · ")
 }
 
 // ---------------- 服务器 ----------------
 
 @Composable
-private fun ServerSheet(
-    api: Api,
-    server: ServerInfo?,
-    session: Session,
-    onSwitchServer: (String) -> Unit,
-    onToast: (String) -> Unit,
-) {
-    val t = tokens()
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        SheetLabel("当前服务器")
-        Text(api.base, fontSize = 13.sp, color = t.text, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).clip(CircleShape).background(if (server != null) t.accent else t.danger))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                if (server != null) "在线 · v${server.version}" else "离线或未响应",
-                fontSize = 11.sp, color = t.muted2
-            )
-        }
-        SheetLabel("运行环境")
-        Text("平台 ${server?.platform.orEmpty().ifEmpty { "—" }}", fontSize = 11.sp, color = t.muted)
-        Text("Python ${server?.python.orEmpty().ifEmpty { "—" }}", fontSize = 11.sp, color = t.muted)
-        Text(
-            "ffmpeg ${if (server?.mediaReady == true) "已就绪" else "未找到（将只能直放）"}",
-            fontSize = 11.sp, color = if (server?.mediaReady == true) t.muted else t.warn
-        )
-        SheetLabel("目录")
-        Text("数据 ${server?.dataDir.orEmpty().ifEmpty { "—" }}", fontSize = 10.5.sp, color = t.muted2)
-        Text("上传 ${server?.uploadDir.orEmpty().ifEmpty { "—" }}", fontSize = 10.5.sp, color = t.muted2)
+private fun ServerPage(api: Api, session: Session, onToast: (String) -> Unit, onSwitch: (String) -> Unit, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var info by remember { mutableStateOf<com.videosorter.app.data.ServerInfo?>(null) }
+    var loading by remember { mutableStateOf(false) }
 
-        val others = session.servers().filter { it != api.base }
-        if (others.isNotEmpty()) {
-            SheetLabel("切换服务器")
-            others.forEach { url ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSwitchServer(url); onToast("正在切换到 $url") }
-                        .padding(vertical = 10.dp, horizontal = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Rounded.Dns, null, tint = t.muted2, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(url, fontSize = 12.sp, color = t.text, modifier = Modifier.weight(1f))
-                    Text("切换", fontSize = 11.sp, color = t.accent)
+    fun load() {
+        scope.launch {
+            loading = true
+            info = runCatching { api.serverInfo() }.getOrNull()
+            loading = false
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    SubScaffold("服务器", onBack, actions = {
+        Box(
+            Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(tokens().ink(0.06f)).clickable { load() },
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Rounded.Refresh, "刷新", tint = tokens().ink(0.75f), modifier = Modifier.size(16.dp)) }
+    }) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+            GroupCard {
+                SettingRow(Icons.Rounded.SwapHoriz, "当前服务器", session.current, chevron = false)
+                RowDivider()
+                SettingRow(Icons.Rounded.Info, "在线版本", info?.version ?: if (loading) "读取中…" else "未连接", chevron = false)
+                RowDivider()
+                SettingRow(
+                    Icons.Rounded.Folder,
+                    "上传目录",
+                    info?.uploadDir?.takeIf { it.isNotEmpty() } ?: "默认",
+                    chevron = false,
+                )
+                RowDivider()
+                SettingRow(
+                    Icons.Rounded.Storage,
+                    "数据目录",
+                    info?.dataDir?.takeIf { it.isNotEmpty() } ?: "-",
+                    chevron = false,
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text("切换服务器", color = t2(), fontSize = 11.sp)
+            Spacer(Modifier.height(8.dp))
+            val others = session.servers().filter { it != session.current }
+            if (others.isEmpty()) {
+                EmptyNote("还没有其它服务器，登录时填写就会自动记录")
+            } else {
+                GroupCard {
+                    others.forEachIndexed { i, url ->
+                        if (i > 0) RowDivider()
+                        SettingRow(Icons.Rounded.SwapHoriz, url, "点按切换", chevron = true) {
+                            onToast("切换到 $url")
+                            onSwitch(url)
+                        }
+                    }
                 }
             }
+            Spacer(Modifier.height(24.dp))
         }
-        Spacer(Modifier.height(14.dp))
     }
 }
 
 // ---------------- 账号 ----------------
 
 @Composable
-private fun AccountSheet(
-    api: Api,
-    session: Session,
-    sessions: List<SessionRow>,
-    onToast: (String) -> Unit,
-    onLogout: () -> Unit,
-    onSessions: (List<SessionRow>) -> Unit,
-) {
+private fun AccountPage(api: Api, session: Session, onToast: (String) -> Unit, onLogout: () -> Unit, onBack: () -> Unit) {
     val t = tokens()
     val scope = rememberCoroutineScope()
-    var user by remember { mutableStateOf(session.lastUser().ifEmpty { "admin" }) }
+    var editUser by remember { mutableStateOf(false) }
+    var userDraft by remember { mutableStateOf(session.lastUser().ifEmpty { "admin" }) }
+    var pwd by remember { mutableStateOf(false) }
     var oldPwd by remember { mutableStateOf("") }
     var newPwd by remember { mutableStateOf("") }
+    var sessions by remember { mutableStateOf<List<SessionRow>>(emptyList()) }
+
+    LaunchedEffect(Unit) { sessions = runCatching { api.sessions() }.getOrDefault(emptyList()) }
+
+    SubScaffold("账号", onBack) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+            GroupCard {
+                SettingRow(Icons.Rounded.Person, "用户名", session.lastUser().ifEmpty { "admin" }) {
+                    userDraft = session.lastUser().ifEmpty { "admin" }
+                    editUser = true
+                }
+                RowDivider()
+                SettingRow(Icons.Rounded.Person, "修改密码", "至少 6 位") { pwd = true }
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("登录设备（${sessions.size}）", color = t.muted2, fontSize = 11.sp)
+            Spacer(Modifier.height(8.dp))
+            GroupCard {
+                if (sessions.isEmpty()) {
+                    EmptyNote("暂无其它登录设备")
+                } else {
+                    sessions.forEachIndexed { i, s ->
+                        if (i > 0) RowDivider()
+                        SettingRow(
+                            Icons.Rounded.Person,
+                            s.createdAt.ifEmpty { "会话" },
+                            if (s.lastUsedAt.isNullOrEmpty()) "创建于 " + s.createdAt else "最近使用 " + s.lastUsedAt,
+                            chevron = false,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            GroupCard {
+                SettingRow(Icons.Rounded.Logout, "退出所有设备", "会让所有已登录的会话失效", danger = true) {
+                    scope.launch {
+                        runCatching { api.revokeAll() }
+                        sessions = emptyList()
+                        onToast("已退出所有设备")
+                    }
+                }
+                RowDivider()
+                SettingRow(Icons.Rounded.Logout, "退出登录", danger = true, chevron = false) {
+                    onToast("已退出登录")
+                    onLogout()
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    if (editUser) {
+        AlertDialog(
+            onDismissRequest = { editUser = false },
+            title = { Text("修改用户名", color = t.text, fontSize = 15.sp) },
+            text = { GlassField(userDraft, { userDraft = it }, placeholder = "用户名") },
+            confirmButton = {
+                TextButton(onClick = {
+                    editUser = false
+                    scope.launch {
+                        try {
+                            api.changeUsername(userDraft.trim())
+                            session.setLastUser(userDraft.trim())
+                            onToast("用户名已修改")
+                        } catch (e: Throwable) {
+                            onToast("修改失败：${e.message ?: ""}")
+                        }
+                    }
+                }) { Text("保存", color = t.accent) }
+            },
+            dismissButton = { TextButton(onClick = { editUser = false }) { Text("取消", color = t.muted) } },
+            containerColor = t.panel,
+        )
+    }
+
+    if (pwd) {
+        AlertDialog(
+            onDismissRequest = { pwd = false },
+            title = { Text("修改密码", color = t.text, fontSize = 15.sp) },
+            text = {
+                Column {
+                    GlassField(oldPwd, { oldPwd = it }, placeholder = "当前密码", password = true)
+                    Spacer(Modifier.height(10.dp))
+                    GlassField(newPwd, { newPwd = it }, placeholder = "新密码（至少 6 位）", password = true)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pwd = false
+                    scope.launch {
+                        try {
+                            api.changePassword(oldPwd, newPwd)
+                            onToast("密码已修改，请重新登录")
+                            onLogout()
+                        } catch (e: Throwable) {
+                            onToast("修改失败：${e.message ?: ""}")
+                        }
+                    }
+                }) { Text("保存", color = t.accent) }
+            },
+            dismissButton = { TextButton(onClick = { pwd = false }) { Text("取消", color = t.muted) } },
+            containerColor = t.panel,
+        )
+    }
+}
+
+// ---------------- 源文件夹 ----------------
+
+@Composable
+private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Unit, onBack: () -> Unit) {
+    val t = tokens()
+    val scope = rememberCoroutineScope()
+    var list by remember { mutableStateOf<List<Source>>(emptyList()) }
+    var adding by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        SheetLabel("用户名")
-        GlassInput(user, { user = it }, "用户名")
-        Spacer(Modifier.height(8.dp))
-        SkinButton("保存用户名", enabled = !busy && user.isNotBlank()) {
-            scope.launch {
-                busy = true
-                runCatching { api.changeUsername(user.trim()) }
-                    .onSuccess { onToast("用户名已更新"); session.setLastUser(user.trim()) }
-                    .onFailure { onToast(it.message ?: "修改失败") }
-                busy = false
-            }
-        }
+    fun load() {
+        scope.launch { list = runCatching { api.sources() }.getOrDefault(emptyList()) }
+    }
 
-        SheetLabel("修改密码")
-        GlassInput(oldPwd, { oldPwd = it }, "当前密码", password = true)
-        Spacer(Modifier.height(8.dp))
-        GlassInput(newPwd, { newPwd = it }, "新密码（至少 6 位）", password = true)
-        Spacer(Modifier.height(8.dp))
-        SkinButton("保存密码", enabled = !busy && oldPwd.isNotEmpty() && newPwd.length >= 6) {
-            scope.launch {
-                busy = true
-                runCatching { api.changePassword(oldPwd, newPwd) }
-                    .onSuccess {
-                        onToast(it.ifEmpty { "密码已更新" })
-                        oldPwd = ""; newPwd = ""
+    LaunchedEffect(Unit) { load() }
+
+    SubScaffold("源文件夹", onBack, actions = {
+        Box(
+            Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(t.ink(0.06f)).clickable { adding = true },
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Rounded.Add, "添加", tint = t.ink(0.75f), modifier = Modifier.size(17.dp)) }
+    }) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+            if (list.isEmpty()) {
+                EmptyNote("还没有源文件夹，点右上角 ＋ 添加")
+            } else {
+                GroupCard {
+                    list.forEachIndexed { i, s ->
+                        if (i > 0) RowDivider()
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RoundIcon(Icons.Rounded.Folder)
+                            Spacer(Modifier.width(11.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    s.path,
+                                    color = t.ink(0.9f),
+                                    fontSize = 12.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    buildString {
+                                        append("${s.count} 个视频")
+                                        if (!s.exists) append(" · 目录不存在")
+                                    },
+                                    color = if (s.exists) t.muted2 else t.danger,
+                                    fontSize = 10.sp,
+                                )
+                            }
+                            Box(
+                                Modifier.size(28.dp).clip(CircleShape).background(t.danger.copy(alpha = 0.12f))
+                                    .clickable {
+                                        scope.launch {
+                                            runCatching { api.removeSource(s.id) }
+                                            load()
+                                            onRefresh()
+                                            onToast("已移除源目录")
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) { Icon(Icons.Rounded.Delete, "移除", tint = t.danger, modifier = Modifier.size(14.dp)) }
+                        }
                     }
-                    .onFailure { onToast(it.message ?: "修改失败") }
-                busy = false
+                }
             }
-        }
 
-        SheetLabel("登录会话（${sessions.size} 个）")
-        sessions.take(4).forEach { s ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Check, null, tint = t.accent, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    "登录于 ${shortTime(s.createdAt)}" + if (s.lastUsedAt != null) " · 最近 ${shortTime(s.lastUsedAt)}" else "",
-                    fontSize = 11.sp, color = t.muted2
-                )
+            Spacer(Modifier.height(16.dp))
+            GroupCard {
+                SettingRow(Icons.Rounded.Search, "立即扫描", "扫描所有源文件夹并生成封面", chevron = false) {
+                    if (busy) return@SettingRow
+                    busy = true
+                    scope.launch {
+                        try {
+                            val taskId = api.scan()
+                            while (true) {
+                                val task = api.task(taskId)
+                                if (task.status != "running") {
+                                    onToast("扫描完成：${task.message.ifEmpty { "ok" }}")
+                                    break
+                                }
+                                kotlinx.coroutines.delay(400)
+                            }
+                            load()
+                            onRefresh()
+                        } catch (e: Throwable) {
+                            onToast("扫描失败：${e.message ?: ""}")
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
             }
+            Spacer(Modifier.height(24.dp))
         }
-        Spacer(Modifier.height(8.dp))
-        SkinButton("退出所有设备", enabled = !busy, danger = true) {
-            scope.launch {
-                busy = true
-                runCatching { api.revokeAll() }
-                    .onSuccess { onToast(it.ifEmpty { "已退出所有设备" }); runCatching { onSessions(api.sessions()) } }
-                    .onFailure { onToast(it.message ?: "操作失败") }
-                busy = false
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        SkinButton("退出登录", danger = true) { onLogout() }
-        Spacer(Modifier.height(14.dp))
+    }
+
+    if (adding) {
+        AlertDialog(
+            onDismissRequest = { adding = false },
+            title = { Text("添加源文件夹", color = t.text, fontSize = 15.sp) },
+            text = {
+                Column {
+                    Text("填服务端上的绝对路径，例如 /volume1/videos", color = t.muted2, fontSize = 11.5.sp)
+                    Spacer(Modifier.height(10.dp))
+                    GlassField(draft, { draft = it }, placeholder = "/volume1/videos")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    adding = false
+                    scope.launch {
+                        try {
+                            api.addSource(draft.trim())
+                            draft = ""
+                            load()
+                            onRefresh()
+                            onToast("已添加源文件夹")
+                        } catch (e: Throwable) {
+                            onToast("添加失败：${e.message ?: ""}")
+                        }
+                    }
+                }) { Text("保存", color = t.accent) }
+            },
+            dismissButton = { TextButton(onClick = { adding = false }) { Text("取消", color = t.muted) } },
+            containerColor = t.panel,
+        )
     }
 }
 
 // ---------------- 标签管理 ----------------
 
+private val TAG_COLORS = listOf(
+    "#F4A259", "#EF5B7B", "#4CC9F0", "#9B8CFF", "#8D98A8", "#5FECAB", "#FFD166", "#FF7A85",
+)
+
 @Composable
-private fun TagsSheet(
-    api: Api,
-    tags: List<Tag>,
-    onToast: (String) -> Unit,
-    onChanged: () -> Unit,
-) {
+private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRefresh: () -> Unit, onBack: () -> Unit) {
     val t = tokens()
     val scope = rememberCoroutineScope()
-    var name by remember { mutableStateOf("") }
-    var color by remember { mutableStateOf(TAG_COLORS.first()) }
     var editing by remember { mutableStateOf<Tag?>(null) }
-    var editName by remember { mutableStateOf("") }
-    var editDir by remember { mutableStateOf("") }
-    var editColor by remember { mutableStateOf(TAG_COLORS.first()) }
+    var creating by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
+    var color by remember { mutableStateOf(TAG_COLORS[0]) }
+    var dir by remember { mutableStateOf("") }
 
-    if (editing != null) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-            Text("编辑「${editing!!.name}」", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = t.text)
-            SheetLabel("标签名 = 文件夹名")
-            GlassInput(editName, { editName = it }, "标签名")
-            SheetLabel("颜色")
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TAG_COLORS.forEach { c ->
-                    Box(
-                        Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(hexColor(c))
-                            .border(2.dp, if (c == editColor) t.text else Color.Transparent, CircleShape)
-                            .clickable { editColor = c }
-                    )
-                }
-            }
-            SheetLabel("目标文件夹（留空=默认）")
-            GlassInput(editDir, { editDir = it }, "/volume1/videos/整理/${editing!!.name}")
-            Spacer(Modifier.height(14.dp))
-            SkinButton("保存") {
-                scope.launch {
-                    runCatching {
-                        api.updateTag(editing!!.id, name = editName.trim(), color = editColor,
-                            dirPath = editDir.trim())
-                    }.onSuccess { onToast("已保存"); editing = null; onChanged() }
-                        .onFailure { onToast(it.message ?: "保存失败") }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            SkinButton("删除标签", danger = true) {
-                scope.launch {
-                    runCatching { api.deleteTag(editing!!.id) }
-                        .onSuccess { onToast("已删除（视频回到未标记）"); editing = null; onChanged() }
-                        .onFailure { onToast(it.message ?: "删除失败") }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            SkinButton("返回列表", danger = false) { editing = null }
-            Spacer(Modifier.height(14.dp))
-        }
-        return
+    fun openEdit(tag: Tag) {
+        editing = tag
+        name = tag.name
+        color = tag.color.ifEmpty { TAG_COLORS[0] }
+        dir = tag.dirPath ?: ""
     }
 
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        tags.forEach { tag ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable {
-                        editing = tag
-                        editName = tag.name
-                        editDir = tag.dirPath ?: ""
-                        editColor = TAG_COLORS.firstOrNull { it.equals(tag.color, true) } ?: TAG_COLORS.first()
+    SubScaffold("标签管理", onBack, actions = {
+        Box(
+            Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(t.ink(0.06f)).clickable {
+                creating = true; name = ""; color = TAG_COLORS[0]; dir = ""
+            },
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Rounded.Add, "新建标签", tint = t.ink(0.75f), modifier = Modifier.size(17.dp)) }
+    }) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+            GroupCard {
+                tags.forEachIndexed { i, tag ->
+                    if (i > 0) RowDivider()
+                    Row(
+                        Modifier.fillMaxWidth().clickable { openEdit(tag) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(hexColor(tag.color)))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(tag.name, color = t.ink(0.9f), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "目标：${tag.dirPath?.takeIf { it.isNotEmpty() } ?: "按规则自动（源目录/标签名）"}",
+                                color = t.muted2,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text("${tag.count} 个", color = t.muted2, fontSize = 10.5.sp)
                     }
-                    .padding(vertical = 9.dp, horizontal = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(hexColor(tag.color)))
-                Spacer(Modifier.width(9.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(tag.name, fontSize = 12.5.sp, color = t.text)
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    val dialogOpen = editing != null || creating
+    if (dialogOpen) {
+        AlertDialog(
+            onDismissRequest = { editing = null; creating = false },
+            title = {
+                Text(if (creating) "新建标签" else "编辑标签", color = t.text, fontSize = 15.sp)
+            },
+            text = {
+                Column {
+                    GlassField(name, { name = it }, placeholder = "标签名称")
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TAG_COLORS.forEach { c ->
+                            Box(
+                                Modifier.size(24.dp).clip(CircleShape).background(hexColor(c))
+                                    .then(if (c == color) Modifier.border(2.dp, t.text, CircleShape) else Modifier)
+                                    .clickable { color = c },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    GlassField(dir, { dir = it }, placeholder = "目标文件夹（可留空）")
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        tag.dirPath?.takeIf { it.isNotBlank() } ?: tag.dir ?: "默认目录",
-                        fontSize = 9.5.sp, color = t.muted2, maxLines = 1
+                        "留空时按规则：全局根目录/标签名 → 首个源目录/标签名",
+                        color = t.muted2,
+                        fontSize = 10.sp,
                     )
                 }
-                Text("${tag.count} 个", fontSize = 10.5.sp, color = t.muted2)
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.Rounded.ChevronRight, null, tint = t.muted2, modifier = Modifier.size(14.dp))
-            }
-            RowDivider()
-        }
-
-        SheetLabel("新建标签")
-        GlassInput(name, { name = it }, "例如：宠物 / 2025 旅行")
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TAG_COLORS.forEach { c ->
-                Box(
-                    Modifier
-                        .size(26.dp)
-                        .clip(CircleShape)
-                        .background(hexColor(c))
-                        .border(2.dp, if (c == color) t.text else Color.Transparent, CircleShape)
-                        .clickable { color = c }
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        SkinButton("创建标签", enabled = name.isNotBlank()) {
-            scope.launch {
-                runCatching { api.createTag(name.trim(), color) }
-                    .onSuccess { onToast("已创建「${name.trim()}」"); name = ""; onChanged() }
-                    .onFailure { onToast(it.message ?: "创建失败") }
-            }
-        }
-        Spacer(Modifier.height(14.dp))
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val n = name.trim()
+                    if (n.isEmpty()) {
+                        onToast("请填写标签名称")
+                        return@TextButton
+                    }
+                    val target = editing
+                    editing = null
+                    creating = false
+                    scope.launch {
+                        try {
+                            if (target == null) {
+                                api.createTag(n, color)
+                            } else {
+                                api.updateTag(target.id, n, color, dir.trim())
+                            }
+                            onRefresh()
+                            onToast("已保存")
+                        } catch (e: Throwable) {
+                            onToast("保存失败：${e.message ?: ""}")
+                        }
+                    }
+                }) { Text("保存", color = t.accent) }
+            },
+            dismissButton = {
+                Row {
+                    if (editing != null) {
+                        TextButton(onClick = {
+                            val target = editing!!
+                            editing = null
+                            scope.launch {
+                                try {
+                                    api.deleteTag(target.id)
+                                    onRefresh()
+                                    onToast("已删除标签")
+                                } catch (e: Throwable) {
+                                    onToast("删除失败：${e.message ?: ""}")
+                                }
+                            }
+                        }) { Text("删除", color = t.danger) }
+                    }
+                    TextButton(onClick = { editing = null; creating = false }) { Text("取消", color = t.muted) }
+                }
+            },
+            containerColor = t.panel,
+        )
     }
 }
 
 // ---------------- 播放历史 ----------------
 
 @Composable
-private fun HistorySheet(
-    api: Api,
-    history: List<Video>,
-    onOpenVideo: (Int) -> Unit,
-    onToast: (String) -> Unit,
-    onReload: (List<Video>) -> Unit,
-) {
+private fun HistoryPage(api: Api, onToast: (String) -> Unit, onOpenVideo: (Int) -> Unit, onBack: () -> Unit) {
     val t = tokens()
     val scope = rememberCoroutineScope()
-    if (history.isEmpty()) {
-        Text("还没有播放记录，去播放页看几个视频吧。", fontSize = 12.sp, color = t.muted2)
-        return
+    var items by remember { mutableStateOf<List<Video>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var selecting by remember { mutableStateOf(false) }
+    val picked = remember { mutableStateListOf<Int>() }
+    var confirmSingle by remember { mutableStateOf<Video?>(null) }
+
+    fun load() {
+        scope.launch {
+            loading = true
+            items = runCatching { api.history(100) }.getOrDefault(emptyList())
+            loading = false
+        }
     }
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        history.take(20).forEach { v ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable { onOpenVideo(v.id); onToast("已跳到「${v.name}」") }
-                    .padding(vertical = 9.dp, horizontal = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Rounded.History, null, tint = t.muted2, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(9.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(v.name, fontSize = 12.sp, color = t.text, maxLines = 1)
-                    val pos = v.position ?: 0.0
-                    Text(
-                        "${fmtDuration(pos)} / ${fmtDuration(v.duration)} · ${shortTime(v.watchedAt)}",
-                        fontSize = 9.5.sp, color = t.muted2
+
+    fun deleteIds(ids: List<Int>) {
+        scope.launch {
+            ids.forEach { runCatching { api.deleteHistory(it) } }
+            picked.clear()
+            selecting = false
+            load()
+            onToast("已删除 ${ids.size} 条记录")
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    // 选择模式下先退出选择，再返回上一级
+    BackHandler(enabled = selecting) {
+        selecting = false
+        picked.clear()
+    }
+
+    SubScaffold(
+        "播放历史",
+        onBack,
+        actions = {
+            TextButton(onClick = {
+                selecting = !selecting
+                picked.clear()
+            }) { Text(if (selecting) "取消" else "选择", color = t.accent, fontSize = 12.sp) }
+        },
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            when {
+                loading -> EmptyNote("读取中…")
+                items.isEmpty() -> EmptyNote("还没有播放记录")
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 120.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(items, key = { it.id }) { v ->
+                        HistoryCard(
+                            api = api,
+                            v = v,
+                            selecting = selecting,
+                            picked = picked.contains(v.id),
+                            onTap = {
+                                if (selecting) {
+                                    if (picked.contains(v.id)) picked.remove(v.id) else picked.add(v.id)
+                                } else {
+                                    onOpenVideo(v.id)
+                                }
+                            },
+                            onLong = { confirmSingle = v },
+                        )
+                    }
+                }
+            }
+
+            if (selecting) {
+                Row(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(18.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(t.panel2)
+                        .border(1.dp, t.line, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("已选 ${picked.size}", color = t.ink(0.85f), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = {
+                        if (picked.size == items.size) picked.clear() else {
+                            picked.clear(); items.forEach { picked.add(it.id) }
+                        }
+                    }) { Text(if (picked.size == items.size) "取消全选" else "全选", color = t.accent, fontSize = 12.sp) }
+                    TextButton(onClick = { if (picked.isNotEmpty()) deleteIds(picked.toList()) }) {
+                        Text("删除", color = if (picked.isEmpty()) t.muted else t.danger, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    val single = confirmSingle
+    if (single != null) {
+        AlertDialog(
+            onDismissRequest = { confirmSingle = null },
+            title = { Text("删除播放记录", color = t.text, fontSize = 15.sp) },
+            text = { Text("只删除这条播放历史，视频文件不会动。", color = t.muted2, fontSize = 12.sp) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSingle = null
+                    deleteIds(listOf(single.id))
+                }) { Text("删除", color = t.danger) }
+            },
+            dismissButton = { TextButton(onClick = { confirmSingle = null }) { Text("取消", color = t.muted) } },
+            containerColor = t.panel,
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HistoryCard(
+    api: Api,
+    v: Video,
+    selecting: Boolean,
+    picked: Boolean,
+    onTap: () -> Unit,
+    onLong: () -> Unit,
+) {
+    val t = tokens()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.linearGradient(listOf(t.ink(0.055f), t.ink(0.02f))))
+            .border(1.dp, if (picked) t.accent.copy(alpha = 0.6f) else t.line, RoundedCornerShape(14.dp))
+            .combinedClickable(onClick = onTap, onLongClick = onLong)
+            .padding(9.dp),
+    ) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))) {
+            AsyncImage(
+                model = api.thumbUrl(v),
+                contentDescription = v.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().background(gradientFor(v.id)),
+            )
+            if (v.duration > 1) {
+                Box(
+                    Modifier.align(Alignment.BottomEnd).padding(5.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                ) { Text(fmtDuration(v.duration), color = Color.White, fontSize = 9.sp) }
+            }
+            val pos = v.position ?: 0.0
+            if (pos > 1 && v.duration > 1) {
+                Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.5.dp).background(Color.Black.copy(alpha = 0.4f))) {
+                    Box(
+                        Modifier.fillMaxWidth((pos / v.duration).toFloat().coerceIn(0.02f, 1f)).height(2.5.dp)
+                            .background(t.accent),
                     )
                 }
-                Text(
-                    v.tagName ?: "未标记", fontSize = 10.sp,
-                    color = if (v.tagName != null) hexColor(v.tagColor) else t.muted2
-                )
             }
-            RowDivider()
-        }
-        Spacer(Modifier.height(12.dp))
-        SkinButton("清除全部历史", danger = true) {
-            scope.launch {
-                runCatching { api.clearHistory() }
-                    .onSuccess { onToast("已清除播放历史"); runCatching { onReload(api.history()) } }
-                    .onFailure { onToast(it.message ?: "清除失败") }
+            if (selecting) {
+                Box(
+                    Modifier.align(Alignment.TopStart).padding(6.dp).size(20.dp).clip(CircleShape)
+                        .background(if (picked) t.accent else Color.Black.copy(alpha = 0.45f))
+                        .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (picked) Icon(Icons.Rounded.Check, null, tint = t.bg, modifier = Modifier.size(13.dp))
+                }
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(7.dp))
+        Text(v.name, color = t.ink(0.88f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            buildString {
+                val pos = v.position ?: 0.0
+                if (pos > 1) append("看到 ${fmtDuration(pos)} · ") else append("未开始 · ")
+                append(shortStamp(v.watchedAt))
+            },
+            color = t.muted2,
+            fontSize = 9.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
+}
+
+private fun shortStamp(iso: String?): String {
+    if (iso.isNullOrEmpty()) return "-"
+    return runCatching {
+        iso.replace("T", " ").take(16).substring(5)
+    }.getOrDefault(iso.take(16))
 }
 
 // ---------------- 缓存与储存 ----------------
 
 @Composable
-private fun CacheSheet(
-    api: Api,
-    cache: CacheInfo?,
-    onToast: (String) -> Unit,
-    onReload: (CacheInfo) -> Unit,
-) {
+private fun CachePage(api: Api, onToast: (String) -> Unit, onBack: () -> Unit) {
     val t = tokens()
     val scope = rememberCoroutineScope()
-    val c = cache
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatBox("封面", bytesText(c?.thumbs?.bytes ?: 0L), "${c?.thumbs?.count ?: 0} 张", Modifier.weight(1f))
-            StatBox("转码", bytesText(c?.hls?.bytes ?: 0L), "${c?.hls?.count ?: 0} 个文件", Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(8.dp))
-        StatBox("合计", bytesText(c?.totalBytes ?: 0L), "数据目录", Modifier.fillMaxWidth())
-        Spacer(Modifier.height(6.dp))
-        Text(c?.dataDir.orEmpty(), fontSize = 10.sp, color = t.muted2)
+    var info by remember { mutableStateOf<CacheInfo?>(null) }
+    var busy by remember { mutableStateOf(false) }
 
-        SheetLabel("清理")
-        SkinButton("清除封面（会按需重新生成）", danger = true) {
-            scope.launch {
-                runCatching { api.clearCache("thumbs") }
-                    .onSuccess { onToast("已清除封面缓存"); onReload(it) }
-                    .onFailure { onToast(it.message ?: "清理失败") }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        SkinButton("清除转码缓存", danger = true) {
-            scope.launch {
-                runCatching { api.clearCache("hls") }
-                    .onSuccess { onToast("已清除转码缓存"); onReload(it) }
-                    .onFailure { onToast(it.message ?: "清理失败") }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        SkinButton("全部清除", danger = true) {
-            scope.launch {
-                runCatching { api.clearCache("all") }
-                    .onSuccess { onToast("已清除全部缓存"); onReload(it) }
-                    .onFailure { onToast(it.message ?: "清理失败") }
-            }
-        }
-        Spacer(Modifier.height(14.dp))
+    fun load() {
+        scope.launch { info = runCatching { api.cache() }.getOrNull() }
     }
-}
 
-@Composable
-private fun StatBox(label: String, value: String, sub: String, modifier: Modifier = Modifier) {
-    val t = tokens()
-    Column(
-        modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Brush.verticalGradient(listOf(t.glass, t.glass.copy(alpha = 0.35f))))
-            .border(1.dp, t.line, RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 11.dp)
-    ) {
-        Text(label, fontSize = 10.sp, color = t.muted2)
-        Spacer(Modifier.height(3.dp))
-        Text(value, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = t.text)
-        Text(sub, fontSize = 9.5.sp, color = t.muted2)
+    LaunchedEffect(Unit) { load() }
+
+    fun clear(target: String) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            try {
+                val c = api.clearCache(target)
+                info = c
+                onToast("已清理，释放 ${sizeText(if (target == "all") info?.totalBytes ?: 0 else 0)}")
+            } catch (e: Throwable) {
+                onToast("清理失败：${e.message ?: ""}")
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    SubScaffold("缓存与储存", onBack) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+            GroupCard {
+                SettingRow(
+                    Icons.Rounded.Storage,
+                    "封面缓存",
+                    info?.let { "${it.thumbs.count} 个文件 · ${sizeText(it.thumbs.bytes)}" } ?: "读取中…",
+                    chevron = false,
+                )
+                RowDivider()
+                SettingRow(
+                    Icons.Rounded.Storage,
+                    "转码缓存",
+                    info?.let { "${it.hls.count} 个文件 · ${sizeText(it.hls.bytes)}" } ?: "读取中…",
+                    chevron = false,
+                )
+                RowDivider()
+                SettingRow(
+                    Icons.Rounded.Info,
+                    "合计占用",
+                    info?.let { sizeText(it.totalBytes) } ?: "-",
+                    chevron = false,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            GroupCard {
+                SettingRow(Icons.Rounded.Delete, "清理封面缓存", "下次打开会重新生成", chevron = false) { clear("thumbs") }
+                RowDivider()
+                SettingRow(Icons.Rounded.Delete, "清理转码缓存", "下次播放会重新转码", chevron = false) { clear("hls") }
+                RowDivider()
+                SettingRow(Icons.Rounded.Delete, "全部清理", danger = true, chevron = false) { clear("all") }
+            }
+            Spacer(Modifier.height(12.dp))
+            GroupCard {
+                SettingRow(
+                    Icons.Rounded.Folder,
+                    "数据目录",
+                    info?.dataDir ?: "-",
+                    chevron = false,
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+        }
     }
 }
 
 // ---------------- 关于 ----------------
 
 @Composable
-private fun AboutSheet(ctx: android.content.Context) {
+private fun AboutPage(onBack: () -> Unit) {
     val t = tokens()
-    Column(Modifier.fillMaxWidth()) {
-        Text("视频整理 · VideoSorter", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = t.text)
-        Spacer(Modifier.height(4.dp))
-        Text("v${BuildConfig.VERSION_NAME} · MIT License", fontSize = 11.sp, color = t.muted2)
-        Spacer(Modifier.height(12.dp))
-        Text(
-            "自托管的视频分类整理工具：扫描源文件夹 → 播放并打标签 → 一键按标签整理到对应文件夹，支持撤销。",
-            fontSize = 11.5.sp, color = t.muted
-        )
-        Spacer(Modifier.height(14.dp))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .clickable {
+    val ctx = LocalContext.current
+    SubScaffold("关于项目", onBack) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+            GroupCard {
+                Column(Modifier.padding(16.dp)) {
+                    Text("视频整理", color = t.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("VIDEO SORTER · 自托管视频分类整理", color = t.muted2, fontSize = 11.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Text("版本 v${BuildConfig.VERSION_NAME}", color = t.muted, fontSize = 11.5.sp)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            GroupCard {
+                SettingRow(Icons.Rounded.Info, "项目主页", REPO_URL) {
+                    runCatching {
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPO_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                }
+                RowDivider()
+                SettingRow(Icons.Rounded.Info, "问题反馈", "GitHub Issues", chevron = false) {
                     runCatching {
                         ctx.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mdjbn/video-sorter"))
+                            Intent(Intent.ACTION_VIEW, Uri.parse("$REPO_URL/issues"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
                     }
                 }
-                .padding(vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Rounded.Info, null, tint = t.accent, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("github.com/mdjbn/video-sorter", fontSize = 12.sp, color = t.accent)
+                RowDivider()
+                SettingRow(Icons.Rounded.Info, "开源许可", "MIT License", chevron = false)
+            }
+            Spacer(Modifier.height(24.dp))
         }
-        Spacer(Modifier.height(6.dp))
-        Text("默认账号 admin / admin1234 · 请部署后尽快修改", fontSize = 10.5.sp, color = t.muted2)
-        Spacer(Modifier.height(14.dp))
     }
 }
+
+private fun fmtStampOf(ms: Long): String = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date(ms))
+
+@Composable
+private fun t2(): Color = tokens().muted2

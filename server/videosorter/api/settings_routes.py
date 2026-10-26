@@ -24,6 +24,9 @@ class SettingsIn(BaseModel):
     transcode_preset: str | None = None
     thumb_position: float | None = None
     scan_workers: int | None = None
+    upload_dir: str | None = None
+    discovery: bool | None = None
+    discovery_port: int | None = None
 
 
 @router.get("/settings")

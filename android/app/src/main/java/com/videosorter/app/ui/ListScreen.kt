@@ -5,7 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -235,25 +236,6 @@ fun ListScreen(
                         v = v,
                         thumb = api.thumbUrl(v),
                         onClick = { onOpen(v.id) },
-                        onLongClick = {
-                            sheets.open(v.name, "时长 ${fmtDuration(v.duration)} · ${sizeText(v.size)}") {
-                                SheetActionRow(
-                                    Icons.Rounded.ChevronRight,
-                                    if (v.tagId == null) "标记标签" else "更换标签",
-                                ) {
-                                    sheets.close()
-                                    openTagSheet(v)
-                                }
-                                SheetActionRow(Icons.Rounded.Download, "下载到手机") {
-                                    sheets.close()
-                                    onDownload(v)
-                                }
-                                SheetActionRow(Icons.Rounded.Refresh, "删除记录") {
-                                    sheets.close()
-                                    onDelete(v)
-                                }
-                            }
-                        },
                         onTagClick = { openTagSheet(v) },
                     )
                 }
@@ -286,13 +268,11 @@ private fun FilterChipView(label: String, on: Boolean, dot: Color? = null, onCli
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun VideoRow(
     v: Video,
     thumb: String,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
     onTagClick: () -> Unit,
 ) {
     val t = tokens()
@@ -304,7 +284,7 @@ private fun VideoRow(
             .clip(shape)
             .background(Brush.linearGradient(listOf(t.ink(0.055f), t.ink(0.022f))))
             .border(1.dp, t.line, shape)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .clickable(onClick = onClick)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),

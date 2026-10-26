@@ -144,7 +144,26 @@ class Api(baseUrl: String, var token: String? = null) {
     // 服务端是 POST /api/scan
     suspend fun scan(): String = sendJson<ScanOut>("/api/scan", "POST", "{}").taskId
 
-    // ---------- 服务器 / 账号 / 标签管理 / 播放历史 / 缓存（设置页二级面板） ----------
+    // ---------- 源文件夹 / 上传目录 / 单条历史 ----------
+
+    suspend fun sources(): List<Source> = getJson<SourceList>("/api/sources").sources
+
+    suspend fun addSource(path: String): Source =
+        sendJson<SourceOut>("/api/sources", "POST", """{"path":${json.encodeToString(path)}}""").source
+
+    suspend fun removeSource(id: Int) {
+        sendJson<OkOut>("/api/sources/$id", "DELETE", "{}")
+    }
+
+    suspend fun setUploadDir(path: String) {
+        sendJson<OkOut>("/api/settings", "PUT", """{"upload_dir":${json.encodeToString(path)}}""")
+    }
+
+    suspend fun deleteHistory(videoId: Int) {
+        sendJson<OkOut>("/api/history/$videoId", "DELETE", "{}")
+    }
+
+    // ---------- 服务器 / 账号 / 标签管理 / 播放历史 / 缓存（设置页二级页面） ----------
 
     suspend fun serverInfo(): ServerInfo = getJson("/api/info")
 

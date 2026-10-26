@@ -182,3 +182,17 @@ data class MessageOut(val ok: Boolean = true, val message: String = "")
 
 @Serializable
 data class TagOut(val ok: Boolean = true, val tag: Tag)
+
+@Serializable
+data class Source(
+    val id: Int = 0,
+    val path: String = "",
+    val count: Int = 0,
+    val exists: Boolean = true,
+)
+
+@Serializable
+data class SourceList(val sources: List<Source> = emptyList())
+
+@Serializable
+data class SourceOut(val ok: Boolean = true, val source: Source = Source())

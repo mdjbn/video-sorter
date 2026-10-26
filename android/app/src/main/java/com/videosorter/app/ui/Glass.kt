@@ -36,9 +36,11 @@ import androidx.compose.material.icons.rounded.DriveFileMove
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.ViewList
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +56,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -64,6 +69,7 @@ import kotlin.math.roundToInt
 /** 底部弹层：全局唯一一份，由 MainScreen 挂载，任何页面调用 open() 即可 */
 class SheetState {
     var visible by mutableStateOf(false)
+    var openedAt = 0L
         private set
     var title by mutableStateOf("")
         private set
@@ -76,6 +82,7 @@ class SheetState {
         this.title = title
         this.subtitle = subtitle
         this.body = body
+        openedAt = System.currentTimeMillis()
         visible = true
     }
 
@@ -156,10 +163,13 @@ fun SheetHost(state: SheetState) {
             Modifier
                 .fillMaxSize()
                 .background(Color(0x8C04060A))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { state.close() },
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        // 长按弹出后的抬手不算「点遮罩」：打开 1.5s 内的按下忽略；之后按遮罩才关闭
+                        if (System.currentTimeMillis() - state.openedAt > 1500) state.close()
+                    }
+                },
             contentAlignment = Alignment.BottomCenter,
         ) {
             AnimatedVisibility(
@@ -193,7 +203,24 @@ fun SheetHost(state: SheetState) {
                             .align(Alignment.CenterHorizontally)
                     )
                     if (state.title.isNotEmpty()) {
-                        Text(state.title, color = t.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                state.title,
+                                color = t.text,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = "关闭",
+                                tint = t.muted,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .clickable { state.close() },
+                            )
+                        }
                     }
                     state.subtitle?.let {
                         Spacer(Modifier.height(4.dp))
@@ -418,8 +445,7 @@ fun LiquidTabBar(
                 .shadow(20.dp, shape)
                 .clip(shape)
                 .background(t.glass)
-                .border(1.dp, t.ink(0.14f), shape)
-                .padding(horizontal = 6.dp),
+                .border(1.dp, t.ink(0.14f), shape),
         ) {
             // 顶部液态高光
             Box(
@@ -431,7 +457,8 @@ fun LiquidTabBar(
                         )
                     )
             )
-            // 指示块
+            // 指示块（左右各留 6dp，但高光覆盖整条，避免两端出现割裂）
+            Box(Modifier.matchParentSize().padding(horizontal = 6.dp)) {
             Box(
                 Modifier
                     .offset { IntOffset((animatedX * 1f).dp.roundToPx(), 0) }
@@ -442,6 +469,7 @@ fun LiquidTabBar(
                     .background(t.ink(0.14f))
                     .border(1.dp, t.ink(0.22f), RoundedCornerShape(16.dp))
             )
+            }
             Row(Modifier.matchParentSize(), verticalAlignment = Alignment.CenterVertically) {
                 TABS.forEachIndexed { i, spec ->
                     val on = i == current

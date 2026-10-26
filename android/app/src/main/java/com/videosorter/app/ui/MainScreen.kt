@@ -1,5 +1,6 @@
 package com.videosorter.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -29,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.ApiException
 import com.videosorter.app.data.Counts
-import com.videosorter.app.data.Downloads
+import com.videosorter.app.data.Transfers
 import com.videosorter.app.data.Session
 import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
@@ -48,6 +49,11 @@ fun MainScreen(
 ) {
     var tab by remember { mutableIntStateOf(0) }
     var transferOpen by remember { mutableStateOf(false) }
+
+    // 系统返回手势：传输页 → 回到浏览页；其它 tab → 回到播放页；播放页才退出 App
+    BackHandler(enabled = transferOpen || tab != 0) {
+        if (transferOpen) transferOpen = false else tab = 0
+    }
     var videos by remember { mutableStateOf<List<Video>>(emptyList()) }
     var counts by remember { mutableStateOf(Counts()) }
     var tags by remember { mutableStateOf<List<Tag>>(emptyList()) }
@@ -104,6 +110,47 @@ fun MainScreen(
         }
     }
 
+
+    fun downloadVideo(v: Video) {
+        scope.launch {
+            val key = TransferHub.start(v.name, "down")
+            try {
+                val where = Transfers.download(ctx, api, v, downloadTree(ctx)) { p ->
+                    TransferHub.progress(key, p)
+                }
+                com.videosorter.app.data.TransferStore.add(
+                    ctx,
+                    com.videosorter.app.data.TransferItem(
+                        name = v.name,
+                        time = System.currentTimeMillis(),
+                        bytes = v.size,
+                        ok = true,
+                        kind = "down",
+                        where = where,
+                    ),
+                )
+                toast("已下载：$where")
+            } catch (e: Throwable) {
+                val msg = e.message ?: "下载失败"
+                TransferHub.fail(key, msg)
+                com.videosorter.app.data.TransferStore.add(
+                    ctx,
+                    com.videosorter.app.data.TransferItem(
+                        name = v.name,
+                        time = System.currentTimeMillis(),
+                        bytes = v.size,
+                        ok = false,
+                        kind = "down",
+                        msg = msg,
+                    ),
+                )
+                toast("下载失败：$msg", err = true)
+            } finally {
+                TransferHub.done(key)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) { reload() }
 
     Box(Modifier.fillMaxSize()) {
@@ -143,6 +190,7 @@ fun MainScreen(
                     sheets = sheets,
                     onOpenList = { tab = 1 },
                     onRefresh = { scope.launch { reload(silent = true) } },
+                    onDownload = ::downloadVideo,
                 )
 
                 1 -> ListScreen(
@@ -160,11 +208,7 @@ fun MainScreen(
                     },
                     onTag = { videoId, tagId -> markTag(videoId, tagId) },
                     onRefresh = { scope.launch { reload() } },
-                    onDownload = { v ->
-                        runCatching { Downloads.save(ctx, api, v) }
-                            .onSuccess { toast("开始下载：${v.name}") }
-                            .onFailure { toast("下载失败：${it.message}", err = true) }
-                    },
+                    onDownload = ::downloadVideo,
                     onDelete = { v ->
                         scope.launch {
                             runCatching { api.deleteVideo(v.id, false) }
@@ -203,9 +247,10 @@ fun MainScreen(
                         if (idx >= 0) {
                             playerIndex = idx
                             tab = 0
+                        } else {
+                            toast("这条记录的视频已不在库里")
                         }
                     },
-                    sheets = sheets,
                 )
 
                 else -> TransferScreen(
@@ -227,7 +272,7 @@ fun MainScreen(
                     transferOpen = false
                     tab = it
                 },
-                visible = !transferOpen,
+                visible = !transferOpen && !sheets.visible,
             )
         }
 

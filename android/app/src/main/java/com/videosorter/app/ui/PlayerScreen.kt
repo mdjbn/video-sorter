@@ -84,7 +84,6 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.Counts
-import com.videosorter.app.data.Downloads
 import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
 import kotlinx.coroutines.delay
@@ -102,6 +101,7 @@ private data class HudSpec(val text: String, val label: String, val pct: Float)
 @Composable
 fun PlayerScreen(
     api: Api,
+    onDownload: (Video) -> Unit = {},
     videos: List<Video>,
     tags: List<Tag>,
     counts: Counts,
@@ -308,11 +308,9 @@ fun PlayerScreen(
             }
             SheetActionRow(Icons.Rounded.Download, "下载到手机") {
                 sheets.close()
-                runCatching { Downloads.save(ctx, api, v) }
-                    .onSuccess { toast("开始下载：${v.name}") }
-                    .onFailure { toast("下载失败：${it.message}") }
+                onDownload(v)
             }
-            SheetActionRow(Icons.Rounded.Speed, "倍速 · 当前 ${if (speed == 1f) "1×" else "%.2f×".format(speed).trimEnd('0').trimEnd('.')}×") {
+            SheetActionRow(Icons.Rounded.Speed, "倍速 · 当前 ${if (speed == 1f) "1.0" else "%.2f".format(speed).trimEnd('0').trimEnd('.')}×") {
                 speed = when (speed) {
                     1f -> 1.25f
                     1.25f -> 1.5f
@@ -517,12 +515,6 @@ fun PlayerScreen(
                 Text("${counts.tagged}", color = t.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text("/ ${counts.all}", color = t.ink(0.5f), fontSize = 11.sp)
             }
-            Spacer(Modifier.weight(1f))
-            GlassIconButton(
-                icon = Icons.Rounded.MoreHoriz,
-                onClick = { current?.let { openMore(it) } },
-                contentDescription = "更多",
-            )
         }
 
         // ---------- 中央播放键 ----------
@@ -640,18 +632,30 @@ fun PlayerScreen(
                 )
                 Spacer(Modifier.height(5.dp))
                 val folder = v.path.substringBeforeLast('/', "").substringAfterLast('/')
-                Text(
-                    listOfNotNull(
-                        folder.takeIf { it.isNotEmpty() },
-                        fmtDuration(duration.takeIf { it > 0 } ?: v.duration),
-                        sizeText(v.size),
-                        if (v.isOrganized) "已整理" else if (v.tagId != null) "待整理" else "未标记",
-                    ).joinToString(" · "),
-                    color = t.ink(0.55f),
-                    fontSize = 10.5.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        listOfNotNull(
+                            folder.takeIf { it.isNotEmpty() },
+                            fmtDuration(duration.takeIf { it > 0 } ?: v.duration),
+                            sizeText(v.size),
+                            if (v.isOrganized) "已整理" else if (v.tagId != null) "待整理" else "未标记",
+                        ).joinToString(" · "),
+                        color = t.ink(0.55f),
+                        fontSize = 10.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    // 「更多」放在信息区右侧（原在右上角，按设计反馈下移）
+                    GlassIconButton(
+                        icon = Icons.Rounded.MoreHoriz,
+                        onClick = { openMore(v) },
+                        size = 30,
+                        iconSize = 16,
+                        contentDescription = "更多",
+                    )
+                }
 
                 Spacer(Modifier.height(12.dp))
                 // 标签胶囊 + 新建
