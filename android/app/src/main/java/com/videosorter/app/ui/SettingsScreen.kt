@@ -341,7 +341,7 @@ private fun ThemeChip(text: String, on: Boolean, modifier: Modifier = Modifier, 
         modifier
             .height(34.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (on) t.accentDim else t.glass.copy(alpha = 0.26f))
+            .background(if (on) t.accentDim else t.ink(0.06f))
             .border(1.dp, if (on) t.accent.copy(alpha = 0.5f) else t.line, RoundedCornerShape(10.dp))
             .clickable { onClick() },
         contentAlignment = Alignment.Center
