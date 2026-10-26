@@ -69,6 +69,6 @@ jobs:
             artifacts/videosorter-apk/*.apk
             artifacts/windows-desktop/**/*.exe
             artifacts/windows-desktop/**/*.msi
-            artifacts/windows-desktop/*.zip
+            artifacts/windows-desktop/**/*.zip
             artifacts/videosorter-fpk/*.fpk
           generate_release_notes: true
