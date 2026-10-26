@@ -64,7 +64,7 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 
 ## 四、接下来还需要什么
 
-1. 把仓库推到 GitHub，打一个 `v0.1.0` tag，让 `release.yml` 真跑一次，产出 APK + NSIS/MSI + 绿色版 zip。
+1. 把仓库推到 GitHub，打一个 `v1.0.0` tag，让 `release.yml` 真跑一次，产出 APK + NSIS/MSI + 绿色版 zip。
 2. 用手机 `adb install` 装一次，验证局域网发现、上下滑播放、上传下载（真机上的 Media3 行为）。
 3. 在目标主机（fnOS）上用 systemd 常驻，把 `--data-dir` 指到大盘。
 

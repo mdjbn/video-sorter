@@ -93,7 +93,7 @@ python3 -c "import socket;s=socket.socket(2,2);s.settimeout(2);s.sendto(b'VS_DIS
 ```
 
 App 登录页点「扫描局域网」→ 向 `255.255.255.255:38080` 与各网卡广播地址发包 → 服务器回
-`{"app":"VideoSorter","version":"0.1.0","name":"VideoSorter @ host","port":8080,"ip":"192.168.1.8","tls":false}`
+`{"app":"VideoSorter","version":"1.0.0","name":"VideoSorter @ host","port":8080,"ip":"192.168.1.8","tls":false}`
 → App 列出服务器，点一下自动填地址。不想要这个端口就在 config.json 里设 `"discovery": false`。
 
 ## 7. 数据与备份

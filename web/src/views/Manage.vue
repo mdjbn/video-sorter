@@ -692,7 +692,7 @@ onMounted(async () => {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '0.1.0' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.0' }}</span></div>
                 <div class="kv"><span class="k">网页端</span><span class="v">Vue 3 + Vite + TypeScript</span></div>
                 <div class="kv"><span class="k">服务端</span><span class="v">Python + FastAPI + SQLite</span></div>
                 <div class="kv"><span class="k">手机端</span><span class="v">Kotlin + Compose + Media3</span></div>
@@ -714,7 +714,7 @@ onMounted(async () => {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
-              <div class="log-item"><span class="dt">0.1.0</span><span>首个版本：扫描源文件夹、播放器打标签、按标签整理并支持撤销、整理预览、播放历史。</span></div>
+              <div class="log-item"><span class="dt">1.0.0</span><span>首个公开版本：扫描源文件夹、播放器打标签、按标签整理并支持撤销、整理预览、播放历史、三档主题；安卓 App、Windows 桌面端、fnOS 应用包。</span></div>
             </div>
           </div>
         </template>
