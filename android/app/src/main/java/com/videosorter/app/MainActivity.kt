@@ -1,6 +1,8 @@
 package com.videosorter.app
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -12,7 +14,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import coil.Coil
 import coil.ImageLoader
+import androidx.compose.runtime.DisposableEffect
 import com.videosorter.app.data.Api
+import com.videosorter.app.data.AuthEvents
 import com.videosorter.app.data.Session
 import com.videosorter.app.ui.LoginScreen
 import com.videosorter.app.ui.MainScreen
@@ -64,6 +68,18 @@ private fun AppRoot() {
             if (token.isNotBlank()) api = Api(saved, token)
         }
         true
+    }
+
+    // 任意接口 401 → 清令牌回登录页（在后台线程触发，必须切回主线程改 Compose 状态）
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    DisposableEffect(Unit) {
+        AuthEvents.onUnauthorized = {
+            mainHandler.post {
+                session.current.let { session.clearToken(it) }
+                api = null
+            }
+        }
+        onDispose { AuthEvents.onUnauthorized = null }
     }
 
     VideoSorterTheme(mode = themeMode) {

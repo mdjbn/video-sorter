@@ -21,6 +21,16 @@ import java.util.concurrent.TimeUnit
 class ApiException(val code: Int, message: String) : IOException(message)
 
 /**
+ * 全局 401 通知：任何接口（视频 / 标签 / 设置 / 缓存 …）返回 401 时，
+ * 说明登录态已经失效（改密码、被踢下线、token 过期、退出所有设备）。
+ * UI 注册回调后统一回到登录页，避免「设置页里还在转圈、却不回登录」。
+ */
+object AuthEvents {
+    @Volatile
+    var onUnauthorized: (() -> Unit)? = null
+}
+
+/**
  * 极简 REST 客户端：OkHttp + kotlinx.serialization。
  * 认证用 Authorization: Bearer，未登录时服务端返回 401，由 UI 引导回登录页。
  */
@@ -59,6 +69,7 @@ class Api(baseUrl: String, var token: String? = null) {
                     val obj = json.parseToJsonElement(text).jsonObject
                     (obj["detail"] ?: obj["error"])?.jsonPrimitive?.content
                 }.getOrNull() ?: "请求失败（${resp.code}）"
+                if (resp.code == 401) runCatching { AuthEvents.onUnauthorized?.invoke() }
                 throw ApiException(resp.code, msg)
             }
             text
