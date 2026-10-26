@@ -170,7 +170,14 @@ class HlsJob:
         self.error = ""
         self.dir = cfg.hls_dir / str(video_id)
         self.playlist = self.dir / "index.m3u8"
-        self.copy_mode = (vcodec or "").lower() == "h264" and (acodec or "").lower() in {"aac", ""}
+        # -c copy 只对「mp4/mkv 家族 + h264 + aac/无音轨」安全；.avi/.wmv 这类老容器
+        # 直接 copy 到 MPEG-TS 常被 ffmpeg 拒掉（真机调试时 镜头语言笔记.avi 就挂了），宁可转码。
+        copy_exts = {".mp4", ".m4v", ".mov", ".mkv"}
+        self.copy_mode = (
+            (vcodec or "").lower() == "h264"
+            and (acodec or "").lower() in {"aac", ""}
+            and src.suffix.lower() in copy_exts
+        )
 
     @property
     def ready(self) -> bool:
@@ -198,48 +205,74 @@ class HlsJob:
             self.playlist.unlink(missing_ok=True)
             (self.dir / ".done").unlink(missing_ok=True)
             ffmpeg, _ = self.tools.require()
-            cmd = [ffmpeg, "-y", "-v", "error", "-i", str(self.src)]
-            if self.copy_mode:
-                cmd += ["-c", "copy"]
-            else:
-                cmd += [
-                    "-c:v", "libx264", "-preset", str(self.cfg.get("transcode_preset", "veryfast")),
-                    "-crf", "23", "-pix_fmt", "yuv420p",
-                    "-vf", "scale='min(1920,iw)':-2",
-                    "-c:a", "aac", "-b:a", "128k", "-ac", "2",
-                ]
-            cmd += [
-                "-hls_time", "4", "-hls_playlist_type", "event",
-                "-hls_segment_filename", str(self.dir / "seg%05d.ts"),
-                "-progress", "pipe:1", "-nostats", str(self.playlist),
-            ]
             self.status = "running"
-            try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                        text=True, bufsize=1)
-            except (OSError, subprocess.SubprocessError) as e:
-                self.status = "error"
-                self.error = str(e)
-                self._progress(1.0, f"转码失败：{e}")
-                return
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                line = line.strip()
-                if line.startswith("out_time_ms=") and self.duration > 0:
-                    try:
-                        sec = int(line.split("=", 1)[1]) / 1_000_000
-                    except ValueError:
-                        continue
-                    self._progress(sec / self.duration, "转码中")
-            proc.wait()
-            if proc.returncode == 0 and self.ready:
-                self.status = "done"
-                (self.dir / ".done").write_text(str(time.time()), encoding="utf-8")
-                self._progress(1.0, "转码完成")
-            else:
-                self.status = "error"
-                self.error = f"ffmpeg 退出码 {proc.returncode}"
-                self._progress(1.0, self.error)
+            # copy 失败时自动回退到完整转码：容器/编码稍有不对劲，copy 就会整段失败，
+            # 而用户只看到「转码失败」——多试一次能救回绝大多数文件。
+            attempts = [True, False] if self.copy_mode else [False]
+            last_rc, last_err = 0, ""
+            for copy in attempts:
+                for f in self.dir.glob("seg*.ts"):
+                    f.unlink(missing_ok=True)
+                self.playlist.unlink(missing_ok=True)
+                last_rc, last_err = self._run_ffmpeg(ffmpeg, copy)
+                if last_rc == 0 and self.ready and self.playlist.stat().st_size > 0:
+                    self.status = "done"
+                    (self.dir / ".done").write_text(str(time.time()), encoding="utf-8")
+                    self._progress(1.0, "转码完成")
+                    return
+            # 全部尝试失败：清掉半截产物，别让播放器拿到坏 playlist
+            for f in self.dir.glob("seg*.ts"):
+                f.unlink(missing_ok=True)
+            self.playlist.unlink(missing_ok=True)
+            self.status = "error"
+            tail = last_err.strip().splitlines()[-1] if last_err.strip() else ""
+            self.error = f"转码失败（ffmpeg 退出码 {last_rc}）" + (f"：{tail}" if tail else "")
+            self._progress(1.0, self.error)
+
+    def _run_ffmpeg(self, ffmpeg: str, copy: bool) -> tuple[int, str]:
+        cmd = [ffmpeg, "-y", "-v", "error", "-i", str(self.src)]
+        if copy:
+            cmd += ["-c", "copy"]
+        else:
+            cmd += [
+                "-c:v", "libx264", "-preset", str(self.cfg.get("transcode_preset", "veryfast")),
+                "-crf", "23", "-pix_fmt", "yuv420p",
+                "-vf", "scale='min(1920,iw)':-2",
+                "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+            ]
+        cmd += [
+            "-hls_time", "4", "-hls_playlist_type", "event",
+            "-hls_segment_filename", str(self.dir / "seg%05d.ts"),
+            "-progress", "pipe:1", "-nostats", str(self.playlist),
+        ]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, bufsize=1)
+        except (OSError, subprocess.SubprocessError) as e:
+            return 1, str(e)
+        err_lines: list[str] = []
+
+        def _drain() -> None:
+            assert proc.stderr is not None
+            for line in proc.stderr:
+                err_lines.append(line.rstrip())
+                if len(err_lines) > 60:
+                    del err_lines[0]
+
+        th = threading.Thread(target=_drain, daemon=True)
+        th.start()
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.strip()
+            if line.startswith("out_time_ms=") and self.duration > 0:
+                try:
+                    sec = int(line.split("=", 1)[1]) / 1_000_000
+                except ValueError:
+                    continue
+                self._progress(sec / self.duration, "转码中")
+        proc.wait()
+        th.join(timeout=2)
+        return proc.returncode, "\n".join(err_lines[-6:])
 
 
 class HlsManager:
