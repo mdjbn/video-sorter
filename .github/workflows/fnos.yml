@@ -51,8 +51,4 @@ jobs:
           path: dist/fnos/*.fpk
           if-no-files-found: error
 
-      - name: 附加到 Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/fnos/*.fpk
+# 附件统一由 release.yml 的 publish job 挂（避免与它重复，也避免 token 权限问题）
