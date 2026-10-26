@@ -39,8 +39,8 @@ done
 curl -sf "http://127.0.0.1:$PORT/api/health" >/dev/null || { echo "服务没起来，见 /tmp/vs-e2e-server.log"; exit 1; }
 
 echo "→ 跑浏览器 E2E"
-NODE_PATH="$NODE_PATH_MOD" VS_BASE="http://127.0.0.1:$PORT" VS_SRC="$SRC" VS_SHOTS=/tmp \
+NODE_PATH="$NODE_PATH_MOD" VS_BASE="http://127.0.0.1:$PORT" VS_SRC="$SRC" VS_SHOTS="${VS_SHOTS:-/tmp}" \
   node tools/e2e-web.js
 CODE=$?
-echo "→ 截图：/tmp/e2e-player.png /tmp/e2e-manage.png"
+echo "→ 截图：${VS_SHOTS:-/tmp}/e2e-player.png ${VS_SHOTS:-/tmp}/e2e-manage.png"
 exit $CODE

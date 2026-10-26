@@ -1,5 +1,10 @@
 # 视频整理 · VideoSorter
 
+[![backend](https://github.com/mdjbn/video-sorter/actions/workflows/backend.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/backend.yml)
+[![E2E](https://github.com/mdjbn/video-sorter/actions/workflows/e2e.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/e2e.yml)
+[![release](https://img.shields.io/github/v/release/mdjbn/video-sorter)](https://github.com/mdjbn/video-sorter/releases)
+[![license](https://img.shields.io/github/license/mdjbn/video-sorter)](LICENSE)
+
 自托管的「扫描 → 观看打标签 → 按标签自动归档」视频整理工具。
 一套 Python 后端同时给网页端、手机端、Windows 桌面端用；数据全部在本地，不依赖任何云服务。
 
@@ -205,3 +210,22 @@ bash tools/e2e-web.sh
 - 单人使用：一个账号 + PBKDF2 密码哈希，登录态是 HttpOnly Cookie（7 天），所有 `/api/*`（除登录/健康检查）都要求登录。
 - 默认监听 `0.0.0.0`，请只在可信局域网使用；公网部署请放到反向代理 + HTTPS 后面。
 - 视频文件只通过后端流式读取，不暴露任意路径；目录选择器的 `/api/fs/list` 仅返回目录名。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 mdjbn
+
+选 MIT 的原因：这个项目是「自己 NAS 上用的工具」，MIT 最短、最容易理解，
+别人想拿去改、二次分发、甚至塞进自己的商业产品都不需要额外沟通；
+同时保留版权声明与免责条款，出问题时责任边界清楚。
+
+> 如果你更在意「别人把它改成收费的托管服务但不回馈代码」，可以把 `LICENSE` 换成
+> [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html)（自托管类项目常见选择）。
+> 换协议只改这一个文件 + README 这一段即可，代码本身不用动。
+
+## 致谢
+
+- [FastAPI](https://fastapi.tiangolo.com/)、[uvicorn](https://www.uvicorn.org/)、[SQLite](https://sqlite.org/)
+- [Vue 3](https://vuejs.org/)、[Vite](https://vitejs.dev/)、[hls.js](https://github.com/video-dev/hls.js)
+- [Media3 / ExoPlayer](https://developer.android.com/media/media3)、[Jetpack Compose](https://developer.android.com/jetpack/compose)
+- [Tauri](https://tauri.app/)、[PyInstaller](https://pyinstaller.org/)、[ffmpeg](https://ffmpeg.org/)

@@ -2,8 +2,7 @@ name: windows-desktop
 
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*"]
+  workflow_call:
 
 jobs:
   tauri:

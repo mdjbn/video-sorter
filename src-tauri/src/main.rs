@@ -39,11 +39,24 @@ fn spawn_server() -> Option<Child> {
     }
     let mut cmd = Command::new(&exe);
     cmd.args(["--host", "127.0.0.1", "--port", "8080"]);
-    // 网页端默认就在 sidecar 旁边（webdist/），显式传过去最稳
+    // 网页端可能和 sidecar 同级，也可能被 Tauri resources 打平到上一层，
+    // 逐个候选找，找到就显式传 --web-dir（比让后端自己猜稳）。
+    let mut webdist_cands: Vec<std::path::PathBuf> = Vec::new();
     if let Some(dir) = exe.parent() {
-        let webdist = dir.join("webdist");
-        if webdist.is_dir() {
-            cmd.arg("--web-dir").arg(&webdist);
+        webdist_cands.push(dir.join("webdist"));
+        webdist_cands.push(dir.join("..").join("webdist"));
+    }
+    if let Ok(app_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = app_exe.parent() {
+            webdist_cands.push(exe_dir.join("webdist"));
+            webdist_cands.push(exe_dir.join("resources").join("webdist"));
+            webdist_cands.push(exe_dir.join("resources").join("binaries").join("webdist"));
+        }
+    }
+    for cand in webdist_cands {
+        if cand.is_dir() {
+            cmd.arg("--web-dir").arg(&cand);
+            break;
         }
     }
     cmd.spawn()
