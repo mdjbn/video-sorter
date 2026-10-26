@@ -13,6 +13,11 @@
 源文件夹里的视频  →  播放页边看边打标签  →  点「整理」 →  文件移动到「标签文件夹」
 ```
 
+<a href="docs/screenshots/player-dark.png"><img src="docs/screenshots/player-dark.png" alt="网页播放页：左边看视频，右边播放列表 / 整理两个页签，底部打标签" width="900"></a>
+
+> 手机端是原生 Kotlin + Compose App（上下滑切视频，交互照抖音那种感觉）；
+> 交互与视觉稿在 [`design/mobile/app.html`](design/mobile/app.html)（可直接用浏览器打开看）。
+
 ## 下载 / 安装
 
 安装包都在 [Releases](https://github.com/mdjbn/video-sorter/releases) 里，按你的设备挑：
