@@ -27,6 +27,8 @@ def preview(body: PlanIn, user: dict[str, Any] = Depends(require_user)) -> dict[
 @router.post("/execute")
 def execute(body: PlanIn, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
+    if body.tag_ids is not None and len(body.tag_ids) == 0:
+        raise HTTPException(400, "没有选中任何标签")
     plan = organizer.build_plan(st.db, st.cfg, body.tag_ids, body.video_ids)
     if not plan["items"]:
         raise HTTPException(400, "没有需要整理的视频（需要先打标签）")

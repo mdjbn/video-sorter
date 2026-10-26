@@ -27,18 +27,18 @@ class OrganizeError(RuntimeError):
 # ---------- 目标目录 ----------
 def resolve_tag_dir(db: Database, cfg: Config, tag: dict[str, Any],
                     video_path: str | None = None) -> Path | None:
-    """标签目标目录优先级：标签自定义 > 全局根目录/标签名 > 视频所在源目录/标签名。"""
+    """标签目标目录优先级：标签自定义 > 全局根目录/标签名 > 首个启用源目录/标签名 > 视频所在目录/标签名。"""
     custom = (tag.get("dir_path") or "").strip()
     if custom:
         return Path(custom).expanduser()
     root = (cfg.get("root_dir") or "").strip()
     if root:
         return Path(root).expanduser() / str(tag["name"])
-    if video_path:
-        return Path(video_path).parent / str(tag["name"])
     row = db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1")
     if row:
         return Path(row["path"]) / str(tag["name"])
+    if video_path:
+        return Path(video_path).parent / str(tag["name"])
     return None
 
 

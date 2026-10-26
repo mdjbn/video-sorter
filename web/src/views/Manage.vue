@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import { api, fmtDur, fmtSize, fmtTime, waitTask, type HistoryItem, type PlanItem, type Source, type Stats, type Tag, type Video } from '../api'
@@ -323,11 +323,21 @@ async function doLogout() {
 function cycleTheme() { setThemeMode(nextThemeMode()) }
 const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeMode.value]}`)
 
+function onKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  // 有弹层时先让弹层处理，这里不跳转
+  if (document.querySelector('.modal-mask.show')) return
+  router.push('/')
+}
+
 onMounted(async () => {
   acc.username = username.value
+  window.addEventListener('keydown', onKeydown)
   await Promise.all([loadTags(), loadStats(), loadSources(), loadRecords()])
   counts.lib = stats.value?.total || 0
 })
+
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
@@ -695,7 +705,7 @@ onMounted(async () => {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.1' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.3' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -720,6 +730,7 @@ onMounted(async () => {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.0.3</span><span>修复 .avi/.wmv 老容器转码失败（copy 失败自动回退完整转码）；静态资源不再被浏览器缓存，升级后立即生效；安卓端真机联调修 12 处。</span></div>
               <div class="log-item"><span class="dt">1.0.1</span><span>关于页展示项目仓库与问题反馈入口；打包信息里的开发者/发布者改为项目作者。</span></div>
               <div class="log-item"><span class="dt">1.0.0</span><span>首个公开版本：扫描源文件夹、播放器打标签、按标签整理并支持撤销、整理预览、播放历史、三档主题；安卓 App、Windows 桌面端、fnOS 应用包。</span></div>
             </div>

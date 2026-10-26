@@ -96,8 +96,15 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                 tasks.step(task_id, f"跳过（无法读取）：{p.name}")
                 continue
             if not item["need_probe"]:
-                stats["skipped"] += 1
-                tasks.step(task_id, f"未变化：{p.name}")
+                old_row = item["old"]
+                if old_row is not None and str(old_row["status"]) == "missing":
+                    # 文件重新出现但大小/mtime 未变：不需要重新探测，但状态要恢复
+                    db.execute("UPDATE videos SET status='idle', scanned_at=? WHERE path=?", (now_iso(), spath))
+                    stats["updated"] += 1
+                    tasks.step(task_id, f"恢复：{p.name}")
+                else:
+                    stats["skipped"] += 1
+                    tasks.step(task_id, f"未变化：{p.name}")
                 continue
             thumb_name = ""
             try:

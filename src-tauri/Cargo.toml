@@ -1,6 +1,6 @@
 [package]
 name = "video-sorter-desktop"
-version = "1.0.2"
+version = "1.0.3"
 description = "VideoSorter Windows desktop shell (Tauri 2 + embedded Python server)"
 edition = "2021"
 

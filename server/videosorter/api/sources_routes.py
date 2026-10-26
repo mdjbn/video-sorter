@@ -53,9 +53,8 @@ def add_source(body: SourceIn, user: dict[str, Any] = Depends(require_user)) -> 
     if st.db.query_one("SELECT id FROM sources WHERE path=?", (path,)):
         raise HTTPException(status_code=400, detail="这个目录已经添加过了")
     sid = st.db.execute("INSERT INTO sources (path, enabled, created_at) VALUES (?,1,?)", (path, now_iso()))
-    # 顺手补齐还没设置目标目录的标签
-    for t in st.db.query("SELECT * FROM tags WHERE dir_path='' OR dir_path IS NULL"):
-        st.db.execute("UPDATE tags SET dir_path=? WHERE id=?", (str(p / t["name"]), t["id"]))
+    # 不在这里把源目录硬写进 tags.dir_path：标签目录由 resolve_tag_dir 动态解析
+    # （标签自定义 > 全局根目录 > 首个源目录 > 视频所在目录），改 root_dir 或换源目录才会生效。
     return {"ok": True, "source": {"id": sid, "path": path}}
 
 
