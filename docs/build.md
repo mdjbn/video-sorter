@@ -250,3 +250,31 @@ curl -s http://127.0.0.1:8612/api/health
 Tauri 壳里的 `sidecar_path()` 会依次找
 `<exe>/binaries/videosorter-server.exe`、`<exe>/binaries/videosorter-server/…`、`<exe>/…`、
 `<exe>/resources/binaries/…`，启动时若 sidecar 同级有 `webdist/` 会显式传 `--web-dir`，避免代理/路径两套布局差异。
+
+## 8. 只换了网页端时怎么做热更新（不重装 fpk）
+
+fnOS 上安装的应用目录归 `videosorter` 用户所有，普通账号不能直接写。可以直接替换 `webdist` 再重启应用，**不动数据库**：
+
+```bash
+FNC='node /vol1/@appshare/Harness/.dsh/profiles/web/node_modules/@fnnas-labs/fnos-cli/skill/../npm/run.cjs'
+CONN="--host 192.168.5.100 --port 5666 --scheme http --allow-insecure-http --profile fnos"
+WD=/vol1/@appcenter/videosorter/webdist
+
+# 1) 备份现有静态资源
+cp -a "$WD" /tmp/vs-webdist-backup-$(date +%H%M%S)
+
+# 2) 临时把目录归属改成当前操作者（uid 825 = Harness）
+$FNC $CONN file chown "$WD" --uid 825 --sub --yes
+
+# 3) 替换文件
+cd web && npm run build:only && cd ..
+rm -rf "$WD"/assets "$WD"/index.html
+cp -a web/dist/. "$WD"/
+chmod -R u+rwX,go+rX "$WD"
+
+# 4) 归属改回应用用户（uid 975 = videosorter）
+$FNC $CONN file chown "$WD" --uid 975 --sub --yes
+$FNC $CONN app restart videosorter --yes
+```
+
+注意：热更新只覆盖网页资源，`/api/health` 的 `version` 仍是安装包版本；数据库、标签、整理记录不受影响。升级安装包时仍需走「卸载 → 安装」（或应用中心界面升级）。

@@ -132,6 +132,28 @@ const api = async (p, path, opt = {}) => p.evaluate(async (path, opt) => {
   await sleep(1500);
   await p.screenshot({ path: SHOTS + '/e2e-player.png' });
 
+  // 侧栏底部用户栏在矮窗口下不能被裁掉（回归：曾因 grid 项 min-height 缺失而溢出）
+  await p.goto(B + '/manage', { waitUntil: 'networkidle2' });
+  await sleep(800);
+  for (const h of [700, 560, 480]) {
+    await p.setViewport({ width: 1440, height: h });
+    await sleep(500);
+    const m = await p.evaluate(() => {
+      const el = document.querySelector('.user-row');
+      if (!el) return null;
+      const b = el.getBoundingClientRect();
+      const nav = document.querySelector('.m-nav');
+      return {
+        bottom: Math.round(b.bottom),
+        vh: window.innerHeight,
+        visible: b.top >= -1 && b.bottom <= window.innerHeight + 1,
+        navScrolls: nav ? nav.scrollHeight > nav.clientHeight + 1 || nav.scrollHeight <= nav.clientHeight : false,
+      };
+    });
+    ok(`侧栏用户栏在 ${h}px 高度下完整可见`, !!m && m.visible, JSON.stringify(m));
+  }
+  await p.setViewport({ width: 1440, height: 900 });
+
   const realErrs = errs.filter((e) => !/favicon|Failed to load resource/.test(e));
   ok('无 JS 报错', realErrs.length === 0, realErrs.slice(0, 3).join(' | '));
   console.log('\n== ' + R.filter((r) => !r[0]).length + ' failed / ' + R.length + ' ==');
