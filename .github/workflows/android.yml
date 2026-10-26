@@ -19,13 +19,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install platform 35
+      - name: Install Android platform 35
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          # ubuntu-latest 自带 Android SDK，但默认只有部分 platform；
+          # 不用 android-actions/setup-android（它会去装早已废弃的 "tools" 包而失败）。
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SM="$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1)"
+          echo "ANDROID_HOME=$SDK"
+          echo "sdkmanager=$SM"
+          yes | "$SM" --licenses > /dev/null 2>&1 || true
+          "$SM" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "sdk.dir=$SDK" > android/local.properties
 
       - uses: gradle/actions/setup-gradle@v4
         with:

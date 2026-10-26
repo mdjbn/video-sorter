@@ -1,8 +1,6 @@
 name: fnos-fpk
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
   workflow_call:
 
