@@ -12,6 +12,20 @@
 源文件夹里的视频  →  播放页边看边打标签  →  点「整理」 →  文件移动到「标签文件夹」
 ```
 
+## 下载 / 安装
+
+安装包都在 [Releases](https://github.com/mdjbn/video-sorter/releases) 里，按你的设备挑：
+
+| 你要装的 | 下载文件 | 说明 |
+| --- | --- | --- |
+| fnOS / Linux / Windows 服务器 | `run.sh`（源码运行）或 `videosorter.fpk`（fnOS 应用中心） | 一个后端给三端用；fpk 装完在应用中心点开即可 |
+| Windows 单机使用 | `VideoSorter_*_x64-setup.exe`（NSIS）或 `.msi` | 内嵌 Python 服务与网页端，双击即用 |
+| Windows 免安装 | `VideoSorter-portable.zip` | 解压后双击 `启动.bat` |
+| 安卓手机 | `app-debug.apk` | 自签名 debug 包，需要允许「安装未知应用」 |
+
+> 手机端连接同一台服务器：打开 App →「扫描局域网」或手填 `http://<服务器IP>:8080` → 登录
+> （默认 `admin` / `admin1234`，登录管理里可改）。
+
 ## 功能
 
 - **扫描**：多个源文件夹、递归扫描 20+ 种视频格式，自动用 ffmpeg 抽封面、读时长/分辨率/编码，按 mtime+size 增量更新。
