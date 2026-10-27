@@ -248,6 +248,73 @@ async function doDelVideo() {
 /* ---------------- 标签管理 ---------------- */
 const tagModal = reactive({ show: false, id: 0, name: '', color: '#35d18a', dir: '', saving: false })
 const TAG_COLORS = ['#f4a259', '#ef5b7b', '#4cc9f0', '#9b8cff', '#8d98a8', '#35d18a', '#f2c14e', '#ef7d4f']
+
+/* ---------- 标签行内编辑（不弹卡片） ---------- */
+interface TagDraft { name: string; color: string; dir_path: string }
+const tagDrafts = reactive<Record<number, TagDraft>>({})
+const tagState = reactive<Record<number, 'idle' | 'saving' | 'saved' | 'err'>>({})
+const colorPop = reactive<{ id: number | null }>({ id: null })
+const saveTimers: Record<number, ReturnType<typeof setTimeout>> = {}
+
+function draftOf(t: Tag): TagDraft {
+  if (!tagDrafts[t.id]) {
+    tagDrafts[t.id] = { name: t.name, color: t.color || TAG_COLORS[0], dir_path: t.dir_path || '' }
+  }
+  return tagDrafts[t.id]
+}
+function normalizeHex(v: string): string {
+  let s = (v || '').trim()
+  if (!s) return ''
+  if (!s.startsWith('#')) s = '#' + s
+  if (/^#[0-9a-fA-F]{3}$/.test(s)) s = '#' + s.slice(1).split('').map((c) => c + c).join('')
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : ''
+}
+function queueSave(id: number) {
+  clearTimeout(saveTimers[id])
+  tagState[id] = 'idle'
+  saveTimers[id] = setTimeout(() => void saveTagInline(id), 500)
+}
+async function saveTagInline(id: number) {
+  const d = tagDrafts[id]
+  if (!d) return
+  const name = d.name.trim()
+  if (!name) { tagState[id] = 'err'; return }
+  tagState[id] = 'saving'
+  try {
+    await api.updateTag(id, { name, color: d.color, dir_path: d.dir_path.trim() })
+    tagState[id] = 'saved'
+    await loadTags()
+    setTimeout(() => { if (tagState[id] === 'saved') tagState[id] = 'idle' }, 1600)
+  } catch (e) {
+    tagState[id] = 'err'
+    toast((e as Error).message || '保存失败', true)
+  }
+}
+function toggleColorPop(id: number) { colorPop.id = colorPop.id === id ? null : id }
+function setColor(id: number, c: string) {
+  const t = tags.value.find((x) => x.id === id)
+  if (!t) return
+  draftOf(t).color = c
+  void saveTagInline(id)
+  colorPop.id = null
+}
+function onColorPicker(id: number, e: Event) {
+  const t = tags.value.find((x) => x.id === id)
+  if (!t) return
+  draftOf(t).color = (e.target as HTMLInputElement).value
+  queueSave(id)
+}
+function onHexInput(id: number, e: Event) {
+  const t = tags.value.find((x) => x.id === id)
+  if (!t) return
+  draftOf(t).color = (e.target as HTMLInputElement).value
+  queueSave(id)
+}
+function closeColorPop(e: MouseEvent) {
+  const el = e.target as HTMLElement
+  if (el.closest('.color-pop') || el.closest('.dot-btn')) return
+  colorPop.id = null
+}
 function openTag(t?: Tag) {
   tagModal.id = t?.id || 0
   tagModal.name = t?.name || ''
@@ -408,11 +475,15 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(async () => {
   acc.username = username.value
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('click', closeColorPop)
   await Promise.all([loadTags(), loadStats(), loadSources(), loadRecords()])
   counts.lib = stats.value?.total || 0
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('click', closeColorPop)
+})
 </script>
 
 <template>
@@ -659,13 +730,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <button class="btn primary" @click="openTag()"><Icon name="plus" :size="15" />新建标签</button>
           </div>
           <div class="rows">
-            <div v-for="t in tags" :key="t.id" class="trow">
-              <span class="dot" :style="{ background: t.color }" />
-              <span class="nm">{{ t.name }}</span>
+            <div v-for="t in tags" :key="t.id" class="trow" :class="'st-' + (tagState[t.id] || 'idle')">
+              <button class="dot-btn" :style="{ background: draftOf(t).color }" title="修改颜色" @click.stop="toggleColorPop(t.id)" />
+              <input class="inline-name" v-model="draftOf(t).name" spellcheck="false" title="标签名称" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
               <span class="ct">{{ t.count ?? 0 }} 个视频</span>
-              <span class="pth" :class="{ custom: !!t.dir_path }" :title="t.dir_path || t.effective_dir">{{ t.dir_path || t.effective_dir }}</span>
-              <button class="icon-act" title="编辑" @click="openTag(t)"><Icon name="pen" :size="15" /></button>
+              <input class="inline-dir" v-model="draftOf(t).dir_path" :placeholder="t.effective_dir" :title="t.dir_path || t.effective_dir" spellcheck="false" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
+              <span class="save-hint">
+                <span v-if="tagState[t.id] === 'saving'">保存中…</span>
+                <span v-else-if="tagState[t.id] === 'saved'" class="ok">已保存</span>
+                <span v-else-if="tagState[t.id] === 'err'" class="err">保存失败</span>
+              </span>
               <button class="icon-act dg" title="删除" @click="delTag.tag = t; delTag.show = true"><Icon name="trash" :size="15" /></button>
+
+              <div v-if="colorPop.id === t.id" class="color-pop" @click.stop>
+                <div class="cp-grid">
+                  <button v-for="c in TAG_COLORS" :key="c" class="swatch" :class="{ on: draftOf(t).color.toLowerCase() === c.toLowerCase() }" :style="{ background: c }" @click="setColor(t.id, c)" />
+                </div>
+                <div class="cp-custom">
+                  <label>自定义</label>
+                  <input type="color" :value="normalizeHex(draftOf(t).color) || '#8d98a8'" @input="onColorPicker(t.id, $event)" />
+                  <input class="cp-hex" :value="draftOf(t).color" maxlength="7" spellcheck="false" @input="onHexInput(t.id, $event)" />
+                </div>
+              </div>
             </div>
             <div v-if="!tags.length" class="empty">还没有标签</div>
           </div>
@@ -834,7 +920,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.1' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.2' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -859,6 +945,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.1.2</span><span>标签管理改为行内编辑：名称、颜色、目标文件夹都可以直接在卡片上改（自动保存）；颜色支持自定义取色。</span></div>
               <div class="log-item"><span class="dt">1.1.1</span><span>视频封面改为取每个视频的第一帧（旧封面会自动重建）；概览页四个统计卡片改为 2×2，与标签分布卡片同排、标签分布卡片固定尺寸。</span></div>
               <div class="log-item"><span class="dt">1.1.0</span><span>扫描会同时遍历源文件夹与各标签的目标文件夹；网页端「源文件夹」管理移到视频库页；标签管理页新增扫描按钮；手机端标签管理页也新增扫描按钮。</span></div>
               <div class="log-item"><span class="dt">1.0.11</span><span>整理过的视频重新扫描后仍留在媒体库；视频库按「源文件夹 / 标签文件夹」分组展示。</span></div>
