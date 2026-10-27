@@ -196,6 +196,7 @@ export const api = {
   videos: (q: {
     status?: string
     tag?: string | number
+    tags?: string
     q?: string
     sort?: string
     order?: string

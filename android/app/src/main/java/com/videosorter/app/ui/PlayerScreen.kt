@@ -647,8 +647,9 @@ fun PlayerScreen(
         ) {
             GlassChip(onClick = onOpenList) {
                 Text("待整理", color = t.ink(0.86f), fontSize = 11.5.sp)
-                Text("${counts.tagged}", color = t.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text("/ ${counts.all}", color = t.ink(0.5f), fontSize = 11.sp)
+                // 用当前列表范围统计，筛选后与视频库保持一致
+                Text("${videos.count { !it.isOrganized }}", color = t.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("/ ${videos.size}", color = t.ink(0.5f), fontSize = 11.sp)
             }
         }
 

@@ -53,6 +53,7 @@ def _apply_tag(st, video_id: int, tag_id: int | None) -> dict[str, Any]:
 def list_videos(
     status: str = Query("all"),
     tag: str | None = Query(None, description="数字=标签 id，none=未打标签"),
+    tags: str = Query("", description="多标签筛选，逗号分隔的标签 id，如 1,3"),
     q: str = Query("", description="文件名关键字"),
     sort: str = Query("added"),
     order: str = Query("desc"),
@@ -74,7 +75,12 @@ def list_videos(
         # 默认（all）：文件已被删除/移走的记录不再出现在视频库与播放列表里
         if "missing" in STATUSES:
             where.append("v.status<>'missing'")
-    if tag == "none":
+    picked = [int(x) for x in tags.replace("，", ",").split(",") if x.strip().isdigit()]
+    if picked:
+        # 多标签并集：勾了几个标签就显示这几个标签下的视频
+        where.append("v.tag_id IN (" + ",".join("?" * len(picked)) + ")")
+        args.extend(picked)
+    elif tag == "none":
         where.append("v.tag_id IS NULL")
     elif tag and tag.isdigit():
         where.append("v.tag_id=?")

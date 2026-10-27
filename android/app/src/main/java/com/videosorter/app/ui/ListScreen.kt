@@ -68,6 +68,10 @@ fun ListScreen(
     tags: List<Tag>,
     loading: Boolean,
     error: String?,
+    status: String,
+    selectedTags: Set<Int>,
+    onStatus: (String) -> Unit,
+    onToggleTag: (Int) -> Unit,
     onOpen: (Int) -> Unit,
     onTag: (Int, Int?) -> Unit,
     onRefresh: () -> Unit,
@@ -78,21 +82,10 @@ fun ListScreen(
     sheets: SheetState,
 ) {
     val t = tokens()
-    var filter by remember { mutableStateOf("all") }
     var query by remember { mutableStateOf("") }
-    var tagFilter by remember { mutableIntStateOf(0) }
 
-    val shown = videos.filter { v ->
-        val byFilter = when (filter) {
-            "idle" -> v.tagId == null && !v.isOrganized
-            "tagged" -> v.tagId != null && !v.isOrganized
-            "done" -> v.isOrganized
-            else -> true
-        }
-        val byTag = tagFilter == 0 || v.tagId == tagFilter
-        val byQuery = query.isBlank() || v.name.contains(query, ignoreCase = true)
-        byFilter && byTag && byQuery
-    }
+    // 状态与标签筛选都在 MainScreen 里（服务端筛选），这里只做关键词过滤
+    val shown = videos.filter { v -> query.isBlank() || v.name.contains(query, ignoreCase = true) }
 
     fun openTagSheet(v: Video) {
         sheets.open("给「${v.name}」打标签", "一个视频一个标签，标签决定它会被整理到哪个文件夹") {
@@ -210,16 +203,15 @@ fun ListScreen(
             modifier = Modifier.padding(top = 11.dp, bottom = 4.dp),
         ) {
             items(LIST_FILTERS) { pair ->
-                FilterChipView(label = pair.second, on = filter == pair.first) {
-                    filter = pair.first
-                    // 「全部」= 清空所有筛选（含标签筛选），避免点了全部还只剩某个标签
-                    if (pair.first == "all") tagFilter = 0
-                }
+                FilterChipView(label = pair.second, on = status == pair.first) { onStatus(pair.first) }
             }
             items(tags, key = { "tag-${it.id}" }) { tag ->
-                FilterChipView(label = tag.name, on = tagFilter == tag.id, dot = hexColor(tag.color)) {
-                    tagFilter = if (tagFilter == tag.id) 0 else tag.id
-                }
+                // 标签可多选：勾上的标签取并集，再点一次取消
+                FilterChipView(
+                    label = tag.name,
+                    on = selectedTags.contains(tag.id),
+                    dot = hexColor(tag.color),
+                ) { onToggleTag(tag.id) }
             }
         }
 

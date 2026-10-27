@@ -120,7 +120,12 @@ class Api(baseUrl: String, var token: String? = null) {
             json.encodeToString(NewTagIn(name, color, dirPath?.takeIf { it.isNotBlank() })),
         )
 
-    suspend fun videos(filter: String = "all", q: String = "", tagId: Int? = null): VideoPage {
+    suspend fun videos(
+        filter: String = "all",
+        q: String = "",
+        tagId: Int? = null,
+        tags: Collection<Int> = emptyList(),
+    ): VideoPage {
         val query = buildString {
             append("/api/videos?limit=500&sort=added&order=asc")
             when {
@@ -130,6 +135,7 @@ class Api(baseUrl: String, var token: String? = null) {
                 filter == "untagged" -> append("&status=untagged")
             }
             if (tagId != null) append("&tag=").append(tagId)
+            if (tags.isNotEmpty()) append("&tags=").append(tags.joinToString(","))
             if (q.isNotBlank()) append("&q=").append(Uri.encode(q))
         }
         return getJson(query)

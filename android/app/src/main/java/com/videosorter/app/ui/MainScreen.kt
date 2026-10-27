@@ -62,6 +62,9 @@ fun MainScreen(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var playerIndex by remember { mutableIntStateOf(0) }
+    // 视频库筛选（服务端筛选）：状态 + 多个标签，播放器与视频库共用同一份结果
+    var statusFilter by remember { mutableStateOf("all") }
+    var tagFilter by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -91,7 +94,7 @@ fun MainScreen(
     suspend fun reload(silent: Boolean = false) {
         if (!silent) loading = true
         try {
-            val page = api.videos()
+            val page = api.videos(filter = statusFilter, tags = tagFilter)
             videos = page.items
             counts = page.counts
             tags = api.tags()
@@ -102,6 +105,13 @@ fun MainScreen(
         } finally {
             loading = false
         }
+    }
+
+    fun applyFilter(next: String, tags: Set<Int>) {
+        val changed = next != statusFilter || tags != tagFilter
+        statusFilter = next
+        tagFilter = tags
+        if (changed) scope.launch { reload(silent = true) }
     }
 
     fun markTag(videoId: Int, tagId: Int?) {
@@ -202,6 +212,15 @@ fun MainScreen(
                     tags = tags,
                     loading = loading,
                     error = error,
+                    status = statusFilter,
+                    selectedTags = tagFilter,
+                    onStatus = { next ->
+                        applyFilter(next, if (next == "all") emptySet() else tagFilter)
+                    },
+                    onToggleTag = { id ->
+                        val next = if (tagFilter.contains(id)) tagFilter - id else tagFilter + id
+                        applyFilter(statusFilter, next)
+                    },
                     onOpen = { id ->
                         val idx = videos.indexOfFirst { it.id == id }
                         if (idx >= 0) {

@@ -234,6 +234,7 @@
 .fmenu button:hover { background: rgba(var(--ink), 0.07); }
 .fmenu button.on { color: var(--accent); }
 .fmenu button .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.fmenu .fmenu-tip { padding: 4px 10px 2px; font-size: 10.5px; color: var(--muted-2); letter-spacing: .04em; }
 .fmenu .divider { height: 1px; background: var(--line); margin: 4px 6px; }
 .fmenu .cnt { margin-left: auto; font-size: 10.5px; color: var(--muted-2); }
 

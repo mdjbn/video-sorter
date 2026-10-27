@@ -20,22 +20,41 @@ const videos = ref<Video[]>([])
 const counts = ref<Record<string, number>>({})
 const current = ref<Video | null>(null)
 const pane = ref<'list' | 'org'>('list')
-type Filter = 'all' | 'idle' | 'tagged' | 'organized' | `tag:${number}`
-const filter = ref<Filter>('all')
+type FilterStatus = 'all' | 'idle' | 'tagged' | 'organized'
+const status = ref<FilterStatus>('all')
+const pickedTags = ref<Set<number>>(new Set())
 const filterOpen = ref(false)
 const loading = ref(true)
 
+const STATUS_LABEL: Record<FilterStatus, string> = {
+  all: '全部视频', idle: '未打标签', tagged: '待整理', organized: '已整理',
+}
 const filterLabel = computed(() => {
-  if (filter.value === 'all') return '全部视频'
-  if (filter.value === 'idle') return '未打标签'
-  if (filter.value === 'tagged') return '待整理'
-  if (filter.value === 'organized') return '已整理'
-  const id = Number(filter.value.split(':')[1])
-  const t = tags.value.find((x) => x.id === id)
-  return t ? t.name : '标签'
+  // 多个标签可同时勾选，标题显示「旅行、美食」
+  if (pickedTags.value.size) {
+    const names = [...pickedTags.value]
+      .map((id) => tags.value.find((x) => x.id === id)?.name)
+      .filter(Boolean) as string[]
+    if (names.length) return names.slice(0, 2).join('、') + (names.length > 2 ? `… +${names.length - 2}` : '')
+  }
+  return STATUS_LABEL[status.value]
 })
+const hasFilter = computed(() => status.value !== 'all' || pickedTags.value.size > 0)
+function pickStatus(k: FilterStatus) {
+  status.value = k
+  pickedTags.value = new Set()
+  filterOpen.value = false
+}
+function toggleTag(id: number) {
+  const next = new Set(pickedTags.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  pickedTags.value = next
+  // 勾了标签就不再按状态过滤，取并集
+  if (next.size) status.value = 'all'
+}
 const listCountText = computed(() => {
-  if (filter.value === 'all') return `未整理 ${counts.value.idle ?? 0}`
+  if (!hasFilter.value) return `未整理 ${counts.value.idle ?? 0}`
   return `${videos.value.length} 个 · ${filterLabel.value}`
 })
 const organizedCount = computed(() => videos.value.filter((v) => v.organized).length)
@@ -48,10 +67,8 @@ async function loadTags() {
 
 async function loadVideos(keepId?: number) {
   const q: any = {}
-  if (filter.value === 'idle') q.status = 'idle'
-  else if (filter.value === 'tagged') q.status = 'tagged'
-  else if (filter.value === 'organized') q.status = 'organized'
-  else if (filter.value.startsWith('tag:')) q.tag = filter.value.split(':')[1]
+  if (status.value !== 'all') q.status = status.value
+  if (pickedTags.value.size) q.tags = [...pickedTags.value].join(',')
   const res = await api.videos({ ...q, limit: 2000, sort: 'added', order: 'asc' })
   videos.value = res.items
   counts.value = res.counts
@@ -66,10 +83,10 @@ async function loadVideos(keepId?: number) {
   await selectVideo(found ? found.id : res.items[0].id, { keepPlaying: false, force: true })
 }
 
-// 切换筛选条件（全部/未打标签/待整理/已整理/某个标签）后重新拉列表
-watch(filter, () => {
+// 切换筛选条件（状态 / 多个标签）后重新拉列表
+watch([status, pickedTags], () => {
   void loadVideos()
-})
+}, { deep: true })
 
 // ---------- 播放 ----------
 const stageEl = ref<HTMLElement | null>(null)
@@ -870,34 +887,35 @@ defineExpose({ selectVideo })
       <!-- 播放列表 -->
       <div v-show="pane === 'list'" class="pane">
         <div class="filter">
-          <button class="fbtn" :class="{ on: filter !== 'all', open: filterOpen }" @click.stop="filterOpen = !filterOpen">
+          <button class="fbtn" :class="{ on: hasFilter, open: filterOpen }" @click.stop="filterOpen = !filterOpen">
             <Icon name="filter" :size="13" />
             <span>{{ filterLabel }}</span>
             <Icon name="chevron-down" :size="12" class="chev" />
           </button>
           <span class="fcount">{{ listCountText }}</span>
           <div v-if="filterOpen" class="fmenu">
-            <button :class="{ on: filter === 'all' }" @click="filter = 'all'; filterOpen = false">
+            <button :class="{ on: status === 'all' && !pickedTags.size }" @click="pickStatus('all')">
               全部视频<span class="cnt">{{ counts.all ?? 0 }}</span>
             </button>
-            <button :class="{ on: filter === 'idle' }" @click="filter = 'idle'; filterOpen = false">
+            <button :class="{ on: status === 'idle' }" @click="pickStatus('idle')">
               未打标签<span class="cnt">{{ counts.idle ?? 0 }}</span>
             </button>
-            <button :class="{ on: filter === 'tagged' }" @click="filter = 'tagged'; filterOpen = false">
+            <button :class="{ on: status === 'tagged' }" @click="pickStatus('tagged')">
               待整理<span class="cnt">{{ counts.tagged ?? 0 }}</span>
             </button>
-            <button :class="{ on: filter === 'organized' }" @click="filter = 'organized'; filterOpen = false">
+            <button :class="{ on: status === 'organized' }" @click="pickStatus('organized')">
               已整理<span class="cnt">{{ counts.organized ?? 0 }}</span>
             </button>
             <div class="divider" />
+            <div class="fmenu-tip">标签可多选</div>
             <button
               v-for="t in tags"
               :key="t.id"
-              :class="{ on: filter === `tag:${t.id}` }"
-              @click="filter = `tag:${t.id}`; filterOpen = false"
+              :class="{ on: pickedTags.has(t.id) }"
+              @click.stop="toggleTag(t.id)"
             >
               <span class="dot" :style="{ background: t.color }" />{{ t.name }}
-              <span class="cnt">{{ t.count ?? 0 }}</span>
+              <span class="cnt">{{ pickedTags.has(t.id) ? '✓' : (t.count ?? 0) }}</span>
             </button>
           </div>
         </div>
