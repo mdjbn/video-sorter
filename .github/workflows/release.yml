@@ -19,7 +19,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: 准备 ffmpeg
+        # GitHub 托管的 runner 上 apt-get update 偶尔会卡十几分钟（镜像源问题），
+        # 所以优先用镜像自带的 ffmpeg；没有就跳过 update 直接装；再不行下静态包。
+        run: |
+          if command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -version | head -1; exit 0
+          fi
+          if timeout 90 sudo apt-get install -y --no-install-recommends ffmpeg >/tmp/apt.log 2>&1; then
+            ffmpeg -version | head -1; exit 0
+          fi
+          timeout 120 curl -fsSL -o /tmp/ff.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz || true
+          if [ -s /tmp/ff.tar.xz ]; then
+            tar -xJf /tmp/ff.tar.xz -C /tmp
+            sudo cp /tmp/ffmpeg-*-amd64-static/ffmpeg /tmp/ffmpeg-*-amd64-static/ffprobe /usr/local/bin/
+            ffmpeg -version | head -1; exit 0
+          fi
+          echo "::warning::没有装到 ffmpeg，测试会退化成占位文件，部分断言可能失败"
+          tail -20 /tmp/apt.log || true
       - run: pip install -r server/requirements.txt -r server/requirements-dev.txt
       - name: pytest
         working-directory: server
