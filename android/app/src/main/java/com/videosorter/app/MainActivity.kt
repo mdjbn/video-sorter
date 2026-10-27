@@ -28,6 +28,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         installImageLoader()
+        // 播放缓存（预加载写入、播放读取）
+        com.videosorter.app.data.MediaCache.init(applicationContext)
         setContent { AppRoot() }
     }
 

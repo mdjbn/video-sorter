@@ -87,6 +87,12 @@ class Api(baseUrl: String, var token: String? = null) {
      * 健康检查。/api/health 里既有字符串也有布尔/数字，反序列化成 Map<String, String> 会抛
      * 类型错误（曾导致登录页误报「连不上服务器」），这里按 JsonObject 解析，宽松判定 ok。
      */
+    /** 播放与预加载都要带的请求头（令牌） */
+    fun headers(): Map<String, String> =
+        buildMap {
+            token?.takeIf { it.isNotEmpty() }?.let { put("Authorization", "Bearer $it") }
+        }
+
     suspend fun ping(): Boolean = runCatching {
         val obj = json.parseToJsonElement(exec(build("/api/health", "GET"))).jsonObject
         (obj["ok"]?.jsonPrimitive?.content ?: "true") == "true"

@@ -124,14 +124,15 @@ fun PlayerScreen(
     // 媒体请求也要带 Bearer 令牌：/api/videos/{id}/raw 与 HLS 分片都要求鉴权，
     // 否则 ExoPlayer 会拿到 401 并报 ERROR_CODE_IO_BAD_HTTP_STATUS。
     val player = remember(api.token) {
-        val headers = buildMap {
-            api.token?.takeIf { it.isNotEmpty() }?.let { put("Authorization", "Bearer $it") }
-        }
-        val httpFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(headers)
-            .setAllowCrossProtocolRedirects(true)
+        // 走带磁盘缓存的 DataSource：预加载写进来的数据，真正播放时直接命中缓存
+        val cacheFactory = com.videosorter.app.data.MediaCache.sourceFactory(api.headers())
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(2_000, 30_000, 250, 600)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
         ExoPlayer.Builder(ctx)
-            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(httpFactory))
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(cacheFactory))
+            .setLoadControl(loadControl)
             .build()
             .apply { playWhenReady = true }
     }
@@ -139,6 +140,13 @@ fun PlayerScreen(
     val count = videos.size
     val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, (count - 1).coerceAtLeast(0))) {
         count.coerceAtLeast(1)
+    }
+
+    // 预加载后面 2 个视频（换片时会先取消上一轮预加载）
+    LaunchedEffect(pagerState.currentPage, count) {
+        if (count > 0) {
+            com.videosorter.app.data.Preloader.warm(scope, api, videos, pagerState.currentPage + 1, 2)
+        }
     }
 
     // 外部指定要播第几个（播放历史跳转、整理页跳转、播完自动下一个）→ 同步到 pager

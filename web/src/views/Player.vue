@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, nextTick, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   api, ApiError, basename, fmtDur, fmtSize, fmtTime, waitTask,
@@ -65,6 +65,11 @@ async function loadVideos(keepId?: number) {
   const found = res.items.find((v) => v.id === wanted)
   await selectVideo(found ? found.id : res.items[0].id, { keepPlaying: false, force: true })
 }
+
+// 切换筛选条件（全部/未打标签/待整理/已整理/某个标签）后重新拉列表
+watch(filter, () => {
+  void loadVideos()
+})
 
 // ---------- 播放 ----------
 const stageEl = ref<HTMLElement | null>(null)
