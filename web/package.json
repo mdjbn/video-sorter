@@ -19,5 +19,8 @@
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vue-tsc": "^2.2.0"
+  },
+  "overrides": {
+    "de-indent": "1.0.2"
   }
 }
