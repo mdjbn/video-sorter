@@ -27,14 +27,15 @@ jobs:
 
       - name: 把 APK 放进 dist/android（build.sh 会复制进 app/apk/）
         run: |
-          V=$(python3 -c "import re,pathlib;print(re.search(r'__version__\s*=\s*"([^"]+)"',pathlib.Path('server/videosorter/__init__.py').read_text(encoding='utf-8')).group(1))")
+          V="$(awk -F'"' '/__version__/{print $2; exit}' server/videosorter/__init__.py)"
+          echo "版本：$V"
           mkdir -p dist/android
           shopt -s nullglob
           for f in /tmp/apk-in/*.apk; do
             b="$(basename "$f")"
             abi="$(printf '%s' "$b" | sed -E 's/^app-(.*)-debug\.apk$/\1/')"
             cp "$f" "dist/android/videosorter-$V-$abi.apk"
-            echo "  $V $abi"
+            echo "  内置 $V $abi"
           done
           shopt -u nullglob
           ls -lh dist/android || true
