@@ -30,7 +30,7 @@ jobs:
     uses: ./.github/workflows/android.yml
 
   fnos:
-    needs: [test]
+    needs: [test, android]
     uses: ./.github/workflows/fnos.yml
 
   publish:

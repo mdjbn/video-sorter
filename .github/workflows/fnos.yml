@@ -18,6 +18,27 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: 取安卓 APK（打进 fpk，装好后网页端才能直接下载 App）
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: videosorter-apk
+          path: /tmp/apk-in
+
+      - name: 把 APK 放进 dist/android（build.sh 会复制进 app/apk/）
+        run: |
+          V=$(python3 -c "import re,pathlib;print(re.search(r'__version__\s*=\s*"([^"]+)"',pathlib.Path('server/videosorter/__init__.py').read_text(encoding='utf-8')).group(1))")
+          mkdir -p dist/android
+          shopt -s nullglob
+          for f in /tmp/apk-in/*.apk; do
+            b="$(basename "$f")"
+            abi="$(printf '%s' "$b" | sed -E 's/^app-(.*)-debug\.apk$/\1/')"
+            cp "$f" "dist/android/videosorter-$V-$abi.apk"
+            echo "  $V $abi"
+          done
+          shopt -u nullglob
+          ls -lh dist/android || true
+
       - name: 构建网页端
         working-directory: web
         run: |
