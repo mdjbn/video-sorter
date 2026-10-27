@@ -1,5 +1,6 @@
 name: Release
 
+# 只在推 v* 标签时发布：目前只发安卓 App 与 fnOS 安装包（Windows/Tauri 桌面端改为手动触发 windows.yml）
 on:
   push:
     tags: ["v*"]
@@ -9,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  # 先把后端和网页端过一遍，失败就不用白等 Windows/Android 那十几分钟
-  backend:
+  # 先过一遍后端测试，失败就不用白等后面十几分钟
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -24,34 +25,16 @@ jobs:
         working-directory: server
         run: python -m pytest -q
 
-  web:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Build web
-        working-directory: web
-        run: |
-          npm ci || npm install
-          npm run build
-
   android:
-    needs: [backend]
+    needs: [test]
     uses: ./.github/workflows/android.yml
 
-  windows:
-    needs: [backend]
-    uses: ./.github/workflows/windows.yml
-
   fnos:
-    needs: [backend, web]
+    needs: [test]
     uses: ./.github/workflows/fnos.yml
 
   publish:
-    needs: [android, windows, fnos]
+    needs: [android, fnos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -60,15 +43,20 @@ jobs:
         with:
           path: artifacts
 
-      - name: List artifacts
-        run: find artifacts -type f | sed 's|^|  |' | head -60
+      - name: 整理发布文件（重命名 APK，过滤掉中间产物）
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#v}"
+          mkdir -p out
+          for f in artifacts/videosorter-apk/*.apk; do
+            b="$(basename "$f")"
+            abi="$(printf '%s' "$b" | sed -E 's/^app-(.*)-debug\.apk$/\1/')"
+            cp "$f" "out/videosorter-$V-$abi.apk"
+          done
+          for f in artifacts/videosorter-fpk/*.fpk; do cp "$f" out/; done
+          ls -lh out
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/videosorter-apk/*.apk
-            artifacts/windows-desktop/**/*.exe
-            artifacts/windows-desktop/**/*.msi
-            artifacts/windows-desktop/**/*.zip
-            artifacts/videosorter-fpk/*.fpk
+          files: out/*
           generate_release_notes: true

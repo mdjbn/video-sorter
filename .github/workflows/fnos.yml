@@ -31,15 +31,16 @@ jobs:
           chmod +x /tmp/fnpk/fnpack
           /tmp/fnpk/fnpack --help | head -3
 
-      - name: 打包 fpk
-        run: bash packaging/fnos/build.sh
+      - name: 打包 fpk（x86 + arm 双架构）
+        run: bash packaging/fnos/build-all.sh
         env:
           FNPACK: /tmp/fnpk/fnpack
 
       - name: 校验产物
         run: |
           ls -lh dist/fnos/*.fpk
-          tar -tzf dist/fnos/videosorter.fpk | sort > /tmp/fpk-list.txt
+          FPK="$(ls -1 dist/fnos/*.fpk | head -1)"
+          tar -tzf "$FPK" | sort > /tmp/fpk-list.txt
           cat /tmp/fpk-list.txt
           for f in manifest ICON.PNG ICON_256.PNG config/privilege config/resource cmd/main; do
             grep -qx "$f" /tmp/fpk-list.txt || { echo "缺少 $f"; exit 1; }
