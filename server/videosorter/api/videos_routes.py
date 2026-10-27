@@ -110,6 +110,11 @@ def list_videos(
     counts["all"] = st.db.query_one("SELECT COUNT(*) AS n FROM videos")["n"]
     counts["untagged"] = st.db.query_one(
         "SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NULL")["n"]
+    # 两组卡片：来自源文件夹的（还没整理）／来自标签对应文件夹的（已整理）
+    counts["organized"] = st.db.query_one(
+        "SELECT COUNT(*) AS n FROM videos WHERE status='organized'")["n"]
+    counts["source"] = st.db.query_one(
+        "SELECT COUNT(*) AS n FROM videos WHERE status IN ('idle','tagged')")["n"]
     return {"items": [video_dict(r) for r in rows], "total": total, "counts": counts}
 
 

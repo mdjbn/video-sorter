@@ -227,13 +227,30 @@ fun ListScreen(
                 verticalArrangement = Arrangement.spacedBy(9.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(shown, key = { it.id }) { v ->
-                    VideoRow(
-                        v = v,
-                        thumb = api.thumbUrl(v),
-                        onClick = { onOpen(v.id) },
-                        onTagClick = { openTagSheet(v) },
-                    )
+                // 两组：还没整理的（文件在源文件夹里）/ 已整理到标签文件夹的
+                val fromSource = shown.filter { !it.isOrganized }
+                val fromTags = shown.filter { it.isOrganized }
+                if (fromSource.isNotEmpty()) {
+                    item(key = "sec-source") { GroupHead("源文件夹", fromSource.size) }
+                    items(fromSource, key = { "s-${it.id}" }) { v ->
+                        VideoRow(
+                            v = v,
+                            thumb = api.thumbUrl(v),
+                            onClick = { onOpen(v.id) },
+                            onTagClick = { openTagSheet(v) },
+                        )
+                    }
+                }
+                if (fromTags.isNotEmpty()) {
+                    item(key = "sec-organized") { GroupHead("标签文件夹", fromTags.size) }
+                    items(fromTags, key = { "o-${it.id}" }) { v ->
+                        VideoRow(
+                            v = v,
+                            thumb = api.thumbUrl(v),
+                            onClick = { onOpen(v.id) },
+                            onTagClick = { openTagSheet(v) },
+                        )
+                    }
                 }
             }
         }
@@ -382,5 +399,31 @@ internal fun sizeText(bytes: Long): String {
         mb >= 1 -> "%.1f MB".format(mb)
         kb >= 1 -> "%.0f KB".format(kb)
         else -> "$bytes B"
+    }
+}
+
+/** 视频库分组标题：源文件夹 / 标签文件夹 */
+@Composable
+private fun GroupHead(title: String, count: Int) {
+    val t = tokens()
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(6.dp).clip(CircleShape).background(t.accent),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(title, color = t.ink(0.9f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "$count",
+            color = t.accent,
+            fontSize = 11.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(t.accentDim)
+                .padding(horizontal = 7.dp, vertical = 1.dp),
+        )
     }
 }

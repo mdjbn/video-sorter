@@ -125,8 +125,12 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                 tasks.step(task_id, f"更新：{p.name}")
 
     # 3) 标记丢失的文件（源目录内的）
+    #    注意：已整理的视频本来就被移到了标签对应的文件夹里，它不在源目录是正常的，
+    #    不能因为它「不在源目录」就标记成 missing，否则整理后再扫描就会从媒体库消失。
     for spath, row in existing.items():
         if spath in seen:
+            continue
+        if str(row["status"]) == "organized":
             continue
         try:
             p = Path(spath)

@@ -201,3 +201,12 @@
 /* 删除确认里的勾选项 */
 .chk-row{display:flex;align-items:center;gap:8px;margin:12px 0 6px;font-size:12.5px;color:var(--text)}
 .chk-row input{width:15px;height:15px;accent-color:var(--accent)}
+
+/* 视频库分组卡片：源文件夹 / 标签文件夹 */
+.lib-group{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px 16px;margin-bottom:16px}
+.lib-group-head{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.lib-group-head .ico{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:rgba(var(--ink),.06);color:var(--muted)}
+.lib-group-head b{font-size:13.5px;color:var(--text)}
+.lib-group-head .cnt{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--accent-dim);color:var(--accent);font-weight:600}
+.lib-group-head .sub{font-size:11.5px;color:var(--muted-2);margin-left:auto}
+.lib-empty{font-size:12px;color:var(--muted-2);padding:18px 2px;text-align:center;border:1px dashed var(--line-2);border-radius:12px}

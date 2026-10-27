@@ -308,3 +308,26 @@ fnos-cli ... app install-fpk videosorter.fpk --custom-parameters '[{"key":"ui_po
 1. 应用中心 → 视频整理 → **卸载** → 选择「保留数据」；
 2. 应用中心 → 手动安装 → 选择新的 `videosorter.fpk` → 在向导里填写端口（默认 8610）；
 3. 安装完成后「打开」会直接指向你填的端口；数据（数据库、缩略图、上传目录里的文件）因为在步骤 1 选择了保留，会自动被新版本接管。
+
+## 10. 多架构产物：fpk（x86 / arm）与 APK（arm64-v8a / armeabi-v7a）
+
+### 10.1 fnOS 安装包：一次出两个架构
+
+```bash
+bash packaging/fnos/build-all.sh          # 产出 dist/fnos/videosorter-<版本>-x86.fpk 与 -arm.fpk
+VS_ARCH=arm bash packaging/fnos/build.sh  # 单独打 arm
+```
+
+- 架构写在 `manifest` 的 `platform` 字段（`x86` / `arm`）。
+- fpk 里带的是**编译好的 wheel**（`pydantic-core` 是 Rust 扩展），所以 arm 包必须用 aarch64 的 wheel：`build.sh` 在 `VS_ARCH=arm` 时会 `pip download --platform manylinux2014_aarch64 --only-binary=:all:` 再解包到 `app/vendor`，不能用本机 x86 的 `.so`。
+- 其它纯 Python 依赖与网页端产物两包相同；ffmpeg 用系统自带的（也可把对应架构的 ffmpeg 放进 `app/tools/`）。
+
+### 10.2 Android：按 ABI 拆分 APK
+
+`android/app/build.gradle.kts` 里开了 ABI split：
+
+```kotlin
+splits { abi { isEnable = true; reset(); include("arm64-v8a", "armeabi-v7a"); isUniversalApk = false } }
+```
+
+`assembleDebug` 会产出 `app-arm64-v8a-debug.apk` 与 `app-armeabi-v7a-debug.apk`（发布时 `assembleRelease` 同理），安装到对应架构手机即可；`aapt2 dump badging` 可以看到 `native-code: 'arm64-v8a'` / `'armeabi-v7a'`。

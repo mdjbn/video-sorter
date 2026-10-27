@@ -14,7 +14,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0.10"
+        versionName = "1.0.11"
     }
 
     buildTypes {
@@ -28,6 +28,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // 按 ABI 拆分安装包：arm64-v8a 与 armeabi-v7a 各出一个 APK
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         compose = true

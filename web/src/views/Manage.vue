@@ -118,6 +118,13 @@ async function removeSource(id: number) {
 const lib = reactive({ status: 'all', tags: new Set<number>(), q: '', mode: 'grid' as 'grid' | 'list' })
 const videos = ref<Video[]>([])
 const sel = reactive(new Set<number>())
+// 视频库分两组展示：还在源文件夹里的 / 已按标签整理到标签文件夹的
+const sourceVideos = computed(() => videos.value.filter((v) => !v.organized))
+const organizedVideos = computed(() => videos.value.filter((v) => v.organized))
+const libGroups = computed(() => [
+  { k: 'source', title: '源文件夹', icon: 'folder', desc: '还没整理，文件仍在源文件夹里', items: sourceVideos.value },
+  { k: 'organized', title: '标签文件夹', icon: 'tag', desc: '已整理，文件已移动到标签对应的文件夹', items: organizedVideos.value },
+])
 const libLoading = ref(false)
 
 const libChips = computed<any[]>(() => {
@@ -579,8 +586,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               <span class="st" :class="u.state">{{ u.state === 'ok' ? '完成' : u.state === 'err' ? (u.msg || '失败') : u.pct + '%' }}</span>
             </div>
           </div>
-          <div class="grid" :class="{ 'as-list': lib.mode === 'list' }">
-            <div v-for="v in videos" :key="v.id" class="vcard" :class="{ sel: sel.has(v.id) }" @click="openVideo(v)">
+          <div v-for="g in libGroups" :key="g.k" class="lib-group">
+            <div class="lib-group-head">
+              <span class="ico"><Icon :name="g.icon" :size="14" /></span>
+              <b>{{ g.title }}</b>
+              <span class="cnt">{{ g.items.length }}</span>
+              <span class="sub">{{ g.desc }}</span>
+            </div>
+            <div v-if="g.items.length" class="grid" :class="{ 'as-list': lib.mode === 'list' }">
+              <div v-for="v in g.items" :key="v.id" class="vcard" :class="{ sel: sel.has(v.id) }" @click="openVideo(v)">
               <div class="vthumb" :style="v.thumb_url ? { backgroundImage: `url(${v.thumb_url})` } : {}">
                 <span class="pick" @click.stop="toggleSel(v.id)"><Icon name="check" :size="12" /></span>
                 <a class="dl" :href="`/api/videos/${v.id}/raw?download=1`" :download="v.filename" title="下载到本机" @click.stop>
@@ -601,6 +615,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 </div>
               </div>
             </div>
+            </div>
+            <div v-else class="lib-empty">这个分组里还没有视频</div>
           </div>
           <div v-if="!videos.length && !libLoading" class="empty">没有符合条件的视频</div>
           <div v-if="sel.size" class="bulk">
@@ -804,7 +820,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.10' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.11' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -829,6 +845,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.0.11</span><span>整理过的视频重新扫描后仍留在媒体库；视频库按「源文件夹 / 标签文件夹」分组展示。</span></div>
               <div class="log-item"><span class="dt">1.0.10</span><span>fnOS 安装包：安装向导可选择服务端口；卸载时可选择保留或删除应用数据。</span></div>
               <div class="log-item"><span class="dt">1.0.9</span><span>筛选支持多标签（手机端与网页端都可同时勾选多个标签取并集）；手机端视频库筛选后播放器只播筛选结果，切回视频库筛选状态保留。</span></div>
               <div class="log-item"><span class="dt">1.0.8</span><span>修复网页播放页筛选（切换全部/未打标签/待整理/已整理/标签后列表实时刷新）；安卓播放器新增预加载（预取后 2 个视频开头数据与 HLS 切片，切换起播更快）。</span></div>
