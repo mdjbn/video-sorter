@@ -960,7 +960,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.1' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.2' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -985,6 +985,7 @@ function onResize() {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.3.2</span><span>修复上传目录会自我嵌套（每次重启/新增源目录都多套一层「手机上传」，导致上传的视频散落在多层目录）；升级后启动会自动收敛回一层。</span></div>
               <div class="log-item"><span class="dt">1.3.1</span><span>管理页「下载手机 App」改成强调色按钮，与「扫描全部」统一；窄屏自动显示为「下载 App」。</span></div>
               <div class="log-item"><span class="dt">1.3.0</span><span>顶栏新增「下载手机 App」按钮（可直接从服务器下载安卓安装包）；手机浏览器打开网页端会提示安装 App。</span></div>
               <div class="log-item"><span class="dt">1.2.0</span><span>网页端适配移动设备：窄屏侧栏收成抽屉（左上角菜单），内容单列、统计卡 2×2、标签行自动换行、视频网格自适应，播放页在手机上改为上下布局。</span></div>
