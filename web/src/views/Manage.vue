@@ -247,7 +247,11 @@ async function doDelVideo() {
 
 /* ---------------- 标签管理 ---------------- */
 const tagModal = reactive({ show: false, id: 0, name: '', color: '#35d18a', dir: '', saving: false })
-const TAG_COLORS = ['#f4a259', '#ef5b7b', '#4cc9f0', '#9b8cff', '#8d98a8', '#35d18a', '#f2c14e', '#ef7d4f']
+const TAG_COLORS = [
+  '#f4a259', '#ef5b7b', '#4cc9f0', '#9b8cff',
+  '#8d98a8', '#35d18a', '#f2c14e', '#ef7d4f',
+  '#e76f51', '#2a9d8f', '#457b9d', '#b5179e',
+]
 
 /* ---------- 标签行内编辑（不弹卡片） ---------- */
 interface TagDraft { name: string; color: string; dir_path: string }
@@ -920,7 +924,7 @@ onBeforeUnmount(() => {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.3' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.4' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -945,6 +949,7 @@ onBeforeUnmount(() => {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.1.4</span><span>标签名称框常显边框；目标文件夹框恢复撑满并贴近删除按钮；预设颜色扩到 12 个。</span></div>
               <div class="log-item"><span class="dt">1.1.3</span><span>标签颜色改为小圆角色块并挪到名称右边，目标文件夹输入框收窄。</span></div>
               <div class="log-item"><span class="dt">1.1.2</span><span>标签管理改为行内编辑：名称、颜色、目标文件夹都可以直接在卡片上改（自动保存）；颜色支持自定义取色。</span></div>
               <div class="log-item"><span class="dt">1.1.1</span><span>视频封面改为取每个视频的第一帧（旧封面会自动重建）；概览页四个统计卡片改为 2×2，与标签分布卡片同排、标签分布卡片固定尺寸。</span></div>
