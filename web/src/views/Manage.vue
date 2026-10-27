@@ -554,7 +554,9 @@ function onResize() {
         </button>
         <div class="m-crumb">视频整理 <span style="opacity:.4">/</span> <b>{{ VIEW_TITLE[view] }}</b></div>
         <div class="sp" />
-        <button id="btnAppDl" class="icon-btn" title="下载手机 App" @click="openAppDl"><Icon name="download" :size="17" /></button>
+        <button id="btnAppDl" class="btn primary top-cta" title="下载手机 App" @click="openAppDl">
+          <Icon name="download" :size="15" /><span class="lbl-long">下载手机 App</span><span class="lbl-short">下载 App</span>
+        </button>
         <button id="btnTheme" class="icon-btn" :title="themeTitle" @click="cycleTheme"><Icon :name="themeMode === 'auto' ? 'auto' : themeMode === 'light' ? 'sun' : 'moon'" :size="17" /></button>
       </div>
 
@@ -958,7 +960,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.0' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.1' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -983,6 +985,7 @@ function onResize() {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.3.1</span><span>管理页「下载手机 App」改成强调色按钮，与「扫描全部」统一；窄屏自动显示为「下载 App」。</span></div>
               <div class="log-item"><span class="dt">1.3.0</span><span>顶栏新增「下载手机 App」按钮（可直接从服务器下载安卓安装包）；手机浏览器打开网页端会提示安装 App。</span></div>
               <div class="log-item"><span class="dt">1.2.0</span><span>网页端适配移动设备：窄屏侧栏收成抽屉（左上角菜单），内容单列、统计卡 2×2、标签行自动换行、视频网格自适应，播放页在手机上改为上下布局。</span></div>
               <div class="log-item"><span class="dt">1.1.4</span><span>标签名称框常显边框；目标文件夹框恢复撑满并贴近删除按钮；预设颜色扩到 12 个。</span></div>
