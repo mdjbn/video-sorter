@@ -184,3 +184,20 @@
   background:rgba(var(--glass),.5);border:1px solid rgba(var(--ink),.16);backdrop-filter:blur(10px);
   text-decoration:none;transition:.16s}
 .vthumb .dl:hover{background:rgba(var(--glass),.72);transform:translateY(-1px)}
+
+/* 视频卡片右上角：下载 / 删除 */
+.vthumb .dl{right:8px;top:8px}
+.vthumb .del{position:absolute;right:8px;top:40px;width:26px;height:26px;border-radius:9px;
+  display:grid;place-items:center;color:var(--danger);cursor:pointer;
+  background:rgba(var(--glass),.5);border:1px solid rgba(239,91,91,.34);backdrop-filter:blur(10px);
+  transition:.16s}
+.vthumb .del:hover{background:rgba(239,91,91,.2);transform:translateY(-1px)}
+
+/* 源文件夹里的「上传目录」角标 */
+.up-badge{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;font-size:9.5px;
+  color:var(--accent);background:var(--accent-dim);border:1px solid rgba(53,209,138,.3);
+  vertical-align:middle}
+
+/* 删除确认里的勾选项 */
+.chk-row{display:flex;align-items:center;gap:8px;margin:12px 0 6px;font-size:12.5px;color:var(--text)}
+.chk-row input{width:15px;height:15px;accent-color:var(--accent)}

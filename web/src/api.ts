@@ -35,7 +35,17 @@ export type Tag = {
   effective_dir: string
 }
 
-export type Source = { id: number; path: string; enabled: number; last_scan_at: string; count: number }
+export type Source = {
+  id: number
+  path: string
+  enabled: number
+  last_scan_at: string
+  count: number
+  /** '' 普通源目录；'upload' 内置上传目录（可改路径、不可删除） */
+  kind?: string
+  editable?: boolean
+  deletable?: boolean
+}
 
 export type Stats = {
   total: number
@@ -166,6 +176,7 @@ export const api = {
   sources: () => get<{ sources: Source[] }>('/sources'),
   addSource: (path: string) => post<{ ok: boolean; source: Source }>('/sources', { path }),
   removeSource: (id: number) => del<{ ok: boolean }>(`/sources/${id}`),
+  updateSource: (id: number, path: string) => put<{ ok: boolean; source: Source }>(`/sources/${id}`, { path }),
   browse: (path?: string) => get<{ path: string; parent: string | null; dirs: { name: string; path: string }[] }>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
 
   // 扫描/任务

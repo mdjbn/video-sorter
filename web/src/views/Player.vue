@@ -296,6 +296,18 @@ async function saveProgress() {
 }
 
 // ---------- 主题 / 跳转 ----------
+function downloadCurrent() {
+  const v = current.value
+  if (!v) return
+  const a = document.createElement('a')
+  a.href = `/api/videos/${v.id}/raw?download=1`
+  a.download = v.filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  toast(`开始下载 ${v.filename}`)
+}
+
 function cycleTheme() {
   const mode = nextThemeMode()
   setThemeMode(mode)
@@ -731,8 +743,18 @@ defineExpose({ selectVideo })
           <span class="mark"><Icon name="film" :size="15" /></span>
           <span>视频整理</span><span class="sep">/</span><span class="cur">播放</span>
         </div>
-        <div class="hintpill">
-          <kbd>滚轮</kbd>切换 <kbd>单击</kbd>暂停 <kbd>长按</kbd>2× <kbd>长按拖动</kbd>调速
+        <div class="tb-right">
+          <div class="hintpill">
+            <kbd>滚轮</kbd>切换 <kbd>单击</kbd>暂停 <kbd>长按</kbd>2× <kbd>长按拖动</kbd>调速
+          </div>
+          <button
+            v-if="current"
+            class="dl-btn"
+            :title="`下载到本机：${current.filename}`"
+            @click.stop="downloadCurrent"
+          >
+            <Icon name="download" :size="16" /><span>下载</span>
+          </button>
         </div>
       </div>
 

@@ -64,9 +64,16 @@ def list_videos(
     where, args = [], []
     if status == "untagged":
         where.append("v.tag_id IS NULL")
+        where.append("v.status<>'missing'")
+    elif status == "missing":
+        where.append("v.status='missing'")
     elif status in STATUSES:
         where.append("v.status=?")
         args.append(status)
+    else:
+        # 默认（all）：文件已被删除/移走的记录不再出现在视频库与播放列表里
+        if "missing" in STATUSES:
+            where.append("v.status<>'missing'")
     if tag == "none":
         where.append("v.tag_id IS NULL")
     elif tag and tag.isdigit():

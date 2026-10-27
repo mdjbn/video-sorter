@@ -211,6 +211,30 @@ async function onFiles(ev: Event) {
   } catch (e: any) { toast(e?.message || '上传失败', true) }
 }
 
+/* ---------------- 删除视频（单个 / 批量） ---------------- */
+const delVideo = reactive({ show: false, ids: [] as number[], names: [] as string[] })
+const delFile = ref(false)
+function openDelVideo(ids: number[], names: string[]) {
+  delVideo.ids = ids
+  delVideo.names = names
+  delFile.value = false
+  delVideo.show = true
+}
+async function doDelVideo() {
+  const ids = [...delVideo.ids]
+  if (!ids.length) return
+  delVideo.show = false
+  busy.value = true
+  try {
+    const withFile = delFile.value
+    for (const id of ids) await api.deleteVideo(id, withFile)
+    sel.clear()
+    toast(withFile ? `已删除 ${ids.length} 个视频（含文件）` : `已删除 ${ids.length} 条记录`)
+    await Promise.all([loadLibrary(), loadStats(), loadTags()])
+  } catch (e: any) { toast(e?.message || '删除失败', true) }
+  finally { busy.value = false }
+}
+
 /* ---------------- 标签管理 ---------------- */
 const tagModal = reactive({ show: false, id: 0, name: '', color: '#35d18a', dir: '', saving: false })
 const TAG_COLORS = ['#f4a259', '#ef5b7b', '#4cc9f0', '#9b8cff', '#8d98a8', '#35d18a', '#f2c14e', '#ef7d4f']
@@ -457,12 +481,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               <div class="card-head"><h2>源文件夹</h2><div class="sp" /><span class="badge">{{ sources.length }} 个</span></div>
               <div class="card-body">
                 <div v-for="s in sources" :key="s.id" class="src-row">
-                  <Icon name="folder" :size="17" style="color:var(--muted-2)" />
+                  <Icon :name="s.kind === 'upload' ? 'upload' : 'folder'" :size="17" :style="{ color: s.kind === 'upload' ? 'var(--accent)' : 'var(--muted-2)' }" />
                   <div class="src-path">
-                    <div class="p">{{ s.path }}</div>
-                    <div class="s">{{ s.count ?? 0 }} 个视频 · 上次扫描 {{ s.last_scan_at ? fmtTime(s.last_scan_at) : '从未' }}</div>
+                    <div class="p">
+                      {{ s.path }}
+                      <span v-if="s.kind === 'upload'" class="up-badge">上传目录</span>
+                    </div>
+                    <div class="s">
+                      {{ s.count ?? 0 }} 个视频 · 上次扫描 {{ s.last_scan_at ? fmtTime(s.last_scan_at) : '从未' }}
+                      <template v-if="s.kind === 'upload'"> · 手机/网页上传都存到这里，可改路径不可删除</template>
+                    </div>
                   </div>
-                  <button class="icon-act dg" title="移除" @click="removeSource(s.id)"><Icon name="close" :size="15" /></button>
+                  <button v-if="s.deletable !== false" class="icon-act dg" title="移除" @click="removeSource(s.id)"><Icon name="close" :size="15" /></button>
                 </div>
                 <div v-if="!sources.length" class="empty">还没有源文件夹，添加一个包含视频的目录。</div>
                 <div style="display:flex;gap:8px;margin-top:12px">
@@ -553,6 +583,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <a class="dl" :href="`/api/videos/${v.id}/raw?download=1`" :download="v.filename" title="下载到本机" @click.stop>
                   <Icon name="download" :size="14" />
                 </a>
+                <button class="del" title="删除" @click.stop="openDelVideo([v.id], [v.filename])">
+                  <Icon name="trash" :size="14" />
+                </button>
                 <span class="dur">{{ fmtDur(v.duration) }}</span>
               </div>
               <div class="vinfo">
@@ -574,6 +607,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <span style="font-size:12px;color:var(--muted-2)">批量打标签：</span>
             <button v-for="t in tags" :key="t.id" class="chip" @click="bulkTag(t.id)">
               <span class="dot" :style="{ background: t.color }" />{{ t.name }}
+            </button>
+            <button class="btn danger sm" @click="openDelVideo([...sel], videos.filter((v) => sel.has(v.id)).map((v) => v.filename))">
+              <Icon name="trash" :size="14" />删除
             </button>
             <button class="btn ghost sm" @click="sel.clear()">取消</button>
           </div>
@@ -765,7 +801,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.6' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.7' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -790,6 +826,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.0.7</span><span>网页端播放页新增下载按钮；源文件夹管理显示「上传目录」角标且不可删除；视频库支持单条与批量删除（可选同时删除文件）；重新扫描后已删除文件的视频不再出现在视频库与播放列表。</span></div>
               <div class="log-item"><span class="dt">1.0.6</span><span>上传目录纳入源文件夹管理（可改路径、不可删除），扫描覆盖上传目录；网页端新增上传（多文件+进度）与下载；手机端修「删除文件后视频库不刷新」「磁盘文件被删后播放报错」、进度条按住即跟手、长按手势分区、传输历史多选删除、播放记录去重与「视频已删除」标记。</span></div>
               <div class="log-item"><span class="dt">1.0.5</span><span>修复视频封面与视频内容错乱：缩略图按视频 id 命名（原来同一毫秒扫描多个文件会撞名）、封面地址带版本号自动破缓存、历史脏封面自动重建。</span></div>
                 <div class="log-item"><span class="dt">1.0.4</span><span>修复窗口较矮时左侧栏底部用户栏被裁切（侧栏导航可滚动、用户栏始终可见）。</span></div>
@@ -833,6 +870,29 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         <div class="modal-actions">
           <button class="btn ghost" @click="delTag.show = false">取消</button>
           <button class="btn danger" @click="doDelTag">删除</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 删除视频确认 -->
+    <div v-if="delVideo.show" class="modal-mask show" @click.self="delVideo.show = false">
+      <div class="modal">
+        <h3>
+          {{ delVideo.ids.length > 1 ? `删除选中的 ${delVideo.ids.length} 个视频？` : `删除「${delVideo.names[0]}」？` }}
+        </h3>
+        <p v-if="delVideo.ids.length > 1" class="mono" style="font-size:11.5px;color:var(--muted-2);max-height:90px;overflow:auto">
+          {{ delVideo.names.join('、') }}
+        </p>
+        <label class="chk-row">
+          <input v-model="delFile" type="checkbox" />
+          <span>同时删除服务器上的文件（不可恢复）</span>
+        </label>
+        <p style="font-size:11.5px;color:var(--muted-2)">
+          不勾选只从视频库里删掉这条记录，磁盘文件保留；勾选后文件也会被删除。
+        </p>
+        <div class="modal-actions">
+          <button class="btn ghost" @click="delVideo.show = false">取消</button>
+          <button class="btn danger" @click="doDelVideo">{{ delFile ? '删除记录和文件' : '仅删除记录' }}</button>
         </div>
       </div>
     </div>
