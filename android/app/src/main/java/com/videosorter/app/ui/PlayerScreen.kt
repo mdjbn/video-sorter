@@ -200,6 +200,12 @@ fun PlayerScreen(
             loadingSrc = false
             return@LaunchedEffect
         }
+        // 文件已被删除/移走：别把不存在的地址交给播放器（会报容器解析失败）
+        if (info.mode == "missing") {
+            errorMsg = "视频文件不存在（可能已被删除或移动），重新扫描源文件夹可更新"
+            loadingSrc = false
+            return@LaunchedEffect
+        }
         // HLS 模式要等切片就绪：直接给 ExoPlayer 一个还没生成的 m3u8 会 404 失败
         if (info.mode == "hls") {
             transcodePct = 0

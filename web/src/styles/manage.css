@@ -162,3 +162,25 @@
 .grid.as-list .vthumb { width: 172px; flex: none; aspect-ratio: 16 / 9; border-radius: 0; }
 .grid.as-list .vinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .grid.as-list .vname { min-height: 0; -webkit-line-clamp: 1; }
+
+/* ---------- 上传到服务器（视频库） ---------- */
+.upl{margin:0 0 14px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);
+  background:linear-gradient(160deg,rgba(var(--ink),.055),rgba(var(--ink),.02))}
+.upl-head{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);margin-bottom:8px}
+.upl-head span{font-size:11px;color:var(--muted-2);font-weight:400}
+.upl-head .sp{flex:1}
+.upl-row{display:flex;align-items:center;gap:10px;font-size:11.5px;padding:4px 0;color:var(--muted)}
+.upl-row .nm{max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.upl-row .bar{flex:1;height:4px;border-radius:2px;background:rgba(var(--ink),.12);overflow:hidden}
+.upl-row .bar i{display:block;height:100%;background:var(--accent);border-radius:2px;transition:width .2s}
+.upl-row .bar i.err{background:var(--danger)}
+.upl-row .st{width:70px;text-align:right;color:var(--muted-2)}
+.upl-row .st.ok{color:var(--accent)}
+.upl-row .st.err{color:var(--danger)}
+
+/* 视频卡片右上角下载按钮 */
+.vthumb .dl{position:absolute;right:8px;top:8px;width:26px;height:26px;border-radius:9px;
+  display:grid;place-items:center;color:rgba(var(--ink),.9);
+  background:rgba(var(--glass),.5);border:1px solid rgba(var(--ink),.16);backdrop-filter:blur(10px);
+  text-decoration:none;transition:.16s}
+.vthumb .dl:hover{background:rgba(var(--glass),.72);transform:translateY(-1px)}

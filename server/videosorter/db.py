@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS sources (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   path         TEXT UNIQUE NOT NULL,
   enabled      INTEGER NOT NULL DEFAULT 1,
+  kind         TEXT NOT NULL DEFAULT '',
   created_at   TEXT NOT NULL,
   last_scan_at TEXT
 );
@@ -169,6 +170,9 @@ class Database:
                 c.execute("ALTER TABLE play_history ADD COLUMN filename TEXT NOT NULL DEFAULT ''")
             if "deleted" not in cols:
                 c.execute("ALTER TABLE play_history ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+            scols = {r["name"] for r in c.execute("PRAGMA table_info(sources)").fetchall()}
+            if "kind" not in scols:
+                c.execute("ALTER TABLE sources ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
             row = c.execute("SELECT COUNT(*) AS n FROM tags").fetchone()
             if row and row["n"] == 0:
                 for i, (name, color) in enumerate(DEFAULT_TAGS):

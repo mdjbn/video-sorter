@@ -61,6 +61,12 @@ def create_app(cfg: Config | None = None, web_dir: Path | str | None = None) -> 
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # 上传目录也当作一个内置源目录：启动时登记/同步，扫描才覆盖它
+        from .api.sources_routes import ensure_upload_source
+        try:
+            ensure_upload_source(st)
+        except Exception as e:  # noqa: BLE001 - 目录不可写不应阻止服务启动
+            print(f"[warn] 上传目录登记失败：{e}")
         # 局域网发现：手机 App 广播 VS_DISCOVER，这里回包告诉它端口/名称
         if cfg.get("discovery", True) and st.discovery is None:
             st.discovery = DiscoveryService(

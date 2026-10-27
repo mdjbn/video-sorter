@@ -32,6 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
@@ -449,6 +451,7 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
     val scope = rememberCoroutineScope()
     var list by remember { mutableStateOf<List<Source>>(emptyList()) }
     var adding by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Source?>(null) }
     var draft by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
@@ -460,7 +463,10 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
 
     SubScaffold("源文件夹", onBack, actions = {
         Box(
-            Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(t.ink(0.06f)).clickable { adding = true },
+            Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(t.ink(0.06f)).clickable {
+                draft = ""
+                adding = true
+            },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.Add, "添加", tint = t.ink(0.75f), modifier = Modifier.size(17.dp)) }
     }) {
@@ -469,44 +475,70 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
                 EmptyNote("还没有源文件夹，点右上角 ＋ 添加")
             } else {
                 GroupCard {
-                    list.forEachIndexed { i, s ->
+                    list.forEachIndexed { i, s0 ->
                         if (i > 0) RowDivider()
+                        val isUpload = s0.kind == "upload"
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            Modifier.fillMaxWidth()
+                                .clickable(enabled = s0.editable) {
+                                    editing = s0
+                                    draft = s0.path
+                                }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RoundIcon(Icons.Rounded.Folder)
+                            RoundIcon(if (isUpload) Icons.Rounded.CloudUpload else Icons.Rounded.Folder)
                             Spacer(Modifier.width(11.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(
-                                    s.path,
-                                    color = t.ink(0.9f),
-                                    fontSize = 12.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        s0.path,
+                                        color = t.ink(0.9f),
+                                        fontSize = 12.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    if (isUpload) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "上传目录",
+                                            color = t.accent,
+                                            fontSize = 9.5.sp,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(5.dp))
+                                                .background(t.accent.copy(alpha = 0.14f))
+                                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                }
                                 Spacer(Modifier.height(3.dp))
                                 Text(
                                     buildString {
-                                        append("${s.count} 个视频")
-                                        if (!s.exists) append(" · 目录不存在")
+                                        append("${s0.count} 个视频")
+                                        if (!s0.exists) append(" · 目录不存在")
+                                        if (isUpload) append(" · 手机/网页上传都存到这里，可改路径不可删除")
                                     },
-                                    color = if (s.exists) t.muted2 else t.danger,
+                                    color = if (s0.exists) t.muted2 else t.danger,
                                     fontSize = 10.sp,
                                 )
                             }
-                            Box(
-                                Modifier.size(28.dp).clip(CircleShape).background(t.danger.copy(alpha = 0.12f))
-                                    .clickable {
-                                        scope.launch {
-                                            runCatching { api.removeSource(s.id) }
-                                            load()
-                                            onRefresh()
-                                            onToast("已移除源目录")
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) { Icon(Icons.Rounded.Delete, "移除", tint = t.danger, modifier = Modifier.size(14.dp)) }
+                            if (s0.deletable) {
+                                Box(
+                                    Modifier.size(28.dp).clip(CircleShape).background(t.danger.copy(alpha = 0.12f))
+                                        .clickable {
+                                            scope.launch {
+                                                runCatching { api.removeSource(s0.id) }
+                                                load()
+                                                onRefresh()
+                                                onToast("已移除源目录")
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) { Icon(Icons.Rounded.Delete, "移除", tint = t.danger, modifier = Modifier.size(14.dp)) }
+                            } else {
+                                Icon(Icons.Rounded.ChevronRight, null, tint = t.ink(0.3f), modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
@@ -514,7 +546,7 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
 
             Spacer(Modifier.height(16.dp))
             GroupCard {
-                SettingRow(Icons.Rounded.Search, "立即扫描", "扫描所有源文件夹并生成封面", chevron = false) {
+                SettingRow(Icons.Rounded.Search, "立即扫描", "扫描所有源文件夹（含上传目录）并生成封面", chevron = false) {
                     if (busy) return@SettingRow
                     busy = true
                     scope.launch {
@@ -570,6 +602,48 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
                 }) { Text("保存", color = t.accent) }
             },
             dismissButton = { TextButton(onClick = { adding = false }) { Text("取消", color = t.muted) } },
+            containerColor = t.panel,
+        )
+    }
+
+    editing?.let { target ->
+        val isUpload = target.kind == "upload"
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text(if (isUpload) "修改上传目录" else "修改源文件夹", color = t.text, fontSize = 15.sp) },
+            text = {
+                Column {
+                    Text(
+                        if (isUpload) "手机端与网页端上传的文件都会存到这里；改完后新的上传落到新目录，已入库的视频不受影响。"
+                        else "改成服务端上的另一个目录，之后扫描按新路径进行。",
+                        color = t.muted2,
+                        fontSize = 11.5.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    GlassField(draft, { draft = it }, placeholder = "/volume1/videos", keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val p = draft.trim()
+                    if (p.isEmpty()) {
+                        onToast("请填写目录路径")
+                        return@TextButton
+                    }
+                    editing = null
+                    scope.launch {
+                        try {
+                            api.updateSource(target.id, p)
+                            load()
+                            onRefresh()
+                            onToast(if (isUpload) "上传目录已更新" else "源文件夹已更新")
+                        } catch (e: Throwable) {
+                            onToast("修改失败：${e.message ?: ""}")
+                        }
+                    }
+                }) { Text("保存", color = t.accent) }
+            },
+            dismissButton = { TextButton(onClick = { editing = null }) { Text("取消", color = t.muted) } },
             containerColor = t.panel,
         )
     }

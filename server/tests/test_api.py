@@ -274,8 +274,14 @@ def test_history_dedupe_and_deleted(env):
     same = [i for i in c.get("/api/history").json()["items"] if i["filename"] == a["filename"]]
     assert len(same) == 1 and same[0]["id"] == again["id"] and same[0]["deleted"] is False
 
+    # 上传目录作为内置源存在，可改不可删
+    srcs = c.get("/api/sources").json()["sources"]
+    up = [s for s in srcs if s["kind"] == "upload"]
+    assert up and up[0]["deletable"] is False and up[0]["editable"] is True
+    assert c.delete(f"/api/sources/{up[0]['id']}").status_code == 400
+
     # 删除源目录 → 其下视频消失，播放记录标 deleted
-    sid = c.get("/api/sources").json()["sources"][0]["id"]
+    sid = [s for s in srcs if s["kind"] != "upload"][0]["id"]
     assert c.delete(f"/api/sources/{sid}").status_code == 200
     assert c.get("/api/videos").json()["items"] == []
     left = c.get("/api/history").json()["items"]

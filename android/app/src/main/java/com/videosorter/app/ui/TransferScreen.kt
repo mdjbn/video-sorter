@@ -124,6 +124,8 @@ fun TransferScreen(
     api: Api,
     onBack: () -> Unit,
     onToast: (String) -> Unit,
+    /** 上传/删除后通知外层刷新视频库（删除文件后列表要立刻少一条） */
+    onChanged: () -> Unit = {},
 ) {
     val t = tokens()
     val ctx = LocalContext.current
@@ -191,6 +193,7 @@ fun TransferScreen(
             exitSelect()
             pendingDelete = null
             reloadHistory()
+            onChanged()
             onToast(if (withFile) "已删除 ${items.size} 条记录 · $files 个文件" else "已删除 ${items.size} 条记录")
         }
     }

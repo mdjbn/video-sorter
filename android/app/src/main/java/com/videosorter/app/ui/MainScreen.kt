@@ -261,6 +261,7 @@ fun MainScreen(
                     api = api,
                     onBack = { transferOpen = false },
                     onToast = { toast(it) },
+                    onChanged = { scope.launch { reload(silent = true) } },
                 )
             }
         }

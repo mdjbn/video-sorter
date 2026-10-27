@@ -191,6 +191,10 @@ data class Source(
     val path: String = "",
     val count: Int = 0,
     val exists: Boolean = true,
+    /** "" 普通源目录；"upload" 内置上传目录（可改路径，不可删除） */
+    val kind: String = "",
+    val editable: Boolean = true,
+    val deletable: Boolean = true,
 )
 
 @Serializable

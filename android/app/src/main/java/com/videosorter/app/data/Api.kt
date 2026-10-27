@@ -164,6 +164,9 @@ class Api(baseUrl: String, var token: String? = null) {
 
     suspend fun sources(): List<Source> = getJson<SourceList>("/api/sources").sources
 
+    suspend fun updateSource(id: Int, path: String): SourceOut =
+        sendJson("/api/sources/$id", "PUT", """{"path":${json.encodeToString(path)}}""")
+
     suspend fun addSource(path: String): Source =
         sendJson<SourceOut>("/api/sources", "POST", """{"path":${json.encodeToString(path)}}""").source
 

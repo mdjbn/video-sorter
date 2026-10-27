@@ -42,7 +42,7 @@ def _file_iter(path: Path, start: int, end: int):
 
 
 @router.get("/raw")
-def raw(video_id: int, request: Request,
+def raw(video_id: int, request: Request, download: int = 0,
         user: dict[str, Any] = Depends(require_user)):
     st = get_state()
     row = _video_row(st, video_id)
@@ -53,6 +53,12 @@ def raw(video_id: int, request: Request,
     ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     if ctype == "application/mp4":
         ctype = "video/mp4"
+    disp = {}
+    if download:
+        # 网页端「下载」用：让浏览器按附件保存，文件名沿用原始文件名
+        from urllib.parse import quote
+        disp["Content-Disposition"] = (
+            f"attachment; filename*=UTF-8''{quote(row['filename'] or path.name)}")
     header = request.headers.get("range")
     if header:
         m = RANGE_RE.match(header.strip())
@@ -71,6 +77,7 @@ def raw(video_id: int, request: Request,
         if start > end or start >= size:
             raise HTTPException(416, "Range 超出文件范围")
         headers = {
+            **disp,
             "Content-Range": f"bytes {start}-{end}/{size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(end - start + 1),
@@ -79,7 +86,7 @@ def raw(video_id: int, request: Request,
                                  media_type=ctype, headers=headers)
     return StreamingResponse(
         _file_iter(path, 0, size - 1), media_type=ctype,
-        headers={"Accept-Ranges": "bytes", "Content-Length": str(size)})
+        headers={**disp, "Accept-Ranges": "bytes", "Content-Length": str(size)})
 
 
 @router.get("/play")

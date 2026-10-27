@@ -42,6 +42,13 @@ def put_settings(body: SettingsIn, user: dict[str, Any] = Depends(require_user))
     if "host" in patch and patch["host"] not in {"0.0.0.0", "127.0.0.1", "localhost"}:
         patch.pop("host")
     values = st.cfg.update(patch)
+    if "upload_dir" in patch:
+        # 上传目录同时是一条内置源目录，路径变了要同步
+        from .sources_routes import ensure_upload_source
+        try:
+            ensure_upload_source(st)
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] 上传目录同步失败：{e}")
     return {"ok": True, "settings": values, "restart_required": bool({"port", "host"} & set(patch))}
 
 

@@ -170,6 +170,47 @@ async function bulkTag(tagId: number) {
 }
 function openVideo(v: Video) { router.push({ path: '/', query: { v: String(v.id) } }) }
 
+/* ---------------- 上传（与手机端共用同一个上传目录） ---------------- */
+type UploadItem = { name: string; pct: number; state: 'run' | 'ok' | 'err'; msg?: string }
+const uploads = ref<UploadItem[]>([])
+const fileInput = ref<HTMLInputElement | null>(null)
+function pickFiles() { fileInput.value?.click() }
+function clearUploads() { uploads.value = uploads.value.filter((u) => u.state === 'run') }
+function errText(text: string): string {
+  try { const j = JSON.parse(text); return j.detail || j.error || '上传失败' } catch { return '上传失败' }
+}
+function uploadOne(f: File): Promise<void> {
+  return new Promise((resolve) => {
+    const item: UploadItem = { name: f.name, pct: 0, state: 'run' }
+    uploads.value.unshift(item)
+    const fd = new FormData()
+    fd.append('file', f)
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', '/api/upload')
+    xhr.withCredentials = true
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) item.pct = Math.round((e.loaded / e.total) * 100) }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) { item.pct = 100; item.state = 'ok' }
+      else { item.state = 'err'; item.msg = errText(xhr.responseText) }
+      resolve()
+    }
+    xhr.onerror = () => { item.state = 'err'; item.msg = '网络错误'; resolve() }
+    xhr.send(fd)
+  })
+}
+async function onFiles(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  if (!files.length) return
+  try {
+    for (const f of files) await uploadOne(f)
+    const ok = uploads.value.filter((u) => u.state === 'ok').length
+    toast(`上传完成 ${ok} 个，正在刷新视频库`)
+    await Promise.all([loadLibrary(), loadStats()])
+  } catch (e: any) { toast(e?.message || '上传失败', true) }
+}
+
 /* ---------------- 标签管理 ---------------- */
 const tagModal = reactive({ show: false, id: 0, name: '', color: '#35d18a', dir: '', saving: false })
 const TAG_COLORS = ['#f4a259', '#ef5b7b', '#4cc9f0', '#9b8cff', '#8d98a8', '#35d18a', '#f2c14e', '#ef7d4f']
@@ -474,6 +515,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               <div class="m-desc">点卡片进入播放页；勾选后可批量打标签。</div>
             </div>
             <div class="sp" />
+            <input ref="fileInput" type="file" accept="video/*" multiple hidden @change="onFiles" />
+            <button class="btn primary" @click="pickFiles"><Icon name="upload" :size="15" />上传视频</button>
             <button class="btn ghost" @click="go('overview')">去扫描</button>
           </div>
           <div class="lib-head">
@@ -489,10 +532,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               <button :class="{ on: lib.mode === 'list' }" @click="lib.mode = 'list'">列表</button>
             </div>
           </div>
+          <div v-if="uploads.length" class="upl">
+            <div class="upl-head">
+              <Icon name="upload" :size="14" />
+              <b>上传到服务器</b>
+              <span>文件会存到「源文件夹 → 上传目录」，手机端与网页端共用同一个目录</span>
+              <div class="sp" />
+              <button class="btn ghost sm" @click="clearUploads">清空</button>
+            </div>
+            <div v-for="(u, i) in uploads" :key="i" class="upl-row">
+              <span class="nm">{{ u.name }}</span>
+              <span class="bar"><i :style="{ width: u.pct + '%' }" :class="{ err: u.state === 'err' }" /></span>
+              <span class="st" :class="u.state">{{ u.state === 'ok' ? '完成' : u.state === 'err' ? (u.msg || '失败') : u.pct + '%' }}</span>
+            </div>
+          </div>
           <div class="grid" :class="{ 'as-list': lib.mode === 'list' }">
             <div v-for="v in videos" :key="v.id" class="vcard" :class="{ sel: sel.has(v.id) }" @click="openVideo(v)">
               <div class="vthumb" :style="v.thumb_url ? { backgroundImage: `url(${v.thumb_url})` } : {}">
                 <span class="pick" @click.stop="toggleSel(v.id)"><Icon name="check" :size="12" /></span>
+                <a class="dl" :href="`/api/videos/${v.id}/raw?download=1`" :download="v.filename" title="下载到本机" @click.stop>
+                  <Icon name="download" :size="14" />
+                </a>
                 <span class="dur">{{ fmtDur(v.duration) }}</span>
               </div>
               <div class="vinfo">
@@ -705,7 +765,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.5' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.6' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -730,6 +790,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.0.6</span><span>上传目录纳入源文件夹管理（可改路径、不可删除），扫描覆盖上传目录；网页端新增上传（多文件+进度）与下载；手机端修「删除文件后视频库不刷新」「磁盘文件被删后播放报错」、进度条按住即跟手、长按手势分区、传输历史多选删除、播放记录去重与「视频已删除」标记。</span></div>
               <div class="log-item"><span class="dt">1.0.5</span><span>修复视频封面与视频内容错乱：缩略图按视频 id 命名（原来同一毫秒扫描多个文件会撞名）、封面地址带版本号自动破缓存、历史脏封面自动重建。</span></div>
                 <div class="log-item"><span class="dt">1.0.4</span><span>修复窗口较矮时左侧栏底部用户栏被裁切（侧栏导航可滚动、用户栏始终可见）。</span></div>
               <div class="log-item"><span class="dt">1.0.3</span><span>修复 .avi/.wmv 老容器转码失败（copy 失败自动回退完整转码）；静态资源不再被浏览器缓存，升级后立即生效；安卓端真机联调修 12 处。</span></div>
