@@ -463,31 +463,33 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             </button>
           </div>
 
-          <div class="stats">
-            <div class="stat" style="--c:rgba(53,209,138,.18)">
-              <div class="k">视频总数</div>
-              <div class="v">{{ stats?.total ?? 0 }} <small>个</small></div>
-              <div class="d">占用 {{ fmtSize(stats?.bytes ?? 0) }}</div>
+          <div class="ov-top">
+            <!-- 四个统计卡片：2×2 -->
+            <div class="stats">
+              <div class="stat" style="--c:rgba(53,209,138,.18)">
+                <div class="k">视频总数</div>
+                <div class="v">{{ stats?.total ?? 0 }} <small>个</small></div>
+                <div class="d">占用 {{ fmtSize(stats?.bytes ?? 0) }}</div>
+              </div>
+              <div class="stat" style="--c:rgba(244,162,89,.18)">
+                <div class="k">待整理</div>
+                <div class="v">{{ stats?.tagged_pending ?? 0 }} <small>个</small></div>
+                <div class="d">已打标签、还没移动</div>
+              </div>
+              <div class="stat" style="--c:rgba(155,140,255,.16)">
+                <div class="k">已整理</div>
+                <div class="v">{{ stats?.organized ?? 0 }} <small>个</small></div>
+                <div class="d">已移动到标签文件夹</div>
+              </div>
+              <div class="stat" style="--c:rgba(76,201,240,.16)">
+                <div class="k">未打标签</div>
+                <div class="v">{{ stats?.untagged ?? 0 }} <small>个</small></div>
+                <div class="d">最近扫描 {{ stats?.last_scan_at ? fmtTime(stats.last_scan_at) : '尚未扫描' }}</div>
+              </div>
             </div>
-            <div class="stat" style="--c:rgba(244,162,89,.18)">
-              <div class="k">待整理</div>
-              <div class="v">{{ stats?.tagged_pending ?? 0 }} <small>个</small></div>
-              <div class="d">已打标签、还没移动</div>
-            </div>
-            <div class="stat" style="--c:rgba(155,140,255,.16)">
-              <div class="k">已整理</div>
-              <div class="v">{{ stats?.organized ?? 0 }} <small>个</small></div>
-              <div class="d">已移动到标签文件夹</div>
-            </div>
-            <div class="stat" style="--c:rgba(76,201,240,.16)">
-              <div class="k">未打标签</div>
-              <div class="v">{{ stats?.untagged ?? 0 }} <small>个</small></div>
-              <div class="d">最近扫描 {{ stats?.last_scan_at ? fmtTime(stats.last_scan_at) : '尚未扫描' }}</div>
-            </div>
-          </div>
 
-          <div class="g2">
-            <div class="card">
+            <!-- 标签分布：固定尺寸，与统计卡同一排 -->
+            <div class="card dist-card">
               <div class="card-head"><h2>标签分布</h2><div class="sp" /><button class="btn ghost sm" @click="go('tags')">管理标签</button></div>
               <div class="card-body">
                 <div v-for="t in stats?.tags || []" :key="t.id" class="dist-row">
@@ -832,7 +834,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.0' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.1' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -857,6 +859,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.1.1</span><span>视频封面改为取每个视频的第一帧（旧封面会自动重建）；概览页四个统计卡片改为 2×2，与标签分布卡片同排、标签分布卡片固定尺寸。</span></div>
               <div class="log-item"><span class="dt">1.1.0</span><span>扫描会同时遍历源文件夹与各标签的目标文件夹；网页端「源文件夹」管理移到视频库页；标签管理页新增扫描按钮；手机端标签管理页也新增扫描按钮。</span></div>
               <div class="log-item"><span class="dt">1.0.11</span><span>整理过的视频重新扫描后仍留在媒体库；视频库按「源文件夹 / 标签文件夹」分组展示。</span></div>
               <div class="log-item"><span class="dt">1.0.10</span><span>fnOS 安装包：安装向导可选择服务端口；卸载时可选择保留或删除应用数据。</span></div>

@@ -21,7 +21,7 @@ DEFAULTS: dict[str, Any] = {
     "theme": "auto",
     "transcode": True,          # 允许按需 HLS 转码
     "transcode_preset": "veryfast",
-    "thumb_position": 0.15,     # 取 15% 处作为封面
+    "thumb_position": 0.0,      # 0 = 取视频第一帧作为封面
     "scan_workers": 3,
     "upload_dir": "",           # 手机上传落盘目录，空=整理根目录/手机上传（或第一个源目录/手机上传）
     "discovery": True,          # 局域网 UDP 发现（手机 App 自动找服务器）
@@ -56,6 +56,9 @@ class Config:
                     for k in DEFAULTS:
                         if k in data and data[k] is not None:
                             self.values[k] = data[k]
+                    # 旧默认值是 0.15（15% 处截帧），现已改为「第一帧」，老配置自动迁移
+                    if self.values.get("thumb_position") == 0.15:
+                        self.values["thumb_position"] = 0.0
             except (json.JSONDecodeError, OSError):
                 pass
         self._apply_env()

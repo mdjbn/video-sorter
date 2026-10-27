@@ -133,10 +133,11 @@ def can_direct_play(ext: str, vcodec: str, acodec: str) -> bool:
     )
 
 
-def make_thumb(tools: MediaTools, src: Path, out: Path, duration: float, ratio: float = 0.15) -> bool:
+def make_thumb(tools: MediaTools, src: Path, out: Path, duration: float, ratio: float = 0.0) -> bool:
     ffmpeg, _ = tools.require()
     out.parent.mkdir(parents=True, exist_ok=True)
-    at = max(0.0, min(duration * ratio, max(duration - 1, 0))) if duration > 1 else 0.0
+    # ratio=0（默认）即取视频第一帧作为封面
+    at = max(0.0, min(duration * ratio, max(duration - 1, 0))) if (duration > 1 and ratio > 0) else 0.0
     cmd = [
         ffmpeg, "-y", "-v", "error", "-ss", f"{at:.2f}", "-i", str(src),
         "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", str(out),

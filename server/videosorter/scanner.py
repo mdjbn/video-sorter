@@ -155,7 +155,7 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                 try:
                     thumb_path = cfg.thumb_dir / f"{vid}.jpg"
                     if make_thumb(tools, p, thumb_path, float(item.get("duration") or 0),
-                                  float(cfg.get("thumb_position", 0.15))):
+                                  float(cfg.get("thumb_position", 0.0))):
                         db.execute("UPDATE videos SET thumb=? WHERE id=?", (thumb_path.name, vid))
                 except Exception:
                     pass

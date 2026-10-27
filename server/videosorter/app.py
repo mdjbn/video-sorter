@@ -67,6 +67,16 @@ def create_app(cfg: Config | None = None, web_dir: Path | str | None = None) -> 
             ensure_upload_source(st)
         except Exception as e:  # noqa: BLE001 - 目录不可写不应阻止服务启动
             print(f"[warn] 上传目录登记失败：{e}")
+        # 封面规则从「视频 15% 处截帧」改成「第一帧」：清掉旧封面，由 /thumb 首次访问时按新规则重建
+        try:
+            if st.db.get_setting("thumb_spec") != "first_frame":
+                import shutil
+                shutil.rmtree(st.cfg.thumb_dir, ignore_errors=True)
+                st.cfg.thumb_dir.mkdir(parents=True, exist_ok=True)
+                st.db.execute("UPDATE videos SET thumb=''")
+                st.db.set_setting("thumb_spec", "first_frame")
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] 封面规则迁移失败：{e}")
         # 局域网发现：手机 App 广播 VS_DISCOVER，这里回包告诉它端口/名称
         if cfg.get("discovery", True) and st.discovery is None:
             st.discovery = DiscoveryService(

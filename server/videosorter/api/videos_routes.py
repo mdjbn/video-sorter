@@ -244,7 +244,7 @@ def thumb(video_id: int, user: dict[str, Any] = Depends(require_user)):
         made = False
         if st.tools.available and src.exists():
             made = make_thumb(st.tools, src, canonical, row["duration"] or 0,
-                              st.cfg.get("thumb_position") or 0.15)
+                              st.cfg.get("thumb_position") or 0.0)
         if not made and legacy is not None and legacy.exists():
             # 没有 ffmpeg 时退而用旧文件，但改正记录
             try:
