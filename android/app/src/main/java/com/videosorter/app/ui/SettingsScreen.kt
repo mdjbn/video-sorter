@@ -49,6 +49,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -546,7 +547,7 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
 
             Spacer(Modifier.height(16.dp))
             GroupCard {
-                SettingRow(Icons.Rounded.Search, "立即扫描", "扫描所有源文件夹（含上传目录）并生成封面", chevron = false) {
+                SettingRow(Icons.Rounded.Search, "立即扫描", "扫描所有源文件夹（含上传目录）与各标签的目标文件夹", chevron = false) {
                     if (busy) return@SettingRow
                     busy = true
                     scope.launch {
@@ -659,6 +660,7 @@ private val TAG_COLORS = listOf(
 private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRefresh: () -> Unit, onBack: () -> Unit) {
     val t = tokens()
     val scope = rememberCoroutineScope()
+    var scanning by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Tag?>(null) }
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
@@ -673,6 +675,38 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
     }
 
     SubScaffold("标签管理", onBack, actions = {
+        // 扫描：同时覆盖源文件夹与各标签的目标文件夹（整理过的视频就在后者里）
+        Box(
+            Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(t.ink(0.06f)).clickable {
+                if (scanning) return@clickable
+                scanning = true
+                scope.launch {
+                    try {
+                        val taskId = api.scan()
+                        while (true) {
+                            val task = api.task(taskId)
+                            if (task.status != "running") {
+                                onToast("扫描完成：${task.message.ifEmpty { "ok" }}")
+                                break
+                            }
+                            kotlinx.coroutines.delay(400)
+                        }
+                        onRefresh()
+                    } catch (e: Throwable) {
+                        onToast("扫描失败：${e.message ?: ""}")
+                    } finally {
+                        scanning = false
+                    }
+                }
+            },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (scanning) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.6.dp, color = t.accent)
+            } else {
+                Icon(Icons.Rounded.Refresh, "扫描源文件夹与标签文件夹", tint = t.ink(0.75f), modifier = Modifier.size(17.dp))
+            }
+        }
         Box(
             Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(t.ink(0.06f)).clickable {
                 creating = true; name = ""; color = TAG_COLORS[0]; dir = ""
@@ -705,6 +739,12 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                     }
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
+                color = t.muted2, fontSize = 10.5.sp, lineHeight = 15.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
             Spacer(Modifier.height(24.dp))
         }
     }

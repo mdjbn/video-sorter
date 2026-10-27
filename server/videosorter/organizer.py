@@ -34,7 +34,8 @@ def resolve_tag_dir(db: Database, cfg: Config, tag: dict[str, Any],
     root = (cfg.get("root_dir") or "").strip()
     if root:
         return Path(root).expanduser() / str(tag["name"])
-    row = db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1")
+    row = (db.query_one("SELECT path FROM sources WHERE enabled=1 AND COALESCE(kind,'')<>'upload' ORDER BY id LIMIT 1")
+           or db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1"))
     if row:
         return Path(row["path"]) / str(tag["name"])
     if video_path:
@@ -46,7 +47,8 @@ def default_tag_dir(db: Database, cfg: Config, tag_name: str) -> str:
     root = (cfg.get("root_dir") or "").strip()
     if root:
         return str(Path(root).expanduser() / tag_name)
-    row = db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1")
+    row = (db.query_one("SELECT path FROM sources WHERE enabled=1 AND COALESCE(kind,'')<>'upload' ORDER BY id LIMIT 1")
+           or db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1"))
     if row:
         return str(Path(row["path"]) / tag_name)
     return ""

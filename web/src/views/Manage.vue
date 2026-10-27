@@ -455,11 +455,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="m-head">
             <div>
               <div class="m-title">概览</div>
-              <div class="m-desc">扫描源文件夹、给视频打标签，然后一键把带标签的视频移动到对应文件夹。</div>
+              <div class="m-desc">扫描源文件夹与标签文件夹、给视频打标签，然后一键把带标签的视频移动到对应文件夹。源文件夹的新增/移除在「视频库」页。</div>
             </div>
             <div class="sp" />
             <button class="btn primary" :disabled="scan.running" @click="runScan">
-              <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描源文件夹' }}
+              <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描全部' }}
             </button>
           </div>
 
@@ -487,35 +487,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           </div>
 
           <div class="g2">
-            <div class="card">
-              <div class="card-head"><h2>源文件夹</h2><div class="sp" /><span class="badge">{{ sources.length }} 个</span></div>
-              <div class="card-body">
-                <div v-for="s in sources" :key="s.id" class="src-row">
-                  <Icon :name="s.kind === 'upload' ? 'upload' : 'folder'" :size="17" :style="{ color: s.kind === 'upload' ? 'var(--accent)' : 'var(--muted-2)' }" />
-                  <div class="src-path">
-                    <div class="p">
-                      {{ s.path }}
-                      <span v-if="s.kind === 'upload'" class="up-badge">上传目录</span>
-                    </div>
-                    <div class="s">
-                      {{ s.count ?? 0 }} 个视频 · 上次扫描 {{ s.last_scan_at ? fmtTime(s.last_scan_at) : '从未' }}
-                      <template v-if="s.kind === 'upload'"> · 手机/网页上传都存到这里，可改路径不可删除</template>
-                    </div>
-                  </div>
-                  <button v-if="s.deletable !== false" class="icon-act dg" title="移除" @click="removeSource(s.id)"><Icon name="close" :size="15" /></button>
-                </div>
-                <div v-if="!sources.length" class="empty">还没有源文件夹，添加一个包含视频的目录。</div>
-                <div style="display:flex;gap:8px;margin-top:12px">
-                  <input v-model="newSource" class="field" placeholder="/volume1/videos/未整理" spellcheck="false" @keyup.enter="addSource" />
-                  <button class="btn" @click="addSource">添加</button>
-                </div>
-                <div v-if="scan.running || scan.percent > 0" class="scanbar">
-                  <div class="track"><i :style="{ width: scan.percent + '%' }" /></div>
-                  <span style="font-size:11.5px;color:var(--muted-2);min-width:120px">{{ scan.text }}</span>
-                </div>
-              </div>
-            </div>
-
             <div class="card">
               <div class="card-head"><h2>标签分布</h2><div class="sp" /><button class="btn ghost sm" @click="go('tags')">管理标签</button></div>
               <div class="card-body">
@@ -557,7 +528,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="sp" />
             <input ref="fileInput" type="file" accept="video/*" multiple hidden @change="onFiles" />
             <button class="btn primary" @click="pickFiles"><Icon name="upload" :size="15" />上传视频</button>
-            <button class="btn ghost" @click="go('overview')">去扫描</button>
+            <button class="btn ghost" :disabled="scan.running" @click="runScan">
+              <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描' }}
+            </button>
           </div>
           <div class="lib-head">
             <label class="search"><Icon name="search" :size="15" /><input v-model="lib.q" placeholder="搜索文件名" spellcheck="false" /></label>
@@ -586,6 +559,42 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               <span class="st" :class="u.state">{{ u.state === 'ok' ? '完成' : u.state === 'err' ? (u.msg || '失败') : u.pct + '%' }}</span>
             </div>
           </div>
+          <div class="card" style="margin-bottom:14px">
+              <div class="card-head">
+                <h2>源文件夹</h2><div class="sp" /><span class="badge">{{ sources.length }} 个</span>
+                <button class="btn ghost sm" :disabled="scan.running" @click="runScan">
+                  <Icon name="refresh" :size="14" />{{ scan.running ? '扫描中…' : '扫描' }}
+                </button>
+              </div>
+              <div class="card-body">
+                <div v-for="s in sources" :key="s.id" class="src-row">
+                  <Icon :name="s.kind === 'upload' ? 'upload' : 'folder'" :size="17" :style="{ color: s.kind === 'upload' ? 'var(--accent)' : 'var(--muted-2)' }" />
+                  <div class="src-path">
+                    <div class="p">
+                      {{ s.path }}
+                      <span v-if="s.kind === 'upload'" class="up-badge">上传目录</span>
+                    </div>
+                    <div class="s">
+                      {{ s.count ?? 0 }} 个视频 · 上次扫描 {{ s.last_scan_at ? fmtTime(s.last_scan_at) : '从未' }}
+                      <template v-if="s.kind === 'upload'"> · 手机/网页上传都存到这里，可改路径不可删除</template>
+                    </div>
+                  </div>
+                  <button v-if="s.deletable !== false" class="icon-act dg" title="移除" @click="removeSource(s.id)"><Icon name="close" :size="15" /></button>
+                </div>
+                <div v-if="!sources.length" class="empty">还没有源文件夹，添加一个包含视频的目录。</div>
+                <div style="display:flex;gap:8px;margin-top:12px">
+                  <input v-model="newSource" class="field" placeholder="/volume1/videos/未整理" spellcheck="false" @keyup.enter="addSource" />
+                  <button class="btn" @click="addSource">添加</button>
+                </div>
+                <div class="m-desc" style="font-size:11.5px;margin-top:10px">
+                  扫描会同时遍历上面的源文件夹，以及「标签管理」里每个标签的目标文件夹（整理过的视频就存放在那里）。
+                </div>
+                <div v-if="scan.running || scan.percent > 0" class="scanbar">
+                  <div class="track"><i :style="{ width: scan.percent + '%' }" /></div>
+                  <span style="font-size:11.5px;color:var(--muted-2);min-width:120px">{{ scan.text }}</span>
+                </div>
+              </div>
+            </div>
           <div v-for="g in libGroups" :key="g.k" class="lib-group">
             <div class="lib-group-head">
               <span class="ico"><Icon :name="g.icon" :size="14" /></span>
@@ -639,9 +648,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="m-head">
             <div>
               <div class="m-title">标签管理</div>
-              <div class="m-desc">每个标签对应一个目的文件夹；不填则默认在视频所在目录/源目录下建同名文件夹。</div>
+              <div class="m-desc">每个标签对应一个目的文件夹；不填则默认在源目录下建同名文件夹。点「扫描」可同时扫描源文件夹与这些标签文件夹。</div>
             </div>
             <div class="sp" />
+            <button class="btn ghost" :disabled="scan.running" title="同时扫描源文件夹与各标签的目标文件夹" @click="runScan">
+              <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描' }}
+            </button>
             <button class="btn primary" @click="openTag()"><Icon name="plus" :size="15" />新建标签</button>
           </div>
           <div class="rows">
@@ -820,7 +832,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.11' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.0' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -845,6 +857,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.1.0</span><span>扫描会同时遍历源文件夹与各标签的目标文件夹；网页端「源文件夹」管理移到视频库页；标签管理页新增扫描按钮；手机端标签管理页也新增扫描按钮。</span></div>
               <div class="log-item"><span class="dt">1.0.11</span><span>整理过的视频重新扫描后仍留在媒体库；视频库按「源文件夹 / 标签文件夹」分组展示。</span></div>
               <div class="log-item"><span class="dt">1.0.10</span><span>fnOS 安装包：安装向导可选择服务端口；卸载时可选择保留或删除应用数据。</span></div>
               <div class="log-item"><span class="dt">1.0.9</span><span>筛选支持多标签（手机端与网页端都可同时勾选多个标签取并集）；手机端视频库筛选后播放器只播筛选结果，切回视频库筛选状态保留。</span></div>
