@@ -83,7 +83,7 @@ defineExpose({ user })
   </template>
 
   <div v-if="showPromo" class="app-promo">
-    <span class="promo-ico">📱</span>
+    <span class="promo-ico"><Icon name="download" :size="15" /></span>
     <div class="promo-txt">
       <b>用 App 刷视频更顺手</b>
       <span>上下滑切换、长按加速、自动发现服务器</span>
