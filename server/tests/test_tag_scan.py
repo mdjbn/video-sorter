@@ -1,6 +1,7 @@
 """扫描要同时覆盖「标签文件夹」：整理过的视频即使数据库丢了也能重新入库。"""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from conftest import make_video
@@ -16,11 +17,13 @@ def _scan(client) -> dict:
     r = client.post("/api/scan", json={})
     assert r.status_code == 200, r.text
     tid = r.json()["task_id"]
-    for _ in range(60):
+    # 扫描是后台线程任务，必须给它时间（CI 机器快，紧凑轮询会在扫描结束前就把次数用完）
+    for _ in range(300):
         t = client.get(f"/api/tasks/{tid}").json()
         if t["status"] != "running":
             assert t["status"] == "done", t
             return t
+        time.sleep(0.05)
     raise AssertionError("扫描超时")
 
 
