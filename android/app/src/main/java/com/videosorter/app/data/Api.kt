@@ -54,6 +54,7 @@ class Api(baseUrl: String, var token: String? = null) {
             ?.toRequestBody(JSON)
         when (method) {
             "POST" -> b.post(jsonBody ?: EMPTY)
+            "PUT" -> b.put(jsonBody ?: EMPTY)
             "PATCH" -> b.patch(jsonBody ?: EMPTY)
             "DELETE" -> b.delete()
             else -> b.get()

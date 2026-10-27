@@ -36,6 +36,7 @@ data class TransferItem(
     val kind: String = "up",          // up | down
     val where: String = "",           // 目标/来源路径
     val uri: String = "",             // 落盘后的 content:// URI（可用来打开文件）
+    val videoId: Int = 0,             // 上传成功后的服务端视频 id（删除文件时用）
     val msg: String = "",
 )
 
@@ -59,6 +60,14 @@ object TransferStore {
 
     fun clear(ctx: Context) {
         runCatching { prefs(ctx).edit().remove(KEY).apply() }
+    }
+
+    /** 删除若干条记录（按 time+name+kind 匹配）。 */
+    fun remove(ctx: Context, items: List<TransferItem>) {
+        if (items.isEmpty()) return
+        val drop = items.map { Triple(it.name, it.time, it.kind) }.toSet()
+        val left = load(ctx).filterNot { Triple(it.name, it.time, it.kind) in drop }
+        runCatching { prefs(ctx).edit().putString(KEY, json.encodeToString(left)).apply() }
     }
 }
 

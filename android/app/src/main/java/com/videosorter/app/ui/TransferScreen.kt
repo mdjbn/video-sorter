@@ -4,12 +4,15 @@ package com.videosorter.app.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Upload
@@ -60,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.TransferItem
 import com.videosorter.app.data.TransferStore
+import java.io.File
 import com.videosorter.app.data.Transfers
 import com.videosorter.app.data.UploadCandidate
 import kotlinx.coroutines.launch
@@ -130,11 +135,53 @@ fun TransferScreen(
     var hist by remember { mutableStateOf(TransferStore.load(ctx)) }
     var editingPath by remember { mutableStateOf(false) }
     var pathDraft by remember { mutableStateOf("") }
+    var selecting by remember { mutableStateOf(false) }
+    val picked = remember { mutableStateListOf<TransferItem>() }
+    var pendingDelete by remember { mutableStateOf<List<TransferItem>?>(null) }
 
     BackHandler(enabled = true) { onBack() }
 
     fun reloadHistory() {
         hist = TransferStore.load(ctx)
+    }
+
+    fun exitSelect() {
+        selecting = false
+        picked.clear()
+    }
+
+    fun treeLabel(uri: Uri?): String {
+        if (uri == null) return "下载/VideoSorter（默认）"
+        return runCatching {
+            val id = DocumentsContract.getTreeDocumentId(uri)
+            id.substringAfter(':', id).ifEmpty { id }
+        }.getOrDefault("已选择自定义目录")
+    }
+
+    fun doDelete(items: List<TransferItem>, withFile: Boolean) {
+        if (items.isEmpty()) return
+        scope.launch {
+            var files = 0
+            if (withFile) {
+                items.forEach { item ->
+                    runCatching {
+                        when {
+                            item.kind == "up" && item.videoId > 0 -> {
+                                api.deleteVideo(item.videoId, true); files++
+                            }
+                            item.uri.isNotEmpty() -> {
+                                deleteLocalUri(ctx, item.uri); files++
+                            }
+                        }
+                    }
+                }
+            }
+            TransferStore.remove(ctx, items)
+            exitSelect()
+            pendingDelete = null
+            reloadHistory()
+            onToast(if (withFile) "已删除 ${items.size} 条记录 · $files 个文件" else "已删除 ${items.size} 条记录")
+        }
     }
 
     // 进入页面 / 切换分段 / 有传输任务结束时都重新读一次历史（原来只在首次组合时读，导致记录不刷新）
@@ -152,7 +199,7 @@ fun TransferScreen(
                 val (name, size) = Transfers.displayName(ctx.contentResolver, uri)
                 val key = TransferHub.start(name, "up")
                 try {
-                    Transfers.upload(api, ctx.contentResolver, UploadCandidate(uri, name, size)) { p ->
+                    val vid = Transfers.upload(api, ctx.contentResolver, UploadCandidate(uri, name, size)) { p ->
                         TransferHub.progress(key, p)
                     }
                     TransferStore.add(
@@ -164,6 +211,7 @@ fun TransferScreen(
                             ok = true,
                             kind = "up",
                             where = uploadDir,
+                            videoId = vid,
                         )
                     )
                     reloadHistory()
@@ -201,7 +249,7 @@ fun TransferScreen(
             }
             saveDownloadTree(ctx, uri)
             treeUri = uri
-            onToast("下载目录已更新")
+            onToast("下载目录：${treeLabel(uri)}")
         }
     }
 
@@ -222,6 +270,12 @@ fun TransferScreen(
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = t.ink(0.8f), modifier = Modifier.size(17.dp))
                 }
                 Text("传输", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = t.text)
+                if (selecting) {
+                    Spacer(Modifier.weight(1f))
+                    Text("已选 ${picked.size}", color = t.muted2, fontSize = 11.5.sp)
+                    Spacer(Modifier.width(6.dp))
+                    TextButton(onClick = { exitSelect() }) { Text("取消", color = t.muted, fontSize = 12.sp) }
+                }
             }
 
             // 分段
@@ -232,8 +286,8 @@ fun TransferScreen(
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                SegButton("上传到服务器", tab == 0, Modifier.weight(1f)) { tab = 0 }
-                SegButton("下载到手机", tab == 1, Modifier.weight(1f)) { tab = 1 }
+                SegButton("上传到服务器", tab == 0, Modifier.weight(1f)) { exitSelect(); tab = 0 }
+                SegButton("下载到手机", tab == 1, Modifier.weight(1f)) { exitSelect(); tab = 1 }
             }
 
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(18.dp)) {
@@ -269,7 +323,16 @@ fun TransferScreen(
                         GroupCard {
                             upHist.forEachIndexed { i, item ->
                                 if (i > 0) RowDivider()
-                                HistRow(item)
+                                HistRow(
+                                    item,
+                                    selected = item in picked,
+                                    selecting = selecting,
+                                    onLong = {
+                                        if (!selecting) { selecting = true; picked.clear(); picked.add(item) }
+                                    },
+                                    onToggle = { if (item in picked) picked.remove(item) else picked.add(item) },
+                                    onDelete = { pendingDelete = listOf(item) },
+                                )
                             }
                         }
                     }
@@ -279,7 +342,7 @@ fun TransferScreen(
                         SettingRow(
                             icon = Icons.Rounded.Folder,
                             title = "下载路径",
-                            subtitle = treeUri?.let { "已选择自定义目录" } ?: "下载/VideoSorter（默认）",
+                            subtitle = if (treeUri == null) "下载/VideoSorter（默认）" else "已选：" + treeLabel(treeUri),
                             onClick = { treePicker.launch(null) },
                         )
                         RowDivider()
@@ -316,7 +379,17 @@ fun TransferScreen(
                         GroupCard {
                             downHist.forEachIndexed { i, item ->
                                 if (i > 0) RowDivider()
-                                HistRow(item) { openDownloaded(ctx, item, onToast) }
+                                HistRow(
+                                    item,
+                                    selected = item in picked,
+                                    selecting = selecting,
+                                    onClick = if (selecting) null else ({ openDownloaded(ctx, item, onToast) }),
+                                    onLong = {
+                                        if (!selecting) { selecting = true; picked.clear(); picked.add(item) }
+                                    },
+                                    onToggle = { if (item in picked) picked.remove(item) else picked.add(item) },
+                                    onDelete = { pendingDelete = listOf(item) },
+                                )
                             }
                         }
                     }
@@ -341,6 +414,54 @@ fun TransferScreen(
                 Icon(Icons.Rounded.Add, "选择视频上传", tint = t.bg, modifier = Modifier.size(30.dp))
             }
         }
+
+        // 多选删除条
+        if (selecting) {
+            Row(
+                Modifier.align(Alignment.BottomCenter)
+                    .padding(start = 18.dp, end = 18.dp, bottom = 26.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(t.panel)
+                    .border(1.dp, t.line, RoundedCornerShape(16.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("已选 ${picked.size} 条", color = t.ink(0.8f), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                TextButton(onClick = {
+                    val all = if (tab == 0) hist.filter { it.kind == "up" } else hist.filter { it.kind == "down" }
+                    if (picked.size == all.size) picked.clear() else { picked.clear(); picked.addAll(all) }
+                }) { Text("全选", color = t.muted, fontSize = 12.sp) }
+                TextButton(enabled = picked.isNotEmpty(), onClick = { pendingDelete = picked.toList() }) {
+                    Text("删除", color = if (picked.isEmpty()) t.muted2 else t.danger, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+
+    pendingDelete?.let { items ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除 ${items.size} 条记录", color = t.text, fontSize = 15.sp) },
+            text = {
+                Text(
+                    "「仅删除记录」只清空传输历史；「同时删除文件」还会" +
+                        (if (items.all { it.kind == "up" }) "从服务器删除对应视频（不可恢复）。" else "删除手机上的文件。"),
+                    color = t.muted2,
+                    fontSize = 11.5.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { doDelete(items, true) }) { Text("同时删除文件", color = t.danger) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { pendingDelete = null }) { Text("取消", color = t.muted) }
+                    TextButton(onClick = { doDelete(items, false) }) { Text("仅删除记录", color = t.accent) }
+                }
+            },
+            containerColor = t.panel,
+        )
     }
 
     if (editingPath) {
@@ -364,9 +485,11 @@ fun TransferScreen(
                     editingPath = false
                     scope.launch {
                         try {
-                            api.setUploadDir(pathDraft.trim())
-                            uploadDir = pathDraft.trim()
-                            onToast("上传路径已保存")
+                            val want = pathDraft.trim()
+                            api.setUploadDir(want)
+                            val real = runCatching { api.serverInfo().uploadDir }.getOrDefault(want)
+                            uploadDir = real
+                            onToast(if (real.isEmpty()) "上传路径已保存（服务端默认目录）" else "上传路径已保存：$real")
                         } catch (e: Throwable) {
                             onToast("保存失败：${e.message ?: ""}")
                         }
@@ -427,14 +550,26 @@ private fun GlassProgress(pct: Float, failed: Boolean) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HistRow(item: TransferItem, onClick: (() -> Unit)? = null) {
+private fun HistRow(
+    item: TransferItem,
+    selected: Boolean = false,
+    selecting: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    onLong: (() -> Unit)? = null,
+    onToggle: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+) {
     val t = tokens()
     Row(
         Modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .combinedClickable(
+                onClick = { if (selecting) onToggle?.invoke() else onClick?.invoke() },
+                onLongClick = { onLong?.invoke() },
+            )
+            .padding(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -468,23 +603,69 @@ private fun HistRow(item: TransferItem, onClick: (() -> Unit)? = null) {
                         append(" · ")
                         append(item.where.takeLast(28))
                     }
+                    if (!item.ok && item.msg.isNotEmpty()) {
+                        append(" · ")
+                        append(item.msg.take(24))
+                    }
                 },
-                color = t.muted2,
+                color = if (item.ok) t.muted2 else t.danger,
                 fontSize = 10.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        Spacer(Modifier.width(8.dp))
+        // 状态打钩向左移
         if (item.ok) {
             Icon(Icons.Rounded.Check, null, tint = t.accent, modifier = Modifier.size(14.dp))
-        } else {
-            Icon(Icons.Rounded.Close, null, tint = t.danger, modifier = Modifier.size(14.dp))
+        }
+        if (selecting) {
+            Spacer(Modifier.width(10.dp))
+            Box(
+                Modifier.size(20.dp).clip(CircleShape)
+                    .background(if (selected) t.accent else t.ink(0.06f))
+                    .border(1.dp, if (selected) t.accent else t.line2, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) {
+                    Icon(Icons.Rounded.Check, null, tint = t.bg, modifier = Modifier.size(13.dp))
+                }
+            }
+        } else if (onDelete != null) {
+            Spacer(Modifier.width(6.dp))
+            Box(
+                Modifier.size(30.dp).clip(RoundedCornerShape(10.dp))
+                    .background(t.ink(0.05f))
+                    .clickable { onDelete() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Delete, "删除记录", tint = t.muted, modifier = Modifier.size(15.dp))
+            }
         }
     }
 }
 
-private fun fmtStamp(ms: Long): String =
-    if (ms <= 0) "" else SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date(ms))
+private fun fmtStamp(ms: Long): String {
+    if (ms <= 0L) return ""
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+    return String.format(
+        "%02d-%02d %02d:%02d",
+        cal.get(java.util.Calendar.MONTH) + 1,
+        cal.get(java.util.Calendar.DAY_OF_MONTH),
+        cal.get(java.util.Calendar.HOUR_OF_DAY),
+        cal.get(java.util.Calendar.MINUTE),
+    )
+}
+
+private fun deleteLocalUri(ctx: Context, uriString: String) {
+    val uri = Uri.parse(uriString)
+    val cr = ctx.contentResolver
+    val ok = runCatching { DocumentsContract.deleteDocument(cr, uri) }.getOrDefault(false) ||
+        runCatching { cr.delete(uri, null, null) > 0 }.getOrDefault(false)
+    if (!ok) {
+        uri.path?.let { p -> runCatching { File(p).delete() } }
+    }
+}
 
 @Composable
 private fun HistEmpty(text: String) {

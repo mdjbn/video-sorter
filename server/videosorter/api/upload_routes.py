@@ -1,6 +1,7 @@
 """手机端上传：把文件存到服务器的上传目录，并立即入库。"""
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -46,7 +47,9 @@ async def upload(file: UploadFile = File(...),
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        raise HTTPException(400, f"无法创建目录：{e}") from e
+        raise HTTPException(400, f"无法创建上传目录 {target_dir}：{e}") from e
+    if not os.access(target_dir, os.W_OK):
+        raise HTTPException(400, f"上传目录不可写：{target_dir}（请检查目录权限或改回默认目录）")
     stem, suffix = Path(name).stem, Path(name).suffix
     dest = target_dir / name
     n = 1
@@ -56,6 +59,12 @@ async def upload(file: UploadFile = File(...),
     try:
         with dest.open("wb") as out:
             shutil.copyfileobj(file.file, out, length=1 << 20)
+    except OSError as e:
+        try:
+            dest.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(400, f"写入上传目录失败（{target_dir}）：{e}") from e
     finally:
         await file.close()
     size = dest.stat().st_size

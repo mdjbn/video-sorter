@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -504,15 +505,19 @@ fun PlayerScreen(
                 .fillMaxSize()
                 .pointerInput(current?.id, lockedSpeed) {
                     val dragThreshold = 56.dp.toPx()
+                    // 横向滑动 320px ≈ 1.0 倍速增量
+                    val speedRange = 320f
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val startY = down.position.y
                         val startX = down.position.x
                         val longPressMs = viewConfiguration.longPressTimeoutMillis
                         val slop = viewConfiguration.touchSlop
+                        val base = speed
                         var longPressed = false
                         var draggedDown = false
                         var swipeDir = 0
+                        var adjustSpeed = 0f
                         var done = false
                         val began = System.currentTimeMillis()
 
@@ -525,11 +530,7 @@ fun PlayerScreen(
                                 longPressed = true
                                 tempSpeed = 2f
                                 player.setPlaybackSpeed(2f)
-                                hud = HudSpec(
-                                    "2.0×",
-                                    if (lockedSpeed == null) "加速中 · 下滑松手固定" else "加速中 · 下滑松手恢复",
-                                    0.4f,
-                                )
+                                hud = HudSpec("2.0×", "左右拖动调速 · 下滑固定", 0.4f)
                                 continue
                             }
                             val ch = ev.changes.firstOrNull() ?: continue
@@ -543,45 +544,44 @@ fun PlayerScreen(
                                     if (swipeDir == 0 && !ch.isConsumed) togglePlay()
                                     done = true
                                 }
-                            } else {
-                                if (ch.pressed) {
-                                    val over = dy > dragThreshold
-                                    if (over != draggedDown) {
-                                        draggedDown = over
-                                        val locked = lockedSpeed != null
-                                        hud = HudSpec(
-                                            "2.0×",
-                                            when {
-                                                over && !locked -> "松手固定 2×"
-                                                over && locked -> "松手恢复 1×"
-                                                locked -> "加速中 · 下滑松手恢复"
-                                                else -> "加速中 · 下滑松手固定"
-                                            },
-                                            if (over) 1f else 0.4f,
-                                        )
-                                    }
-                                } else {
-                                    done = true
+                            } else if (ch.pressed) {
+                                draggedDown = dy > dragThreshold
+                                if (draggedDown) {
+                                    hud = HudSpec(
+                                        "2.0×",
+                                        if (lockedSpeed == null) "松手固定 2×" else "松手恢复",
+                                        1f,
+                                    )
+                                } else if (abs(dx) > slop) {
+                                    adjustSpeed = (base + dx / speedRange).coerceIn(0.5f, 3f)
+                                    player.setPlaybackSpeed(adjustSpeed)
+                                    hud = HudSpec(speedText(adjustSpeed), "松手应用该倍速", adjustSpeed / 3f)
                                 }
+                            } else {
+                                done = true
                             }
                         }
 
                         if (longPressed) {
                             tempSpeed = null
-                            lockedSpeed = if (draggedDown) {
-                                if (lockedSpeed == null) 2f else null
-                            } else {
-                                lockedSpeed
+                            when {
+                                draggedDown -> {
+                                    lockedSpeed = if (lockedSpeed == null) 2f else null
+                                    applySpeed()
+                                    toast(
+                                        if (lockedSpeed != null) "已固定 2.0× 倍速"
+                                        else "已取消固定，恢复 ${speedText(speed)} 倍速",
+                                    )
+                                }
+                                adjustSpeed > 0f -> {
+                                    speed = adjustSpeed
+                                    lockedSpeed = null
+                                    applySpeed()
+                                    toast("倍速已调整为 ${speedText(speed)}")
+                                }
+                                else -> applySpeed()
                             }
-                            applySpeed()
                             hud = null
-                            toast(
-                                when {
-                                    draggedDown && lockedSpeed != null -> "已固定 2.0× 倍速"
-                                    draggedDown -> "已取消固定，恢复 ${speedText(speed)} 倍速"
-                                    else -> "已恢复 ${speedText(speed)} 倍速"
-                                },
-                            )
                         } else if (swipeDir != 0) {
                             val target = pagerState.currentPage + swipeDir
                             if (target in 0 until count) {
@@ -632,42 +632,23 @@ fun PlayerScreen(
             }
         }
 
-        // ---------- HUD（长按 / 调速） ----------
+        // ---------- HUD（长按 / 调速）：小卡片、偏上、只显示倍速、半透明 ----------
         AnimatedVisibility(
             visible = hud != null,
-            enter = fadeIn(tween(140)) + scaleIn(tween(180), initialScale = 0.9f),
-            exit = fadeOut(tween(120)) + scaleOut(tween(140), targetScale = 0.94f),
-            modifier = Modifier.align(Alignment.Center),
+            enter = fadeIn(tween(120)) + scaleIn(tween(160), initialScale = 0.92f),
+            exit = fadeOut(tween(110)) + scaleOut(tween(130), targetScale = 0.95f),
+            modifier = Modifier.align(Alignment.TopCenter),
         ) {
             hud?.let { spec ->
-                Column(
+                Box(
                     Modifier
-                        .width(150.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(t.glassStrong)
-                        .border(1.dp, t.glassBorder, RoundedCornerShape(18.dp))
-                        .padding(horizontal = 16.dp, vertical = 13.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                        .padding(top = 96.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (dark) Color(0x8A0E1218) else Color(0x8AFFFFFF))
+                        .border(1.dp, t.glassBorder, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 18.dp, vertical = 9.dp),
                 ) {
-                    Text(spec.text, color = t.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(t.ink(0.2f))
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth(spec.pct)
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(t.accent)
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(spec.label, color = t.ink(0.58f), fontSize = 10.5.sp)
+                    Text(spec.text, color = t.text, fontSize = 19.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -851,21 +832,24 @@ fun PlayerScreen(
                             .height(28.dp)
                             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
                             .pointerInput(duration) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown()
-                                    dragging = true
-                                    scrub = (down.position.x / widthPx).coerceIn(0f, 1f)
-                                    while (true) {
-                                        val e = awaitPointerEvent()
-                                        val ch = e.changes.firstOrNull { it.id == down.id } ?: break
-                                        scrub = (ch.position.x / widthPx).coerceIn(0f, 1f)
-                                        ch.consume()
-                                        if (!ch.pressed) break
-                                    }
-                                    if (duration > 0) player.seekTo((scrub * duration * 1000).toLong())
-                                    position = (scrub * duration)
-                                    dragging = false
-                                }
+                                // 需要「长按进度条再左右拖动」才调整进度（单击不再跳转）
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { off ->
+                                        dragging = true
+                                        scrub = (off.x / widthPx).coerceIn(0f, 1f)
+                                    },
+                                    onDrag = { change, _ ->
+                                        scrub = (change.position.x / widthPx).coerceIn(0f, 1f)
+                                        change.consume()
+                                    },
+                                    onDragEnd = {
+                                        if (duration > 0) player.seekTo((scrub * duration * 1000).toLong())
+                                        position = (scrub * duration)
+                                        dragging = false
+                                        toast("跳到 ${fmtDuration(scrub * duration)}")
+                                    },
+                                    onDragCancel = { dragging = false },
+                                )
                             },
                         contentAlignment = Alignment.CenterStart,
                     ) {
