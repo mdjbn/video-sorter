@@ -12,6 +12,7 @@ const router = useRouter()
 
 type View = 'overview' | 'library' | 'tags' | 'organize' | 'history' | 'account' | 'about'
 const view = ref<View>('overview')
+const navOpen = ref(false)   // 窄屏抽屉导航
 const VIEW_TITLE: Record<View, string> = {
   overview: '概览', library: '视频库', tags: '标签管理', organize: '整理',
   history: '播放历史', account: '登录管理', about: '关于项目',
@@ -63,6 +64,7 @@ async function loadSessions() {
 }
 
 function go(v: View) {
+  navOpen.value = false
   view.value = v
   if (v === 'library') loadLibrary()
   if (v === 'organize') loadPlan()
@@ -480,6 +482,7 @@ onMounted(async () => {
   acc.username = username.value
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('click', closeColorPop)
+  window.addEventListener('resize', onResize)
   await Promise.all([loadTags(), loadStats(), loadSources(), loadRecords()])
   counts.lib = stats.value?.total || 0
 })
@@ -487,12 +490,17 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('click', closeColorPop)
+  window.removeEventListener('resize', onResize)
 })
+function onResize() {
+  if (window.innerWidth > 820) navOpen.value = false
+}
 </script>
 
 <template>
   <div class="m-app">
-    <aside class="m-side">
+    <div v-if="navOpen" class="nav-mask" @click="navOpen = false" />
+    <aside class="m-side" :class="{ open: navOpen }">
       <button class="back-side" @click="router.push('/')">
         <Icon name="chevron-left" :size="16" /><span>返回播放页</span>
       </button>
@@ -519,6 +527,9 @@ onBeforeUnmount(() => {
 
     <main class="m-main">
       <div class="m-top">
+        <button class="nav-toggle" :class="{ open: navOpen }" aria-label="菜单" @click="navOpen = !navOpen">
+          <Icon :name="navOpen ? 'close' : 'menu'" :size="18" />
+        </button>
         <div class="m-crumb">视频整理 <span style="opacity:.4">/</span> <b>{{ VIEW_TITLE[view] }}</b></div>
         <div class="sp" />
         <button id="btnTheme" class="icon-btn" :title="themeTitle" @click="cycleTheme"><Icon :name="themeMode === 'auto' ? 'auto' : themeMode === 'light' ? 'sun' : 'moon'" :size="17" /></button>
@@ -924,7 +935,7 @@ onBeforeUnmount(() => {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.4' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.2.0' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -949,6 +960,7 @@ onBeforeUnmount(() => {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.2.0</span><span>网页端适配移动设备：窄屏侧栏收成抽屉（左上角菜单），内容单列、统计卡 2×2、标签行自动换行、视频网格自适应，播放页在手机上改为上下布局。</span></div>
               <div class="log-item"><span class="dt">1.1.4</span><span>标签名称框常显边框；目标文件夹框恢复撑满并贴近删除按钮；预设颜色扩到 12 个。</span></div>
               <div class="log-item"><span class="dt">1.1.3</span><span>标签颜色改为小圆角色块并挪到名称右边，目标文件夹输入框收窄。</span></div>
               <div class="log-item"><span class="dt">1.1.2</span><span>标签管理改为行内编辑：名称、颜色、目标文件夹都可以直接在卡片上改（自动保存）；颜色支持自定义取色。</span></div>

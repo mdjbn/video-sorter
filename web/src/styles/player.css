@@ -349,15 +349,38 @@
 .org-actions .sel b { color: var(--text); }
 .org-actions .btn { margin-left: auto; }
 
-/* 响应式：窄屏收起侧栏 */
-@media (max-width: 900px) {
-  .side { width: 280px; }
+/* 响应式：平板收窄侧栏，手机改为上下布局 */
+@media (max-width: 1020px) {
+  .side { width: 300px; }
   .meta h1 { font-size: 17px; }
 }
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   .app { flex-direction: column; }
-  .side { width: 100%; height: 44%; border-left: none; border-top: 1px solid var(--line); }
-  .tools .tool span { display: none; }
+  .stage { flex: 1 1 58%; min-height: 0; }
+  .side { width: 100%; height: 42%; flex: none; border-left: none; border-top: 1px solid var(--line); }
+  .topbar { padding: 10px 12px; }
+  .hintpill { display: none; }
+  .brand-mini .sep, .brand-mini .cur { display: none; }
+  .big-play { width: 62px; height: 62px; margin: -31px 0 0 -31px; }
+  .bottom { padding: 40px 13px 13px; }
+  .info-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .meta h1 { font-size: 16px; gap: 7px; }
+  .meta .path { font-size: 11px; }
+  .tools { justify-content: flex-start; flex-wrap: wrap; padding-bottom: 0; gap: 5px; }
+  .tool { height: 30px; padding: 0 9px; font-size: 12px; }
+  .tool span { display: none; }
+  .tool.icon { width: 30px; }
+  .tags { margin-top: 11px; gap: 6px; }
+  .tag { height: 27px; padding: 0 10px; font-size: 12px; }
+  .timebar { margin-top: 12px; gap: 8px; }
+  .dl-btn span { display: none; }
+  .pl-head { flex-wrap: wrap; gap: 6px; padding: 10px 10px 8px; }
+  .filter { padding: 0 10px 6px; }
+}
+@media (max-width: 430px) {
+  .bottom { padding: 32px 11px 12px; }
+  .stage { flex: 1 1 54%; }
+  .side { height: 46%; }
 }
 
 /* ---------- 顶栏右侧：提示 + 下载 ---------- */
