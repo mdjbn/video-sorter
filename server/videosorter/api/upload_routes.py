@@ -20,6 +20,18 @@ router = APIRouter(prefix="/api/upload", tags=["upload"])
 UPLOAD_DIRNAME = "手机上传"
 
 
+def _collapse_upload_path(path: Path) -> Path:
+    """把历史上被重复套上的「手机上传」收敛回一层。
+
+    老逻辑拿「第一条源目录」当基准再拼 `手机上传`，而上传目录自己也是一条 id 最小的源目录，
+    于是每次启动 / 加源 / 改设置都会再套一层（`…/手机上传/手机上传/手机上传`）。
+    """
+    p = Path(path)
+    while p.name == UPLOAD_DIRNAME and p.parent.name == UPLOAD_DIRNAME:
+        p = p.parent
+    return p
+
+
 def _default_dir(st) -> Path:
     custom = (st.cfg.get("upload_dir") or "").strip()
     if custom:
@@ -27,7 +39,15 @@ def _default_dir(st) -> Path:
     root = (st.cfg.get("root_dir") or "").strip()
     if root:
         return Path(root).expanduser() / UPLOAD_DIRNAME
-    src = st.db.query_one("SELECT path FROM sources WHERE enabled=1 ORDER BY id LIMIT 1")
+    # 上传目录本身就是一条内置源目录（kind='upload'）：直接以它为准，
+    # 绝不能再拿它当基准拼一层「手机上传」，否则会自己套自己。
+    row = st.db.query_one("SELECT path FROM sources WHERE kind='upload' ORDER BY id LIMIT 1")
+    if row and (row["path"] or "").strip():
+        return _collapse_upload_path(Path(row["path"]))
+    # 还没有内置源目录（全新安装）：退到第一条普通源目录下面
+    src = st.db.query_one(
+        "SELECT path FROM sources WHERE enabled=1 AND COALESCE(kind, '') <> 'upload' "
+        "ORDER BY id LIMIT 1")
     if src:
         return Path(src["path"]) / UPLOAD_DIRNAME
     return st.cfg.data_dir / "uploads"
