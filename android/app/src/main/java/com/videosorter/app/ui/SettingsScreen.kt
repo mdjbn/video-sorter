@@ -671,32 +671,8 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val n = name.trim()
-                    if (n.isEmpty()) {
-                        onToast("请填写标签名称")
-                        return@TextButton
-                    }
-                    val target = editing
-                    editing = null
-                    creating = false
-                    scope.launch {
-                        try {
-                            if (target == null) {
-                                api.createTag(n, color, dir.trim())
-                            } else {
-                                api.updateTag(target.id, n, color, dir.trim())
-                            }
-                            onRefresh()
-                            onToast("已保存")
-                        } catch (e: Throwable) {
-                            onToast("保存失败：${e.message ?: ""}")
-                        }
-                    }
-                }) { Text("保存", color = t.accent) }
-            },
-            dismissButton = {
-                Row {
+                // 顺序按用户要求：删除 / 保存 / 取消
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (editing != null) {
                         TextButton(onClick = {
                             val target = editing!!
@@ -712,9 +688,35 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                             }
                         }) { Text("删除", color = t.danger) }
                     }
-                    TextButton(onClick = { editing = null; creating = false }) { Text("取消", color = t.muted) }
+                    TextButton(onClick = {
+                        val n = name.trim()
+                        if (n.isEmpty()) {
+                            onToast("请填写标签名称")
+                            return@TextButton
+                        }
+                        val target = editing
+                        editing = null
+                        creating = false
+                        scope.launch {
+                            try {
+                                if (target == null) {
+                                    api.createTag(n, color, dir.trim())
+                                } else {
+                                    api.updateTag(target.id, n, color, dir.trim())
+                                }
+                                onRefresh()
+                                onToast("已保存")
+                            } catch (e: Throwable) {
+                                onToast("保存失败：${e.message ?: ""}")
+                            }
+                        }
+                    }) { Text("保存", color = t.accent) }
+                    TextButton(onClick = { editing = null; creating = false }) {
+                        Text("取消", color = t.muted)
+                    }
                 }
             },
+            dismissButton = {},
             containerColor = t.panel,
         )
     }
@@ -788,6 +790,8 @@ private fun HistoryPage(api: Api, onToast: (String) -> Unit, onOpenVideo: (Int) 
                             onTap = {
                                 if (selecting) {
                                     if (picked.contains(v.id)) picked.remove(v.id) else picked.add(v.id)
+                                } else if (v.deleted) {
+                                    onToast("该视频已被删除，无法播放")
                                 } else {
                                     onOpenVideo(v.id)
                                 }
@@ -862,12 +866,18 @@ private fun HistoryCard(
             .padding(9.dp),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))) {
-            AsyncImage(
-                model = api.thumbUrl(v),
-                contentDescription = v.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().background(gradientFor(v.id)),
-            )
+            if (v.deleted) {
+                Box(Modifier.fillMaxSize().background(t.ink(0.06f)), contentAlignment = Alignment.Center) {
+                    Text("视频已删除", color = t.muted2, fontSize = 11.sp)
+                }
+            } else {
+                AsyncImage(
+                    model = api.thumbUrl(v),
+                    contentDescription = v.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().background(gradientFor(v.id)),
+                )
+            }
             if (v.duration > 1) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(5.dp)

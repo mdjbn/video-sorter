@@ -194,6 +194,10 @@ def delete_video(video_id: int, file: bool = Query(False, description="是否同
                 removed = True
         except OSError as e:
             raise HTTPException(400, f"删除文件失败：{e}") from e
+    # 播放记录保留下来并标注「视频已删除」（历史里仍能看到这条，只是不能播放）
+    st.db.execute(
+        "UPDATE play_history SET deleted=1, filename=CASE WHEN filename='' THEN ? ELSE filename END "
+        "WHERE video_id=?", (row["filename"] or "", video_id))
     st.db.execute("DELETE FROM videos WHERE id=?", (video_id,))
     thumb = st.cfg.thumb_dir / f"{video_id}.jpg"
     if thumb.exists():
@@ -251,11 +255,18 @@ def save_history(video_id: int, body: HistoryIn,
     st = get_state()
     if not st.db.query_one("SELECT id FROM videos WHERE id=?", (video_id,)):
         raise HTTPException(404, "视频不存在")
+    row = st.db.query_one("SELECT filename FROM videos WHERE id=?", (video_id,))
+    fname = ((row["filename"] if row else "") or "").strip()
     st.db.execute(
-        "INSERT INTO play_history(video_id, position, duration, watched_at) VALUES(?,?,?,?) "
+        "INSERT INTO play_history(video_id, position, duration, watched_at, filename, deleted) "
+        "VALUES(?,?,?,?,?,0) "
         "ON CONFLICT(video_id) DO UPDATE SET position=excluded.position, "
-        "duration=excluded.duration, watched_at=excluded.watched_at",
-        (video_id, max(0.0, body.position), max(0.0, body.duration), now_iso()))
+        "duration=excluded.duration, watched_at=excluded.watched_at, "
+        "filename=excluded.filename, deleted=0",
+        (video_id, max(0.0, body.position), max(0.0, body.duration), now_iso(), fname))
+    # 同一个视频（同名文件）只保留最新一条：重扫后会产生新 id，旧记录清掉
+    if fname:
+        st.db.execute("DELETE FROM play_history WHERE filename=? AND video_id<>?", (fname, video_id))
     return {"ok": True}
 
 
@@ -264,8 +275,43 @@ def list_history(limit: int = Query(60, ge=1, le=500),
                  user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
     rows = st.db.query(
-        VIDEO_SQL + " WHERE h.video_id IS NOT NULL ORDER BY h.watched_at DESC LIMIT ?", (limit,))
-    return {"items": [video_dict(r) for r in rows]}
+        "SELECT h.video_id AS h_video_id, h.position AS h_position, h.duration AS h_duration, "
+        "h.watched_at AS h_watched_at, h.filename AS h_filename, h.deleted AS h_deleted, "
+        "v.*, t.name AS tag_name, t.color AS tag_color, t.dir_path AS tag_dir "
+        "FROM play_history h "
+        "LEFT JOIN videos v ON v.id = h.video_id "
+        "LEFT JOIN tags t ON t.id = v.tag_id "
+        "ORDER BY h.watched_at DESC LIMIT ?", (limit,))
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        if r["id"] is None:
+            # 视频已被删除：用快照信息展示，前端标注「视频已删除」
+            items.append({
+                "id": r["h_video_id"],
+                "filename": r["h_filename"] or "（已删除的视频）",
+                "path": "",
+                "ext": "",
+                "duration": float(r["h_duration"] or 0),
+                "size": 0,
+                "status": "deleted",
+                "tag_id": None,
+                "tag_name": None,
+                "tag_color": None,
+                "position": float(r["h_position"] or 0),
+                "watched_at": r["h_watched_at"],
+                "thumb_url": None,
+                "raw_url": None,
+                "deleted": True,
+                "organized": False,
+                "has_tag": False,
+            })
+        else:
+            d = video_dict(r)
+            d["position"] = float(r["h_position"] or 0)
+            d["watched_at"] = r["h_watched_at"]
+            d["deleted"] = bool(r["h_deleted"])
+            items.append(d)
+    return {"items": items}
 
 
 @router.delete("/history/{video_id}")

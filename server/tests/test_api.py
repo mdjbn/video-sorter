@@ -239,3 +239,44 @@ def test_change_password(env):
     assert ok.status_code == 200, ok.text
     c.post("/api/auth/logout")
     assert c.post("/api/auth/login", json={"username": "admin", "password": "newpass123"}).status_code == 200
+
+
+def test_history_dedupe_and_deleted(env):
+    """同一个视频只保留最新一条播放记录；视频删除后记录保留并标注 deleted。"""
+    c, src = env["client"], env["src"]
+    login(c)
+    c.post("/api/sources", json={"path": str(src)})
+    wait_task(c, c.post("/api/scan", json={}).json()["task_id"])
+    videos = c.get("/api/videos").json()["items"]
+    assert len(videos) >= 2
+    a, b = videos[0], videos[1]
+    assert c.post(f"/api/videos/{a['id']}/history",
+                  json={"position": 5.0, "duration": 20}).status_code == 200
+    assert c.post(f"/api/videos/{b['id']}/history",
+                  json={"position": 7.0, "duration": 30}).status_code == 200
+    items = c.get("/api/history").json()["items"]
+    assert {i["id"] for i in items} == {a["id"], b["id"]}
+    assert all(i["deleted"] is False for i in items)
+
+    # 删除视频（不删文件）→ 该条记录保留且标 deleted
+    assert c.delete(f"/api/videos/{a['id']}").status_code == 200
+    items = c.get("/api/history").json()["items"]
+    gone = [i for i in items if i["id"] == a["id"]]
+    assert gone and gone[0]["deleted"] is True
+    assert gone[0]["filename"] == a["filename"]
+
+    # 重扫同一个文件 → 新 id 再写记录，同名记录只保留最新一条
+    wait_task(c, c.post("/api/scan", json={}).json()["task_id"])
+    again = [v for v in c.get("/api/videos").json()["items"] if v["filename"] == a["filename"]][0]
+    assert again["id"] != a["id"]
+    assert c.post(f"/api/videos/{again['id']}/history",
+                  json={"position": 9.0, "duration": 20}).status_code == 200
+    same = [i for i in c.get("/api/history").json()["items"] if i["filename"] == a["filename"]]
+    assert len(same) == 1 and same[0]["id"] == again["id"] and same[0]["deleted"] is False
+
+    # 删除源目录 → 其下视频消失，播放记录标 deleted
+    sid = c.get("/api/sources").json()["sources"][0]["id"]
+    assert c.delete(f"/api/sources/{sid}").status_code == 200
+    assert c.get("/api/videos").json()["items"] == []
+    left = c.get("/api/history").json()["items"]
+    assert left and all(i["deleted"] is True for i in left)

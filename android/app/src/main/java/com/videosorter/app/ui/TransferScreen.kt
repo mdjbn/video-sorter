@@ -166,8 +166,19 @@ fun TransferScreen(
                 items.forEach { item ->
                     runCatching {
                         when {
-                            item.kind == "up" && item.videoId > 0 -> {
-                                api.deleteVideo(item.videoId, true); files++
+                            item.kind == "up" -> {
+                                var vid = item.videoId
+                                if (vid <= 0) {
+                                    // 旧记录没有 videoId：按文件名在视频库里回查（同名文件可能在子目录，取路径尾部匹配）
+                                    val page = runCatching { api.videos("all", item.name) }.getOrNull()
+                                    val hit = page?.items?.firstOrNull {
+                                        it.name == item.name && (item.where.isEmpty() || it.path.endsWith(item.where))
+                                    } ?: page?.items?.firstOrNull { it.name == item.name }
+                                    vid = hit?.id ?: 0
+                                }
+                                if (vid > 0) {
+                                    api.deleteVideo(vid, true); files++
+                                }
                             }
                             item.uri.isNotEmpty() -> {
                                 deleteLocalUri(ctx, item.uri); files++
@@ -452,14 +463,20 @@ fun TransferScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { doDelete(items, true) }) { Text("同时删除文件", color = t.danger) }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { pendingDelete = null }) { Text("取消", color = t.muted) }
-                    TextButton(onClick = { doDelete(items, false) }) { Text("仅删除记录", color = t.accent) }
+                // 顺序按用户要求：同时删除文件 / 仅删除记录 / 取消
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TextButton(onClick = { doDelete(items, true) }) {
+                        Text("同时删除文件", color = t.danger, fontSize = 12.sp)
+                    }
+                    TextButton(onClick = { doDelete(items, false) }) {
+                        Text("仅删除记录", color = t.accent, fontSize = 12.sp)
+                    }
+                    TextButton(onClick = { pendingDelete = null }) {
+                        Text("取消", color = t.muted, fontSize = 12.sp)
+                    }
                 }
             },
+            dismissButton = {},
             containerColor = t.panel,
         )
     }

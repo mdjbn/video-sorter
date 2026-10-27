@@ -98,7 +98,9 @@ CREATE TABLE IF NOT EXISTS play_history (
   video_id   INTEGER PRIMARY KEY,
   position   REAL NOT NULL DEFAULT 0,
   duration   REAL NOT NULL DEFAULT 0,
-  watched_at TEXT NOT NULL
+  watched_at TEXT NOT NULL,
+  filename   TEXT NOT NULL DEFAULT '',
+  deleted    INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -161,6 +163,12 @@ class Database:
     def _init_schema(self) -> None:
         with self.tx() as c:
             c.executescript(SCHEMA)
+            # 老库升级：play_history 补 filename / deleted（视频被删后播放记录仍要保留并标注「已删除」）
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(play_history)").fetchall()}
+            if "filename" not in cols:
+                c.execute("ALTER TABLE play_history ADD COLUMN filename TEXT NOT NULL DEFAULT ''")
+            if "deleted" not in cols:
+                c.execute("ALTER TABLE play_history ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
             row = c.execute("SELECT COUNT(*) AS n FROM tags").fetchone()
             if row and row["n"] == 0:
                 for i, (name, color) in enumerate(DEFAULT_TAGS):

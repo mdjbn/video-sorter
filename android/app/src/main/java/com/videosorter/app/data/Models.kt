@@ -39,6 +39,8 @@ data class Video(
     /** 播放进度（秒）；后端在无播放历史时返回 null，不能声明为非空 Double */
     val position: Double? = null,
     @SerialName("watched_at") val watchedAt: String? = null,
+    /** 播放记录里视频文件已被删除（服务端用快照信息返回） */
+    val deleted: Boolean = false,
     val organized: Boolean = false,
 ) {
     val isOrganized: Boolean get() = organized || status == "organized"

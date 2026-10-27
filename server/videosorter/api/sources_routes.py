@@ -65,7 +65,21 @@ def delete_source(source_id: int, user: dict[str, Any] = Depends(require_user)) 
     if not row:
         raise HTTPException(status_code=404, detail="源目录不存在")
     st.db.execute("DELETE FROM sources WHERE id=?", (source_id,))
-    return {"ok": True, "removed": row["path"]}
+    # 源文件夹移除后，其下视频同步从视频库删除；播放记录保留并标注「视频已删除」
+    base = str(row["path"]).rstrip("/") + "/"
+    victims = st.db.query("SELECT id, filename FROM videos WHERE path LIKE ?", (base + "%",))
+    for v in victims:
+        st.db.execute(
+            "UPDATE play_history SET deleted=1, filename=CASE WHEN filename='' THEN ? ELSE filename END "
+            "WHERE video_id=?", (v["filename"] or "", v["id"]))
+        st.db.execute("DELETE FROM videos WHERE id=?", (v["id"],))
+        thumb = st.cfg.thumb_dir / f"{v['id']}.jpg"
+        thumb.unlink(missing_ok=True)
+        try:
+            st.hls.cleanup(v["id"])
+        except Exception:
+            pass
+    return {"ok": True, "removed": row["path"], "videos_removed": len(victims)}
 
 
 @router.get("/fs/list")
