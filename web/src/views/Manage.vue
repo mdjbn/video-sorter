@@ -731,8 +731,8 @@ onBeforeUnmount(() => {
           </div>
           <div class="rows">
             <div v-for="t in tags" :key="t.id" class="trow" :class="'st-' + (tagState[t.id] || 'idle')">
-              <button class="dot-btn" :style="{ background: draftOf(t).color }" title="修改颜色" @click.stop="toggleColorPop(t.id)" />
               <input class="inline-name" v-model="draftOf(t).name" spellcheck="false" title="标签名称" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
+              <button class="tag-color" :style="{ background: draftOf(t).color }" :title="`颜色 ${draftOf(t).color}（点击修改）`" @click.stop="toggleColorPop(t.id)" />
               <span class="ct">{{ t.count ?? 0 }} 个视频</span>
               <input class="inline-dir" v-model="draftOf(t).dir_path" :placeholder="t.effective_dir" :title="t.dir_path || t.effective_dir" spellcheck="false" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
               <span class="save-hint">
@@ -920,7 +920,7 @@ onBeforeUnmount(() => {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.2' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.1.3' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -945,6 +945,7 @@ onBeforeUnmount(() => {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.1.3</span><span>标签颜色改为小圆角色块并挪到名称右边，目标文件夹输入框收窄。</span></div>
               <div class="log-item"><span class="dt">1.1.2</span><span>标签管理改为行内编辑：名称、颜色、目标文件夹都可以直接在卡片上改（自动保存）；颜色支持自定义取色。</span></div>
               <div class="log-item"><span class="dt">1.1.1</span><span>视频封面改为取每个视频的第一帧（旧封面会自动重建）；概览页四个统计卡片改为 2×2，与标签分布卡片同排、标签分布卡片固定尺寸。</span></div>
               <div class="log-item"><span class="dt">1.1.0</span><span>扫描会同时遍历源文件夹与各标签的目标文件夹；网页端「源文件夹」管理移到视频库页；标签管理页新增扫描按钮；手机端标签管理页也新增扫描按钮。</span></div>
