@@ -192,7 +192,7 @@ cd web && npm install && npm run dev
 
 ## 界面预览
 
-手机端真机（Xiaomi M2104K10AC / Android 13，装在 fnOS 的 `.fpk` 服务上实拍）：
+手机端真机（Xiaomi M2104K10AC / Android 13，连局域网里运行的服务实拍）：
 
 | 播放页 | 视频库 |
 | --- | --- |
@@ -202,7 +202,7 @@ cd web && npm install && npm run dev
 | --- | --- |
 | ![手机整理](docs/screenshots/mobile-organize-light.png) | ![手机设置](docs/screenshots/mobile-settings-light.png) |
 
-网页端（截图由无头浏览器对运行中的服务实拍，见 `docs/screenshots/`）：
+网页端（截图由无头浏览器对运行中的服务实拍，见 `docs/screenshots/`；片子是 Mixkit 的免费素材）：
 
 | 播放页（深色） | 播放页（浅色） |
 | --- | --- |
