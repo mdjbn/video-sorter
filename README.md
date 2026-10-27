@@ -76,7 +76,11 @@ python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m videosorter --web-dir ..\web\dist
 ```
 
-### 使用流程
+### 安装向导（fnOS）
+
+安装 fpk 时向导会让你填写**服务端口**（默认 8610），装好后应用中心「打开」会自动使用该端口；卸载时可以选择**保留数据**（重装后继续用）或**删除所有数据**（只清应用自己的数据库与上传目录，不碰你的源文件夹）。详见 `docs/build.md` 第 9 节。
+
+## 使用流程
 
 1. 管理页 →「概览」→ 添加源文件夹（例如 `/volume1/videos/未整理`）→ 点「扫描源文件夹」。
 2. 回到播放页，挑视频看，点底部标签（点「＋ 新建标签」可当场建）。

@@ -1,5 +1,38 @@
 #!/bin/bash
-# 生命周期脚本占位：本应用没有需要特殊处理的生命周期动作。
-# 失败时把用户可见的错误写入 TRIM_TEMP_LOGFILE 并以非 0 退出。
+# 卸载回调：按卸载向导里的选择决定是否删除应用数据
 set -u
+
+ACTION="${wizard_data_action:-keep}"
+VAR_DIR="${TRIM_PKGVAR:-/var/apps/videosorter/var}"
+# data-share 声明的共享目录（上传的文件落在这里），多个的话取第一个
+SHARE_PATHS="${TRIM_DATA_SHARE_PATHS:-}"
+LOG_FILE="${TRIM_TEMP_LOGFILE:-/dev/null}"
+
+echo "卸载选项 wizard_data_action=${ACTION}" >> "$LOG_FILE" 2>/dev/null
+
+if [ "$ACTION" != "delete" ]; then
+    echo "保留应用数据：${VAR_DIR}" >> "$LOG_FILE" 2>/dev/null
+    exit 0
+fi
+
+# 删除数据库/缩略图/转码缓存/日志
+if [ -n "$VAR_DIR" ] && [ -d "$VAR_DIR" ]; then
+    rm -rf "$VAR_DIR"
+    echo "已删除应用数据目录：${VAR_DIR}" >> "$LOG_FILE" 2>/dev/null
+fi
+
+# 删除本应用自己的上传目录（不动用户自己添加的源文件夹）
+if [ -n "$SHARE_PATHS" ]; then
+    OLD_IFS="$IFS"
+    IFS=':'
+    for d in $SHARE_PATHS; do
+        case "$d" in
+            */videosorter|*/videosorter/*)
+                [ -d "$d" ] && rm -rf "$d" && echo "已删除上传目录：${d}" >> "$LOG_FILE" 2>/dev/null
+                ;;
+        esac
+    done
+    IFS="$OLD_IFS"
+fi
+
 exit 0

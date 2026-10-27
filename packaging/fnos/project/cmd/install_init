@@ -1,5 +1,26 @@
 #!/bin/bash
-# 生命周期脚本占位：本应用没有需要特殊处理的生命周期动作。
-# 失败时把用户可见的错误写入 TRIM_TEMP_LOGFILE 并以非 0 退出。
+# 安装前置检查：校验安装向导里填写的服务端口
 set -u
+
+PORT="${ui_port:-${TRIM_SERVICE_PORT:-8610}}"
+LOG_FILE="${TRIM_TEMP_LOGFILE:-/dev/null}"
+
+fail() {
+    echo "$*" > "$LOG_FILE" 2>/dev/null
+    exit 1
+}
+
+case "$PORT" in
+    ''|*[!0-9]*) fail "服务端口必须是数字：$PORT" ;;
+esac
+
+if [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
+    fail "服务端口需要介于 1024 - 65535 之间，当前填写：$PORT"
+fi
+
+# 端口被占用时给出可读的提示（不阻断：可能是本应用升级）
+if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${PORT}$"; then
+    echo "提示：端口 ${PORT} 当前已被占用，如果安装后无法访问，请在应用设置里换一个端口。" >> "$LOG_FILE" 2>/dev/null
+fi
+
 exit 0

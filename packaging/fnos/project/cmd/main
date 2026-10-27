@@ -4,7 +4,11 @@ set -u
 
 APP_DIR="${TRIM_APPDEST:-/var/apps/videosorter/target}"
 VAR_DIR="${TRIM_PKGVAR:-/var/apps/videosorter/var}"
-PORT="${TRIM_SERVICE_PORT:-8610}"
+# 端口优先级：安装/配置向导里填的 ui_port > 应用中心给的 TRIM_SERVICE_PORT > 默认 8610
+PORT="${ui_port:-${TRIM_SERVICE_PORT:-8610}}"
+case "$PORT" in
+    ''|*[!0-9]*) PORT=8610 ;;
+esac
 LOG_FILE="${VAR_DIR}/info.log"
 PID_FILE="${VAR_DIR}/app.pid"
 # 上传落盘目录：优先用 data-share 声明的共享目录，其次变量目录

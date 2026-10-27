@@ -278,3 +278,33 @@ $FNC $CONN app restart videosorter --yes
 ```
 
 注意：热更新只覆盖网页资源，`/api/health` 的 `version` 仍是安装包版本；数据库、标签、整理记录不受影响。升级安装包时仍需走「卸载 → 安装」（或应用中心界面升级）。
+
+## 9. fnOS 安装向导：端口与卸载数据
+
+fnOS 的 fpk 支持在**安装**和**卸载**时向用户提问，答案会以环境变量形式传给包内的生命周期脚本。
+
+### 9.1 安装时选择服务端口
+
+- `packaging/fnos/project/wizard/install`：一个 `text` 项，`field = "ui_port"`，默认 `8610`。
+- `packaging/fnos/project/app/ui/config` 的 `.url["videosorter.Application"].port` 必须是 **`"${ui_port}"`**（模板变量），这样应用中心「打开」时用的就是你填的端口。**manifest 里不要写 `service_port`**（写死会覆盖向导值），保留 `checkport = true` 即可。
+- `cmd/main` 用 `PORT="${ui_port:-${TRIM_SERVICE_PORT:-8610}}"` 启动服务；`cmd/install_init` 校验 1024–65535，端口被占用只提示不阻断（避免升级失败）。
+
+按 CLI 安装时可传参模拟（仅用于自测）：
+
+```bash
+fnos-cli ... app install-fpk videosorter.fpk --custom-parameters '[{"key":"ui_port","value":18767}]' --accept-license --yes
+```
+
+### 9.2 卸载时选择是否删除数据
+
+- `packaging/fnos/project/wizard/uninstall`：一个 `radio` 项，`field = "wizard_data_action"`，`keep`（默认，保留数据）/ `delete`（删除数据）。
+- `cmd/uninstall_callback` 读 `wizard_data_action`：
+  - `keep`：什么都不做（`TRIM_PKGVAR` = `/vol1/@appdata/<appname>` 保留，重装后可继续用）。
+  - `delete`：删除 `TRIM_PKGVAR`，并清理 `TRIM_DATA_SHARE_PATHS` 中属于本应用的目录（`*/videosorter`、`*/videosorter/*`，即上传目录），**不会**动用户自己添加的源文件夹。
+- 一旦包内带了 required 的卸载向导，CLI 的 `app uninstall <app> --yes` 会拒绝执行（`app-center uninstall requires custom wizard parameters; run it from App Center UI`），必须从应用中心界面卸载——这是预期行为。
+
+### 9.3 升级步骤（带向导的包）
+
+1. 应用中心 → 视频整理 → **卸载** → 选择「保留数据」；
+2. 应用中心 → 手动安装 → 选择新的 `videosorter.fpk` → 在向导里填写端口（默认 8610）；
+3. 安装完成后「打开」会直接指向你填的端口；数据（数据库、缩略图、上传目录里的文件）因为在步骤 1 选择了保留，会自动被新版本接管。

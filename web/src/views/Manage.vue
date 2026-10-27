@@ -804,7 +804,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.9' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.0.10' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -829,6 +829,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.0.10</span><span>fnOS 安装包：安装向导可选择服务端口；卸载时可选择保留或删除应用数据。</span></div>
               <div class="log-item"><span class="dt">1.0.9</span><span>筛选支持多标签（手机端与网页端都可同时勾选多个标签取并集）；手机端视频库筛选后播放器只播筛选结果，切回视频库筛选状态保留。</span></div>
               <div class="log-item"><span class="dt">1.0.8</span><span>修复网页播放页筛选（切换全部/未打标签/待整理/已整理/标签后列表实时刷新）；安卓播放器新增预加载（预取后 2 个视频开头数据与 HLS 切片，切换起播更快）。</span></div>
               <div class="log-item"><span class="dt">1.0.7</span><span>网页端播放页新增下载按钮；源文件夹管理显示「上传目录」角标且不可删除；视频库支持单条与批量删除（可选同时删除文件）；重新扫描后已删除文件的视频不再出现在视频库与播放列表。</span></div>
