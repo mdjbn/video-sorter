@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from . import APP_NAME, __version__
 from .api import (
     auth_routes, cache_routes, organize_routes, scan_routes, settings_routes,
-    sources_routes, stream_routes, tags_routes, upload_routes, videos_routes)
+    sources_routes, stream_routes, tags_routes, upload_routes, videos_routes, app_routes)
 from .config import Config
 from .discovery import DISCOVERY_PORT, DiscoveryService
 from .state import get_state, init
@@ -22,7 +22,8 @@ from .state import get_state, init
 log = logging.getLogger("videosorter")
 
 API_ROUTERS = [auth_routes, settings_routes, tags_routes, sources_routes, scan_routes,
-               videos_routes, stream_routes, organize_routes, upload_routes, cache_routes]
+               videos_routes, stream_routes, organize_routes, upload_routes, cache_routes,
+               app_routes]
 
 PLACEHOLDER = """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <title>VideoSorter</title>

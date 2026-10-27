@@ -463,6 +463,28 @@ async function revokeAll() {
   catch (e: any) { toast(e?.message || '操作失败', true) }
 }
 const logoutModal = ref(false)
+const appDl = reactive({
+  show: false,
+  loading: false,
+  apps: [] as { name: string; abi: string; version: string; size: number; url: string }[],
+  releases: 'https://github.com/mdjbn/video-sorter/releases/latest',
+  version: '',
+})
+async function openAppDl() {
+  appDl.show = true
+  if (appDl.apps.length) return
+  appDl.loading = true
+  try {
+    const r = await api.apkList()
+    appDl.apps = r.apps
+    appDl.releases = r.releases
+    appDl.version = r.version
+  } catch {
+    /* 拿不到列表就只显示 GitHub 入口 */
+  } finally {
+    appDl.loading = false
+  }
+}
 async function doLogout() {
   try { await api.logout() } catch {}
   location.reload()
@@ -532,6 +554,7 @@ function onResize() {
         </button>
         <div class="m-crumb">视频整理 <span style="opacity:.4">/</span> <b>{{ VIEW_TITLE[view] }}</b></div>
         <div class="sp" />
+        <button id="btnAppDl" class="icon-btn" title="下载手机 App" @click="openAppDl"><Icon name="download" :size="17" /></button>
         <button id="btnTheme" class="icon-btn" :title="themeTitle" @click="cycleTheme"><Icon :name="themeMode === 'auto' ? 'auto' : themeMode === 'light' ? 'sun' : 'moon'" :size="17" /></button>
       </div>
 
@@ -935,7 +958,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.2.0' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.0' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -960,6 +983,7 @@ function onResize() {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.3.0</span><span>顶栏新增「下载手机 App」按钮（可直接从服务器下载安卓安装包）；手机浏览器打开网页端会提示安装 App。</span></div>
               <div class="log-item"><span class="dt">1.2.0</span><span>网页端适配移动设备：窄屏侧栏收成抽屉（左上角菜单），内容单列、统计卡 2×2、标签行自动换行、视频网格自适应，播放页在手机上改为上下布局。</span></div>
               <div class="log-item"><span class="dt">1.1.4</span><span>标签名称框常显边框；目标文件夹框恢复撑满并贴近删除按钮；预设颜色扩到 12 个。</span></div>
               <div class="log-item"><span class="dt">1.1.3</span><span>标签颜色改为小圆角色块并挪到名称右边，目标文件夹输入框收窄。</span></div>
@@ -1002,6 +1026,37 @@ function onResize() {
         <div class="modal-actions">
           <button class="btn ghost" @click="tagModal.show = false">取消</button>
           <button class="btn primary" :disabled="tagModal.saving" @click="saveTag">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 下载手机 App -->
+    <div v-if="appDl.show" class="modal-mask show" @click.self="appDl.show = false">
+      <div class="modal app-dl">
+        <h3>下载手机 App</h3>
+        <p>安卓 App 支持上下滑刷视频、长按加速、上传下载；装好后会自动发现局域网里的服务器（也可以手动填地址）。</p>
+        <div v-if="appDl.loading" class="app-dl-loading">正在查询安装包…</div>
+        <template v-else-if="appDl.apps.length">
+          <a
+            v-for="a in appDl.apps"
+            :key="a.name"
+            class="app-dl-row"
+            :href="a.url"
+            :download="a.name"
+          >
+            <span class="ico"><Icon name="download" :size="16" /></span>
+            <span class="txt">
+              <b>{{ a.abi === 'arm64-v8a' ? '安卓版（64 位，推荐）' : a.abi === 'armeabi-v7a' ? '安卓版（32 位，老机型）' : '安卓版' }}</b>
+              <i>{{ a.name }} · {{ fmtSize(a.size) }}</i>
+            </span>
+            <span class="go">下载</span>
+          </a>
+          <p class="app-dl-tip">下载后点开安装；若提示「未知来源」，在系统设置里允许浏览器安装应用即可。</p>
+        </template>
+        <p v-else class="app-dl-empty">服务器上还没有放安装包。可以到 GitHub Releases 下载，或把 APK 放进数据目录的 <code>apk/</code> 文件夹。</p>
+        <div class="app-dl-foot">
+          <a class="btn ghost" :href="appDl.releases" target="_blank" rel="noopener">GitHub Releases</a>
+          <button class="btn primary" @click="appDl.show = false">关闭</button>
         </div>
       </div>
     </div>

@@ -170,6 +170,8 @@ export const api = {
   settings: () => get<{ settings: Record<string, any>; defaults: Record<string, any> }>('/settings'),
   saveSettings: (patchBody: Record<string, any>) => put<{ ok: boolean; settings: Record<string, any> }>('/settings', patchBody),
   info: () => get<Info>('/info'),
+  apkList: () =>
+    get<{ version: string; apps: { name: string; abi: string; version: string; size: number; url: string }[]; releases: string }>('/app/apk'),
   stats: () => get<Stats>('/stats'),
 
   // 源目录

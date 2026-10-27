@@ -55,6 +55,15 @@ find "$PROJ/app/videosorter" -type d -name '__pycache__' -prune -exec rm -rf {} 
 find "$PROJ/app/videosorter" -type d -name 'tests' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$PROJ/app/videosorter" -name '*.pyc' -delete
 cp -a "$ROOT/web/dist/." "$PROJ/app/webdist/"
+
+# 手机 App 安装包（网页端「下载 App」按钮直接从这里取；没有就跳过，界面会退回 GitHub Releases）
+mkdir -p "$PROJ/app/apk"
+shopt -s nullglob
+for f in "$ROOT"/dist/android/videosorter-*.apk; do
+  cp -a "$f" "$PROJ/app/apk/"
+  say "    打包 APK：$(basename "$f")"
+done
+shopt -u nullglob
 cat > "$PROJ/app/tools/README.md" <<'EOF'
 把 ffmpeg / ffprobe 放到这里即可让「视频整理」优先使用自带的二进制；
 不放也能用，会自动回退到系统 PATH 里的 ffmpeg（fnOS 自带）。
