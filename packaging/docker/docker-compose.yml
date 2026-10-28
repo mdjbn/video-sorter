@@ -6,6 +6,8 @@
 #
 # 想按宿主视频目录的真实权限跑，先看两个 UID/GID 再 build：
 #   stat -c '%u:%g' /vol1/1000/video
+name: videosorter
+
 services:
   videosorter:
     build:
@@ -14,7 +16,7 @@ services:
       args:
         UID: "1000"
         GID: "1000"
-    image: videosorter:1.3.3
+    image: videosorter:local   # 本地构建的镜像名；用 CI 出的镜像就改成 ghcr.io/mdjbn/video-sorter:latest
     container_name: videosorter
     restart: unless-stopped
     ports:
