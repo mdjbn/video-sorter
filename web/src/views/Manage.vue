@@ -960,7 +960,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.3' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.4' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
@@ -985,6 +985,7 @@ function onResize() {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
+              <div class="log-item"><span class="dt">1.3.4</span><span>Windows 桌面端修复「英文等非中文系统启动即崩」（控制台编码打印中文报错导致服务端起不来）；发版自动产出 Windows 安装包（.exe / .msi）；新增 Docker 镜像，同时发布到 Docker Hub 与 GHCR（amd64 / arm64）。</span></div>
               <div class="log-item"><span class="dt">1.3.3</span><span>网页端 HLS 播放也会续播了（需要转码的视频不再每次从头播）；整理时文件被占用（如正在播放）会先自动重试两次，仍不行就提示「文件正被占用，请关闭播放器后重试」；全新安装后新增第一个源目录，上传目录会自动跟到「&lt;源目录&gt;/手机上传」；会话列表会标出「当前设备」。</span></div>
               <div class="log-item"><span class="dt">1.3.2</span><span>修复上传目录会自我嵌套（每次重启/新增源目录都多套一层「手机上传」，导致上传的视频散落在多层目录）；升级后启动会自动收敛回一层。</span></div>
               <div class="log-item"><span class="dt">1.3.1</span><span>管理页「下载手机 App」改成强调色按钮，与「扫描全部」统一；窄屏自动显示为「下载 App」。</span></div>

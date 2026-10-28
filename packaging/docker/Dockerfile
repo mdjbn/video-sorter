@@ -1,12 +1,12 @@
 # VideoSorter 的 Docker 镜像：网页端 + 后端服务（不含安卓 App / 桌面端外壳）
 #
 # 构建（在仓库根目录）：
-#   docker build -f packaging/docker/Dockerfile -t videosorter:1.3.3 .
-#   docker buildx build --platform linux/amd64,linux/arm64 -f packaging/docker/Dockerfile -t videosorter:1.3.3 .
+#   docker build -f packaging/docker/Dockerfile -t videosorter:1.3.4 .
+#   docker buildx build --platform linux/amd64,linux/arm64 -f packaging/docker/Dockerfile -t videosorter:1.3.4 .
 #
 # 运行：
 #   docker run -d --name videosorter -p 8080:8080 \
-#     -v /你的/视频目录:/videos -v /你的/数据目录:/data videosorter:1.3.3
+#     -v /你的/视频目录:/videos -v /你的/数据目录:/data videosorter:1.3.4
 
 # syntax=docker/dockerfile:1
 
