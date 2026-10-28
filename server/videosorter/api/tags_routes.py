@@ -53,7 +53,10 @@ def create_tag(body: TagIn, user: dict[str, Any] = Depends(require_user)) -> dic
         raise HTTPException(status_code=400, detail="标签名不能为空")
     if st.db.query_one("SELECT id FROM tags WHERE name=?", (name,)):
         raise HTTPException(status_code=400, detail="已存在同名标签")
-    dir_path = body.dir_path.strip() or default_tag_dir(st.db, st.cfg, name)
+    # dir_path 只在用户明确填写时落库；留空表示「跟随默认目录」，由 resolve_tag_dir 现场算。
+    # 以前这里会把 default_tag_dir() 的结果写死进 tags.dir_path，导致「先建标签、之后在设置里
+    # 改全局根目录」永远不生效（resolve_tag_dir 最优先用标签自己的 dir_path）。
+    dir_path = body.dir_path.strip()
     order = (st.db.query_one("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM tags") or {"n": 1})["n"]
     tid = st.db.execute(
         "INSERT INTO tags (name, color, dir_path, sort_order, created_at) VALUES (?,?,?,?,?)",
