@@ -1,12 +1,12 @@
 name: docker
 
-# 镜像构建：
+# 镜像构建（双仓库）：
 #   - push 到 main 且改了服务端 / 网页端 / Dockerfile → 只构建 amd64 并做一次容器内冒烟（不推送）
-#   - 推 v* tag 或手动触发 → 构建 amd64 + arm64 并推到 GHCR
+#   - 推 v* tag 或手动触发 → 构建 amd64 + arm64，同时推 GHCR 与 Docker Hub
 #
-# 注意：首次推送成功后，包在 GitHub 上默认可能是 private，需要在
-# https://github.com/users/mdjbn/packages/container/video-sorter/settings 改成 Public，
-# 否则 `docker pull ghcr.io/mdjbn/video-sorter` 需要先登录。
+# 需要两个仓库 secret：DOCKERHUB_USERNAME / DOCKERHUB_TOKEN（Docker Hub 的 PAT，read+write）。
+# GHCR 用内置 GITHUB_TOKEN（靠 permissions.packages: write），首次推送后若包是 private，
+# 去 https://github.com/users/mdjbn/packages/container/video-sorter/settings 改成 Public。
 
 on:
   push:
@@ -29,7 +29,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  IMAGE_GHCR: ghcr.io/${{ github.repository }}
+  IMAGE_DOCKERHUB: docker.io/1045188196/videosorter
   # 只有 tag 推送和手动触发才真正推镜像；main 上的普通 push 只做构建验证
   PUSH_IMAGE: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
 
@@ -61,11 +62,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 登录 Docker Hub
+        if: env.PUSH_IMAGE == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: 生成镜像标签
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: |
+            ${{ env.IMAGE_GHCR }}
+            ${{ env.IMAGE_DOCKERHUB }}
           tags: |
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}}

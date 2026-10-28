@@ -7,14 +7,19 @@
 发版（推 `v*` tag）时 GitHub Actions 会自动构建 `linux/amd64` + `linux/arm64` 并推到 GHCR，直接跑就行：
 
 ```bash
+# Docker Hub（最省事，国内拉取也快）
 docker run -d --name videosorter --restart unless-stopped \
   -p 8080:8080 \
   -v /你的/视频目录:/videos \
   -v /你的/数据目录:/data \
-  ghcr.io/mdjbn/video-sorter:latest
+  1045188196/videosorter:latest
+
+# 或者 GHCR（同一个镜像，换仓库而已）
+#   ghcr.io/mdjbn/video-sorter:latest
 ```
 
-可用标签：`latest`（最新 tag）、`<版本号>`（如 `1.3.3`）、`<major>.<minor>`（如 `1.3`）、`sha-<短哈希>`。
+两个仓库内容完全一致：Docker Hub `1045188196/videosorter`、GHCR `ghcr.io/mdjbn/video-sorter`。
+可用标签：`latest`（最新 tag）、`<版本号>`（如 `1.3.3`）、`<major>.<minor>`（如 `1.3`）、`edge`（main 分支最近一次手动构建）、`sha-<短哈希>`。
 main 分支上的普通推送只构建 amd64 并跑一次容器冒烟（等 `/api/health` healthy、断言版本号/media_ready/web），**不推镜像**；
 想在 main 上出镜像就在 Actions 里手动 Run 一次 `docker` 工作流。
 
@@ -95,7 +100,8 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```
 
 （`--push` 需要先 `docker login` 到你的 registry；本机只构建不推就用 `--load` 或去掉 `--push`。）
-CI 里的 `.github/workflows/docker.yml` 就是这么做的（QEMU 跑 arm64），不用自己在本机折腾。
+CI 里的 `.github/workflows/docker.yml` 就是这么做的（QEMU 跑 arm64），并且会同时推到 GHCR 与 Docker Hub，
+不用自己在本机折腾。
 
 ## 和 fnOS 的 `.fpk` 比，差在哪
 

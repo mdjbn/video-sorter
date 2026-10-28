@@ -35,7 +35,7 @@ git push origin vX.Y.Z
 | `windows` | `windows-desktop/*.exe`(NSIS) + `*.msi` | 20–40 min |
 | `fnos` | `videosorter-fpk/*.fpk` | 3–5 min |
 | `publish` | 汇总成 6 个资产挂到 Release | 1 min |
-| （并行）`docker` | `ghcr.io/mdjbn/video-sorter` 的 amd64+arm64 镜像 | 10–25 min |
+| （并行）`docker` | `ghcr.io/mdjbn/video-sorter` + `1045188196/videosorter` 的 amd64+arm64 镜像 | 10–25 min |
 
 `android` / `windows` / `fnos` 三个 job 并行（都只 `needs: [test]`）；`publish` 的条件是
 `!cancelled() && needs.android.result == 'success' && needs.fnos.result == 'success'`，
@@ -59,8 +59,10 @@ git push origin vX.Y.Z
 `windows-desktop` 定位问题，修好后重打 tag（或手动补挂资产）。
 
 **镜像没推上去**：`docker` 工作流只在推 `v*` tag 或手动触发时 push（main 上的普通推送只做构建 + 容器冒烟）。
-另外 GHCR 包首次创建后默认可能是 private，需要在
-`https://github.com/users/mdjbn/packages/container/video-sorter/settings` 把可见性改成 Public。
+推两个仓库：GHCR 用内置 `GITHUB_TOKEN`；Docker Hub 用仓库 secret `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`
+（PAT 需要 read+write，失效了就在 Docker Hub 重新生成再 `PUT /actions/secrets/DOCKERHUB_TOKEN`）。
+GHCR 包若被设成 private，需要在 `https://github.com/users/mdjbn/packages/container/video-sorter/settings` 改 Public；
+Docker Hub 的仓库默认 public。
 
 **tag 打错了要重来**：
 ```bash

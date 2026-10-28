@@ -26,7 +26,7 @@
 | 你要装的 | 下载文件 | 说明 |
 | --- | --- | --- |
 | fnOS / Linux 服务器 | `run.sh`（源码运行）、`videosorter-<版本>-x86.fpk` / `-arm.fpk`（fnOS 应用中心） | 一个后端给三端用；fpk 装完在应用中心点开即可 |
-| Docker / NAS | `ghcr.io/mdjbn/video-sorter:<版本>` | 多架构镜像（amd64 / arm64），见下面「启动（Docker）」 |
+| Docker / NAS | `1045188196/videosorter:<版本>`（Docker Hub）或 `ghcr.io/mdjbn/video-sorter:<版本>` | 多架构镜像（amd64 / arm64），见下面「启动（Docker）」 |
 | Windows 单机使用 | `VideoSorter-<版本>-x64-setup.exe`（NSIS）或 `VideoSorter-<版本>-x64.msi` | 内嵌 Python 服务与网页端，双击即用 |
 | 安卓手机 | `videosorter-<版本>-arm64-v8a.apk` / `-armeabi-v7a.apk` | 自签名 debug 包，需要允许「安装未知应用」 |
 
@@ -88,10 +88,10 @@ docker run -d --name videosorter \
   -p 8080:8080 \
   -v /你的/视频目录:/videos \
   -v /你的/数据目录:/data \
-  ghcr.io/mdjbn/video-sorter:latest
+  1045188196/videosorter:latest
 ```
 
-镜像由 CI 构建并推到 GHCR（每次发版出 `linux/amd64` + `linux/arm64` 两个架构，
+镜像由 CI 构建并同时推到 Docker Hub 与 GHCR（同一内容，每次发版出 `linux/amd64` + `linux/arm64` 两个架构，
 也可以本地 `docker build -f packaging/docker/Dockerfile -t videosorter:dev .`）。
 `/data` 放数据库、封面、HLS 缓存和手机上传，**必须持久化**；手机 App 的「扫描局域网」在 bridge 网络下
 发现的是容器 IP，要用 `--network host` 或让手机手填 `http://<NAS IP>:8080`。
