@@ -196,15 +196,7 @@ async function startPlayback(v: Video) {
     el.src = info.url
     el.playbackRate = effSpeed.value
     el.load()
-    if (v.position && v.position > 3) {
-      const seekTo = () => {
-        try {
-          el.currentTime = Math.min(v.position!, Math.max(0, duration.value - 2))
-        } catch {}
-        el.removeEventListener('loadedmetadata', seekTo)
-      }
-      el.addEventListener('loadedmetadata', seekTo)
-    }
+    seekToResume(el, v.position)
     return
   }
   // HLS：先等后端切出第一个分片，再交给 hls.js
@@ -256,6 +248,23 @@ async function attachHls(videoId: number) {
     }
   }
   el.playbackRate = effSpeed.value
+  // 续播对 HLS 同样生效：等元数据就绪后跳到上次的位置
+  seekToResume(el, current.value?.position)
+}
+
+/** 续播：把播放头挪回上次看到的位置（超过 3 秒才跳），direct 与 HLS 共用。 */
+function seekToResume(el: HTMLVideoElement, pos?: number | null) {
+  if (!pos || pos <= 3) return
+  const seek = () => {
+    try {
+      const end = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : duration.value
+      el.currentTime = Math.max(0, Math.min(pos, Math.max(0, (end || pos + 2) - 2)))
+    } catch {
+      /* 元数据还没就绪时忽略，下面会移除监听 */
+    }
+    el.removeEventListener('loadedmetadata', seek)
+  }
+  el.addEventListener('loadedmetadata', seek)
 }
 
 function togglePlay(force?: boolean) {

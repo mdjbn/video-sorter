@@ -90,6 +90,8 @@ def add_source(body: SourceIn, user: dict[str, Any] = Depends(require_user)) -> 
     sid = st.db.execute("INSERT INTO sources (path, enabled, created_at) VALUES (?,1,?)", (path, now_iso()))
     # 不在这里把源目录硬写进 tags.dir_path：标签目录由 resolve_tag_dir 动态解析
     # （标签自定义 > 全局根目录 > 首个源目录 > 视频所在目录），改 root_dir 或换源目录才会生效。
+    # 上传目录默认跟着第一个源目录走（没有显式配置 upload_dir/root_dir 时），加完源目录顺手同步一次。
+    ensure_upload_source(st)
     return {"ok": True, "source": {"id": sid, "path": path}}
 
 

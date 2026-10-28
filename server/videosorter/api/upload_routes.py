@@ -32,6 +32,24 @@ def _collapse_upload_path(path: Path) -> Path:
     return p
 
 
+def _is_fallback_dir(st, path: Path) -> bool:
+    """这条上传目录是不是还停在「数据目录/uploads」这个兜底位置（没有跟着源目录走）。"""
+    try:
+        return Path(path).resolve() == (Path(st.cfg.data_dir) / "uploads").resolve()
+    except OSError:
+        return False
+
+
+def _fallback_has_uploads(st, path: Path) -> bool:
+    """兜底位置上已经有用户上传的视频时，不要再挪（挪了用户会找不到上传的东西）。"""
+    if not _is_fallback_dir(st, path):
+        return False
+    try:
+        return any(p.is_file() for p in Path(path).iterdir())
+    except OSError:
+        return True  # 判断不了就当有，保守不动
+
+
 def _default_dir(st) -> Path:
     custom = (st.cfg.get("upload_dir") or "").strip()
     if custom:
@@ -39,17 +57,22 @@ def _default_dir(st) -> Path:
     root = (st.cfg.get("root_dir") or "").strip()
     if root:
         return Path(root).expanduser() / UPLOAD_DIRNAME
-    # 上传目录本身就是一条内置源目录（kind='upload'）：直接以它为准，
-    # 绝不能再拿它当基准拼一层「手机上传」，否则会自己套自己。
+    # 上传目录本身就是一条内置源目录（kind='upload'），绝不能再拿它当基准拼一层「手机上传」，
+    # 否则会自己套自己。已经固定下来的路径（用户在界面里改过、或已经在某个源目录下）优先尊重；
+    # 只有还停在「数据目录/uploads」这个兜底位置时，才跟着第一个普通源目录走 —— 与 README 的描述一致。
     row = st.db.query_one("SELECT path FROM sources WHERE kind='upload' ORDER BY id LIMIT 1")
+    row_path = None
     if row and (row["path"] or "").strip():
-        return _collapse_upload_path(Path(row["path"]))
-    # 还没有内置源目录（全新安装）：退到第一条普通源目录下面
+        row_path = _collapse_upload_path(Path(row["path"]))
+        if not _is_fallback_dir(st, row_path) or _fallback_has_uploads(st, row_path):
+            return row_path
     src = st.db.query_one(
         "SELECT path FROM sources WHERE enabled=1 AND COALESCE(kind, '') <> 'upload' "
         "ORDER BY id LIMIT 1")
-    if src:
+    if src and (src["path"] or "").strip():
         return Path(src["path"]) / UPLOAD_DIRNAME
+    if row_path is not None:
+        return row_path
     return st.cfg.data_dir / "uploads"
 
 

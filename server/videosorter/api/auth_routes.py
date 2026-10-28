@@ -50,9 +50,10 @@ def logout(request: Request, response: Response) -> dict[str, Any]:
 
 
 @router.get("/me")
-def me(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+def me(request: Request, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
-    return {"user": user, "sessions": st.auth.sessions(), "version": st.cfg.version}
+    return {"user": user, "sessions": st.auth.sessions(current_token(request)),
+            "version": st.cfg.version}
 
 
 @router.post("/password")
@@ -74,9 +75,9 @@ def change_username(body: UsernameIn, user: dict[str, Any] = Depends(require_use
 
 
 @router.get("/sessions")
-def sessions(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+def sessions(request: Request, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
-    return {"sessions": st.auth.sessions()}
+    return {"sessions": st.auth.sessions(current_token(request))}
 
 
 @router.post("/revoke-all")

@@ -104,8 +104,10 @@ class AuthService:
     def revoke_all(self) -> None:
         self.db.execute("DELETE FROM tokens")
 
-    def sessions(self) -> list[dict[str, Any]]:
+    def sessions(self, current: str | None = None) -> list[dict[str, Any]]:
         return [
-            {"token": r["token"][:8] + "…", "created_at": r["created_at"], "last_used_at": r["last_used_at"]}
+            {"token": r["token"][:8] + "…", "created_at": r["created_at"],
+             "last_used_at": r["last_used_at"],
+             "current": bool(current) and r["token"] == current}
             for r in self.db.query("SELECT * FROM tokens ORDER BY created_at DESC")
         ]

@@ -8,8 +8,10 @@
 """
 from __future__ import annotations
 
+import errno
 import os
 import shutil
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -145,6 +147,33 @@ def _cross_device(src: Path, dst_dir: Path) -> bool:
 
 
 # ---------- 执行 ----------
+def explain_error(e: Exception) -> str:
+    """把底层的系统错误翻成用户能看懂的中文（Windows 上「文件被占用」最常见）。"""
+    winerror = getattr(e, "winerror", None)
+    busy = winerror == 32 or getattr(e, "errno", None) in (errno.EACCES, errno.EPERM, errno.EBUSY, errno.ETXTBSY)
+    if isinstance(e, OSError) and busy:
+        return "文件正被占用（可能正在播放，或被其他程序打开），请关闭播放器后重试"
+    if isinstance(e, OSError) and getattr(e, "errno", None) == errno.ENOSPC:
+        return "磁盘空间不足"
+    return str(e) or e.__class__.__name__
+
+
+def _move_with_retry(src: Path, dst: Path, attempts: int = 3, delay: float = 0.3) -> str:
+    """Windows 上「文件正在播放」常常是瞬时的（播放器刚松开或 ffmpeg 正在退出），先重试几次再判失败。"""
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return move_file(src, dst)
+        except OSError as e:
+            busy = getattr(e, "winerror", None) == 32 or getattr(e, "errno", None) in (
+                errno.EACCES, errno.EPERM, errno.EBUSY, errno.ETXTBSY)
+            if not busy or i == attempts - 1:
+                raise
+            last = e
+            time.sleep(delay)
+    raise last  # pragma: no cover — 上面一定已经 return 或 raise
+
+
 def move_file(src: Path, dst: Path) -> str:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
@@ -191,7 +220,7 @@ def execute_plan(db: Database, cfg: Config, tasks: TaskRegistry, task_id: str,
             real_dst = dst
             if real_dst.exists():
                 real_dst = _unique_target(Path(it["dir"]), it["name"], set())
-            how = move_file(src, real_dst)
+            how = _move_with_retry(src, real_dst)
             db.execute(
                 "INSERT INTO organize_logs (batch_id, video_id, tag_id, from_path, to_path, moved_at) "
                 "VALUES (?,?,?,?,?,?)",
@@ -205,8 +234,9 @@ def execute_plan(db: Database, cfg: Config, tasks: TaskRegistry, task_id: str,
                           "from": str(src), "to": str(real_dst), "how": how})
             tasks.step(task_id, f"已移动 {real_dst.name}")
         except Exception as e:  # noqa: BLE001 — 单个文件失败不应中断整批
-            failed.append({"video_id": it["video_id"], "name": it["name"], "error": str(e)})
-            tasks.step(task_id, f"失败 {it['name']}：{e}")
+            reason = explain_error(e)
+            failed.append({"video_id": it["video_id"], "name": it["name"], "error": reason})
+            tasks.step(task_id, f"失败 {it['name']}：{reason}")
 
     if not moved and not failed:
         db.execute("DELETE FROM organize_batches WHERE id=?", (batch_id,))
@@ -238,7 +268,7 @@ def undo_batch(db: Database, batch_id: str) -> dict[str, Any]:
             )
             restored += 1
         except Exception as e:  # noqa: BLE001
-            failed.append({"name": to_path.name, "error": str(e)})
+            failed.append({"name": to_path.name, "error": explain_error(e)})
     db.execute("UPDATE organize_batches SET undone=1 WHERE id=?", (batch_id,))
     return {"restored": restored, "failed": failed}
 
