@@ -77,6 +77,17 @@ Release 已发布时，先删对应 Release（或让它随 tag 一起走），�
 挂 Release（tag 直跑时默认 token 只有只读权限）。附件统一由 `release.yml` 的
 `publish` job 负责。
 
+**复用工作流拿不到 secrets**：`release.yml` 里 `android` / `windows` / `fnos` 都是用
+`uses: ./.github/workflows/xxx.yml` 的复用工作流，GitHub **不会**自动把仓库 secrets 传进去。
+凡是复用工作流里用到 secrets 的（现在只有 Android 签名证书那四个 `ANDROID_KEYSTORE_*`），
+调用处必须写 `secrets: inherit`，否则会出现「本地/单跑 android.yml 正常，走 Release 就报
+`缺少 secrets.ANDROID_KEYSTORE_BASE64`」的谜案（2026-10-29 真实踩过，见 `965d2a2`）。
+
+**`apksigner` 输出格式随 build-tools 版本变**：runner 上是 build-tools 37，行首是
+`V2 Signer: certificate SHA-256 digest:`；老的 34/35 是 `Signer #1 certificate SHA-256 digest:`。
+`android.yml` 的校验步骤因此不 grep 固定前缀，而是先 `out="$(apksigner verify -v --print-certs ...)"`
+再 `case "$out" in *"certificate SHA-256 digest"*)` 判定，并且不把 apksigner 的非零退出直接短路。
+
 ## 本地等价命令（不依赖 CI）
 
 ```bash
