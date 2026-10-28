@@ -40,7 +40,9 @@ git push origin vX.Y.Z
 `android` / `windows` / `fnos` 三个 job 并行（都只 `needs: [test]`）；`publish` 的条件是
 `!cancelled() && needs.android.result == 'success' && needs.fnos.result == 'success'`，
 所以 **Windows 失败只会少 `VideoSorter-<版本>-x64-setup.exe` 和 `.msi` 两个资产，不会拦住发布**。
-`publish` 里会把 `windows-desktop` artifact 里的 NSIS/MSI 改名成这两个固定名字再挂上去。
+`publish` 里会把 `windows-desktop` artifact 里的 NSIS/MSI 改名成这两个固定名字再挂上去；
+注意 artifact 会保留 `nsis/`、`msi/` 子目录（实测下载下来是 `windows-desktop/nsis/VideoSorter_1.3.3_x64-setup.exe`），
+所以整理脚本用 `find` 找文件而不是 `*.exe` 通配。
 
 `publish` 用 `softprops/action-gh-release@v2` 挂载；`permissions: contents: write` 在
 `release.yml` 顶层声明，复用工作流（`workflow_call`）继承该权限。

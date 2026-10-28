@@ -80,16 +80,14 @@ jobs:
             cp "$f" "out/videosorter-$V-$abi.apk"
           done
           for f in artifacts/videosorter-fpk/*.fpk; do cp "$f" out/; done
-          # Windows 安装包：windows job 失败时目录不存在，跳过（不影响其余产物）
+          # Windows 安装包：windows job 失败时目录不存在，跳过（不影响其余产物）。
+          # 注意 upload-artifact 会保留 nsis/ 与 msi/ 子目录（实测 artifacts/windows-desktop/nsis/xxx.exe），
+          # 所以这里用 find 而不是 *.exe 通配。
           if [ -d artifacts/windows-desktop ]; then
-            for f in artifacts/windows-desktop/*.exe; do
-              [ -e "$f" ] || continue          # 没匹配到 glob 时别当成文件
-              cp "$f" "out/VideoSorter-$V-x64-setup.exe"
-            done
-            for f in artifacts/windows-desktop/*.msi; do
-              [ -e "$f" ] || continue
-              cp "$f" "out/VideoSorter-$V-x64.msi"
-            done
+            exe="$(find artifacts/windows-desktop -type f -name '*.exe' | head -1)"
+            msi="$(find artifacts/windows-desktop -type f -name '*.msi' | head -1)"
+            if [ -n "$exe" ]; then cp "$exe" "out/VideoSorter-$V-x64-setup.exe"; fi
+            if [ -n "$msi" ]; then cp "$msi" "out/VideoSorter-$V-x64.msi"; fi
           fi
           ls -lh out
 
