@@ -99,6 +99,21 @@ export type Plan = {
 
 export type HistoryItem = Video & { position: number; watched_at: string }
 
+export type ImportResult = {
+  ok: boolean
+  applied: {
+    settings: string[]
+    sources_added: number
+    sources_skipped: number
+    tags_added: number
+    tags_updated: number
+  }
+  settings: Record<string, any>
+  restart_required: boolean
+}
+
+export type DirEntry = { name: string; path: string }
+
 export type Info = {
   version: string
   data_dir: string
@@ -169,6 +184,10 @@ export const api = {
   // 设置/信息
   settings: () => get<{ settings: Record<string, any>; defaults: Record<string, any> }>('/settings'),
   saveSettings: (patchBody: Record<string, any>) => put<{ ok: boolean; settings: Record<string, any> }>('/settings', patchBody),
+  /** 备份设置：返回下载地址（带 cookie 直接下载 JSON 文件） */
+  exportSettingsUrl: () => '/api/settings/export',
+  /** 导入设置：把备份的 JSON 套回来 */
+  importSettings: (payload: any) => post<ImportResult>('/settings/import', payload),
   info: () => get<Info>('/info'),
   apkList: () =>
     get<{ version: string; apps: { name: string; abi: string; version: string; size: number; url: string }[]; releases: string }>('/app/apk'),
@@ -179,7 +198,8 @@ export const api = {
   addSource: (path: string) => post<{ ok: boolean; source: Source }>('/sources', { path }),
   removeSource: (id: number) => del<{ ok: boolean }>(`/sources/${id}`),
   updateSource: (id: number, path: string) => put<{ ok: boolean; source: Source }>(`/sources/${id}`, { path }),
-  browse: (path?: string) => get<{ path: string; parent: string | null; dirs: { name: string; path: string }[] }>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  browse: (path?: string) => get<{ path: string; parent: string | null; dirs: DirEntry[] }>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  fsRoots: () => get<{ roots: DirEntry[]; home: string }>('/fs/roots'),
 
   // 扫描/任务
   scan: (body: { source_ids?: number[]; full?: boolean } = {}) => post<{ task_id: string }>('/scan', body),

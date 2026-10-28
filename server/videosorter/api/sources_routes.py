@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import string
 from pathlib import Path
 from typing import Any
 
@@ -175,3 +176,36 @@ def list_dirs(path: str = "", user: dict[str, Any] = Depends(require_user)) -> d
     parent = str(target.parent) if target.parent != target else ""
     sep = "\\" if os.name == "nt" else "/"
     return {"path": str(target), "parent": parent, "sep": sep, "dirs": dirs[:500]}
+
+
+@router.get("/fs/roots")
+def fs_roots(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """目录选择器的快捷入口：返回这台机器上常见的几个根目录。"""
+    st = get_state()
+    roots: list[dict[str, str]] = []
+
+    def add(name: str, path: str | Path | None) -> None:
+        if path is None or str(path).strip() == "":
+            return
+        p = Path(str(path))
+        try:
+            if not p.is_dir():
+                return
+        except OSError:
+            return
+        key = str(p)
+        if any(r["path"] == key for r in roots):
+            return
+        roots.append({"name": name, "path": key})
+
+    add("主目录", Path.home())
+    if os.name == "nt":
+        for letter in string.ascii_uppercase:
+            add(f"{letter}: 盘", f"{letter}:\\")
+    else:
+        add("根目录", "/")
+        for candidate in ("/vol1", "/volume1", "/mnt", "/media", "/srv", "/data"):
+            add(candidate, candidate)
+    add("数据目录", getattr(st.cfg, "data_dir", None))
+    add("整理根目录", st.cfg.get("root_dir"))
+    return {"roots": roots, "home": str(Path.home())}

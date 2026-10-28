@@ -2,20 +2,22 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
+import DirPicker from '../components/DirPicker.vue'
 import { api, fmtDur, fmtSize, fmtTime, waitTask, type HistoryItem, type PlanItem, type Source, type Stats, type Tag, type Video } from '../api'
+import { isFnosHost, pickDirFromHost } from '../fnos'
 import { toast } from '../toast'
-import { nextThemeMode, setThemeMode, themeMode, THEME_LABEL } from '../theme'
+import { nextThemeMode, setThemeMode, themeMode, THEME_LABEL, type ThemeMode } from '../theme'
 import '../styles/manage.css'
 
 const props = defineProps<{ user?: { username: string } | null }>()
 const router = useRouter()
 
-type View = 'overview' | 'library' | 'tags' | 'organize' | 'history' | 'account' | 'about'
+type View = 'overview' | 'library' | 'tags' | 'organize' | 'history' | 'settings' | 'account' | 'about'
 const view = ref<View>('overview')
 const navOpen = ref(false)   // 窄屏抽屉导航
 const VIEW_TITLE: Record<View, string> = {
   overview: '概览', library: '视频库', tags: '标签管理', organize: '整理',
-  history: '播放历史', account: '登录管理', about: '关于项目',
+  history: '播放历史', settings: '设置', account: '登录管理', about: '关于项目',
 }
 const views: { id: View; label: string; icon: string; group?: string }[] = [
   { id: 'overview', label: '概览', icon: 'grid' },
@@ -23,6 +25,7 @@ const views: { id: View; label: string; icon: string; group?: string }[] = [
   { id: 'tags', label: '标签管理', icon: 'tag' },
   { id: 'organize', label: '整理', icon: 'move' },
   { id: 'history', label: '播放历史', icon: 'clock', group: '记录与设置' },
+  { id: 'settings', label: '设置', icon: 'settings' },
   { id: 'account', label: '登录管理', icon: 'shield' },
   { id: 'about', label: '关于项目', icon: 'info' },
 ]
@@ -63,12 +66,145 @@ async function loadSessions() {
   try { sessions.value = (await api.sessions()).sessions } catch { sessions.value = [] }
 }
 
+/* ---------------- 设置 / 备份 / 导入 ---------------- */
+const setForm = reactive({
+  root_dir: '',
+  upload_dir: '',
+  theme: 'auto',
+  transcode: true,
+  transcode_preset: 'veryfast',
+  thumb_position: 0,
+  scan_workers: 3,
+  discovery: true,
+  discovery_port: 38080,
+  port: 8080,
+  host: '0.0.0.0',
+})
+const setLoading = ref(false)
+const setSaving = ref(false)
+const setRestart = ref(false)
+const importing = ref(false)
+const importInput = ref<HTMLInputElement | null>(null)
+
+const TRANSCODE_PRESETS = [
+  { v: 'ultrafast', label: '最快（体积大）' },
+  { v: 'veryfast', label: '很快（默认）' },
+  { v: 'faster', label: '较快' },
+  { v: 'medium', label: '均衡' },
+  { v: 'slow', label: '慢（体积小）' },
+]
+const THEME_OPTIONS: { v: ThemeMode; label: string }[] = [
+  { v: 'auto', label: '跟随系统' },
+  { v: 'light', label: '浅色' },
+  { v: 'dark', label: '深色' },
+]
+
+async function loadSettings() {
+  setLoading.value = true
+  try {
+    const r = await api.settings()
+    const s = r.settings || {}
+    setForm.root_dir = s.root_dir || ''
+    setForm.upload_dir = s.upload_dir || ''
+    setForm.theme = themeMode.value || s.theme || 'auto'
+    setForm.transcode = s.transcode !== false
+    setForm.transcode_preset = s.transcode_preset || 'veryfast'
+    setForm.thumb_position = Number(s.thumb_position ?? 0)
+    setForm.scan_workers = Number(s.scan_workers ?? 3)
+    setForm.discovery = s.discovery !== false
+    setForm.discovery_port = Number(s.discovery_port ?? 38080)
+    setForm.port = Number(s.port ?? 8080)
+    setForm.host = s.host || '0.0.0.0'
+  } catch (e: any) {
+    toast(e?.message || '读取设置失败', true)
+  } finally {
+    setLoading.value = false
+  }
+}
+async function saveSettingsAll() {
+  setSaving.value = true
+  try {
+    const r: any = await api.saveSettings({
+      root_dir: setForm.root_dir.trim(),
+      upload_dir: setForm.upload_dir.trim(),
+      theme: setForm.theme,
+      transcode: setForm.transcode,
+      transcode_preset: setForm.transcode_preset,
+      thumb_position: Number(setForm.thumb_position) || 0,
+      scan_workers: Math.max(1, Math.min(16, Number(setForm.scan_workers) || 3)),
+      discovery: setForm.discovery,
+      discovery_port: Math.max(1, Math.min(65535, Number(setForm.discovery_port) || 38080)),
+    })
+    setRestart.value = !!r.restart_required
+    setThemeMode(setForm.theme as ThemeMode)
+    toast('设置已保存')
+    await Promise.all([loadSettings(), loadSources(), loadInfo()])
+  } catch (e: any) {
+    toast(e?.message || '保存失败', true)
+  } finally {
+    setSaving.value = false
+  }
+}
+function backupSettings() {
+  // 同源下载，登录 cookie 会一起带上
+  const a = document.createElement('a')
+  a.href = api.exportSettingsUrl()
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  toast('已导出设置文件')
+}
+function pickImportFile() {
+  importInput.value?.click()
+}
+async function onImportFile(e: Event) {
+  const el = e.target as HTMLInputElement
+  const file = el.files?.[0]
+  el.value = ''
+  if (!file) return
+  importing.value = true
+  try {
+    const text = await file.text()
+    let payload: any
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      throw new Error('这个文件不是 JSON，可能选错了')
+    }
+    const r = await api.importSettings(payload)
+    const a = r.applied
+    const parts = [
+      a.settings.length ? `设置 ${a.settings.length} 项` : '',
+      a.sources_added ? `新增源目录 ${a.sources_added} 个` : '',
+      a.sources_skipped ? `已存在源目录 ${a.sources_skipped} 个` : '',
+      a.tags_added ? `新增标签 ${a.tags_added} 个` : '',
+      a.tags_updated ? `更新标签 ${a.tags_updated} 个` : '',
+    ].filter(Boolean)
+    toast(parts.length ? `导入完成：${parts.join('、')}` : '导入完成，没有需要变更的内容')
+    setRestart.value = !!r.restart_required
+    const importedTheme = r.settings?.theme
+    if (importedTheme && ['light', 'dark', 'auto'].includes(importedTheme)) setThemeMode(importedTheme as ThemeMode)
+    await Promise.all([loadSettings(), loadSources(), loadTags(), loadStats(), loadInfo()])
+  } catch (err: any) {
+    toast(err?.message || '导入失败', true)
+  } finally {
+    importing.value = false
+  }
+}
+const themeKeyPreview = computed(() => setForm.theme)
+function pickTheme(v: ThemeMode) {
+  setForm.theme = v
+  setThemeMode(v) // 立即生效，保存时再同步到服务端
+}
+
 function go(v: View) {
   navOpen.value = false
   view.value = v
   if (v === 'library') loadLibrary()
   if (v === 'organize') loadPlan()
   if (v === 'history') loadHistory()
+  if (v === 'settings') loadSettings()
   if (v === 'account') loadSessions()
   if (v === 'about') loadInfo()
 }
@@ -351,6 +487,54 @@ async function doDelTag() {
   } catch (e: any) { toast(e?.message || '删除失败', true) }
 }
 
+/* ---------------- 目录选择器 ---------------- */
+type PickTarget =
+  | { kind: 'source' }
+  | { kind: 'tag'; id: number }
+  | { kind: 'tagModal' }
+  | { kind: 'setting'; key: 'root_dir' | 'upload_dir' }
+
+const picker = reactive({ open: false, start: '', target: null as PickTarget | null })
+
+function startDirOf(t: PickTarget): string {
+  if (t.kind === 'source') return ''
+  if (t.kind === 'tag') {
+    const tag = tags.value.find((x) => x.id === t.id)
+    return (tag && (tagDrafts[t.id]?.dir_path || tag.dir_path)) || ''
+  }
+  if (t.kind === 'tagModal') return tagModal.dir || ''
+  return setForm[t.key] || ''
+}
+
+function applyPickedDir(t: PickTarget, path: string) {
+  if (t.kind === 'source') newSource.value = path
+  else if (t.kind === 'tag') {
+    const tag = tags.value.find((x) => x.id === t.id)
+    if (!tag) return
+    draftOf(tag).dir_path = path
+    void saveTagInline(t.id)
+  } else if (t.kind === 'tagModal') tagModal.dir = path
+  else setForm[t.key] = path
+}
+
+async function chooseDir(t: PickTarget) {
+  // fnOS 宿主（微应用 iframe）里优先调系统目录选择器；其它环境用内置目录浏览
+  if (isFnosHost()) {
+    const picked = await pickDirFromHost({ title: '选择文件夹' })
+    if (picked !== undefined) {
+      if (picked) applyPickedDir(t, picked)
+      return
+    }
+  }
+  picker.target = t
+  picker.start = startDirOf(t)
+  picker.open = true
+}
+
+function onDirPicked(path: string) {
+  if (picker.target) applyPickedDir(picker.target, path)
+}
+
 /* ---------------- 整理 ---------------- */
 const plan = ref<{ items: PlanItem[]; total: number; total_bytes: number; skipped: number } | null>(null)
 const planLoading = ref(false)
@@ -492,6 +676,34 @@ async function doLogout() {
 
 function cycleTheme() { setThemeMode(nextThemeMode()) }
 const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeMode.value]}`)
+
+/* ---------------- 更新日志（关于页只显示最近 5 条） ---------------- */
+const LOGS: { v: string; text: string }[] = [
+  { v: '1.3.5', text: '新增「设置」页：整理根目录、上传目录、缩略图位置、扫描线程数、转码、局域网发现都可以在网页里改；新增「备份设置 / 导入设置」，把配置、源文件夹、标签一起导出成一个 JSON 文件，换机器或重装后一键还原（导入只补不会删）；关于页的更新日志只显示最近 5 条，完整历史去 GitHub Releases 看；所有填目录的输入框后面多了「选择」按钮，可直接点选文件夹（fnOS 里调系统目录选择器，其它环境用内置目录浏览）。' },
+  { v: '1.3.4', text: 'Windows 桌面端修复「英文等非中文系统启动即崩」（控制台编码打印中文报错导致服务端起不来）；发版自动产出 Windows 安装包（.exe / .msi）；新增 Docker 镜像，同时发布到 Docker Hub 与 GHCR（amd64 / arm64）；安卓安装包改用固定证书签名，以后升级可直接覆盖安装、不用卸载重装（这一版仍需卸载旧包一次）。' },
+  { v: '1.3.3', text: '网页端 HLS 播放也会续播了（需要转码的视频不再每次从头播）；整理时文件被占用（如正在播放）会先自动重试两次，仍不行就提示「文件正被占用，请关闭播放器后重试」；全新安装后新增第一个源目录，上传目录会自动跟到「<源目录>/手机上传」；会话列表会标出「当前设备」。' },
+  { v: '1.3.2', text: '修复上传目录会自我嵌套（每次重启/新增源目录都多套一层「手机上传」，导致上传的视频散落在多层目录）；升级后启动会自动收敛回一层。' },
+  { v: '1.3.1', text: '管理页「下载手机 App」改成强调色按钮，与「扫描全部」统一；窄屏自动显示为「下载 App」。' },
+  { v: '1.3.0', text: '顶栏新增「下载手机 App」按钮（可直接从服务器下载安卓安装包）；手机浏览器打开网页端会提示安装 App。' },
+  { v: '1.2.0', text: '网页端适配移动设备：窄屏侧栏收成抽屉（左上角菜单），内容单列、统计卡 2×2、标签行自动换行、视频网格自适应，播放页在手机上改为上下布局。' },
+  { v: '1.1.4', text: '标签名称框常显边框；目标文件夹框恢复撑满并贴近删除按钮；预设颜色扩到 12 个。' },
+  { v: '1.1.3', text: '标签颜色改为小圆角色块并挪到名称右边，目标文件夹输入框收窄。' },
+  { v: '1.1.2', text: '标签管理改为行内编辑：名称、颜色、目标文件夹都可以直接在卡片上改（自动保存）；颜色支持自定义取色。' },
+  { v: '1.1.1', text: '视频封面改为取每个视频的第一帧（旧封面会自动重建）；概览页四个统计卡片改为 2×2，与标签分布卡片同排、标签分布卡片固定尺寸。' },
+  { v: '1.1.0', text: '扫描会同时遍历源文件夹与各标签的目标文件夹；网页端「源文件夹」管理移到视频库页；标签管理页新增扫描按钮；手机端标签管理页也新增扫描按钮。' },
+  { v: '1.0.11', text: '整理过的视频重新扫描后仍留在媒体库；视频库按「源文件夹 / 标签文件夹」分组展示。' },
+  { v: '1.0.10', text: 'fnOS 安装包：安装向导可选择服务端口；卸载时可选择保留或删除应用数据。' },
+  { v: '1.0.9', text: '筛选支持多标签（手机端与网页端都可同时勾选多个标签取并集）；手机端视频库筛选后播放器只播筛选结果，切回视频库筛选状态保留。' },
+  { v: '1.0.8', text: '修复网页播放页筛选（切换全部/未打标签/待整理/已整理/标签后列表实时刷新）；安卓播放器新增预加载（预取后 2 个视频开头数据与 HLS 切片，切换起播更快）。' },
+  { v: '1.0.7', text: '网页端播放页新增下载按钮；源文件夹管理显示「上传目录」角标且不可删除；视频库支持单条与批量删除（可选同时删除文件）；重新扫描后已删除文件的视频不再出现在视频库与播放列表。' },
+  { v: '1.0.6', text: '上传目录纳入源文件夹管理（可改路径、不可删除），扫描覆盖上传目录；网页端新增上传（多文件+进度）与下载；手机端修「删除文件后视频库不刷新」「磁盘文件被删后播放报错」、进度条按住即跟手、长按手势分区、传输历史多选删除、播放记录去重与「视频已删除」标记。' },
+  { v: '1.0.5', text: '修复视频封面与视频内容错乱：缩略图按视频 id 命名（原来同一毫秒扫描多个文件会撞名）、封面地址带版本号自动破缓存、历史脏封面自动重建。' },
+  { v: '1.0.4', text: '修复窗口较矮时左侧栏底部用户栏被裁切（侧栏导航可滚动、用户栏始终可见）。' },
+  { v: '1.0.3', text: '修复 .avi/.wmv 老容器转码失败（copy 失败自动回退完整转码）；静态资源不再被浏览器缓存，升级后立即生效；安卓端真机联调修 12 处。' },
+  { v: '1.0.1', text: '关于页展示项目仓库与问题反馈入口；打包信息里的开发者/发布者改为项目作者。' },
+  { v: '1.0.0', text: '首个公开版本：扫描源文件夹、播放器打标签、按标签整理并支持撤销、整理预览、播放历史、三档主题；安卓 App、Windows 桌面端、fnOS 应用包。' },
+]
+const recentLogs = computed(() => LOGS.slice(0, 5))
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
@@ -697,6 +909,9 @@ function onResize() {
                 <div v-if="!sources.length" class="empty">还没有源文件夹，添加一个包含视频的目录。</div>
                 <div style="display:flex;gap:8px;margin-top:12px">
                   <input v-model="newSource" class="field" placeholder="/volume1/videos/未整理" spellcheck="false" @keyup.enter="addSource" />
+                  <button class="btn ghost dir-btn" title="选择文件夹" @click="chooseDir({ kind: 'source' })">
+                    <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
+                  </button>
                   <button class="btn" @click="addSource">添加</button>
                 </div>
                 <div class="m-desc" style="font-size:11.5px;margin-top:10px">
@@ -775,6 +990,7 @@ function onResize() {
               <button class="tag-color" :style="{ background: draftOf(t).color }" :title="`颜色 ${draftOf(t).color}（点击修改）`" @click.stop="toggleColorPop(t.id)" />
               <span class="ct">{{ t.count ?? 0 }} 个视频</span>
               <input class="inline-dir" v-model="draftOf(t).dir_path" :placeholder="t.effective_dir" :title="t.dir_path || t.effective_dir" spellcheck="false" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
+              <button class="icon-act" title="选择目标文件夹" @click="chooseDir({ kind: 'tag', id: t.id })"><Icon name="folder" :size="15" /></button>
               <span class="save-hint">
                 <span v-if="tagState[t.id] === 'saving'">保存中…</span>
                 <span v-else-if="tagState[t.id] === 'saved'" class="ok">已保存</span>
@@ -944,6 +1160,103 @@ function onResize() {
           </div>
         </template>
 
+        <!-- ================= 设置 ================= -->
+        <template v-else-if="view === 'settings'">
+          <div class="m-head">
+            <div>
+              <div class="m-title">设置</div>
+              <div class="m-desc">整理相关的选项都能在这里改；端口、监听地址这类启动参数仍需改配置文件后重启。</div>
+            </div>
+            <div class="sp" />
+            <button class="btn ghost" :disabled="setLoading" @click="loadSettings"><Icon name="refresh" :size="15" />重新读取</button>
+            <button class="btn primary" :disabled="setSaving" @click="saveSettingsAll">
+              <Icon name="check" :size="15" />{{ setSaving ? '保存中…' : '保存设置' }}
+            </button>
+          </div>
+
+          <div v-if="setRestart" class="set-warn">有改动需要重启服务后生效。</div>
+
+          <div class="split">
+            <div class="card">
+              <div class="card-head"><h2>目录</h2></div>
+              <div class="card-body">
+                <div class="form-row"><label>整理根目录（留空则跟随各标签自己的设置）</label>
+                  <div class="dir-line">
+                    <input v-model="setForm.root_dir" class="field" placeholder="/volume1/videos" spellcheck="false" />
+                    <button class="btn ghost dir-btn" title="选择文件夹" @click="chooseDir({ kind: 'setting', key: 'root_dir' })">
+                      <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="form-row"><label>上传目录（手机/网页上传的视频存到这里）</label>
+                  <div class="dir-line">
+                    <input v-model="setForm.upload_dir" class="field" :placeholder="info?.upload_dir || '默认：源目录/手机上传'" spellcheck="false" />
+                    <button class="btn ghost dir-btn" title="选择文件夹" @click="chooseDir({ kind: 'setting', key: 'upload_dir' })">
+                      <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="m-desc" style="font-size:11.5px">上传目录同时也是一条源文件夹，扫描时会一起遍历，不能删除。</div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h2>扫描与主题</h2></div>
+              <div class="card-body">
+                <div class="form-row"><label>扫描线程数（1–16）</label>
+                  <input v-model.number="setForm.scan_workers" class="field" type="number" min="1" max="16" />
+                </div>
+                <div class="form-row"><label>封面取第几秒的画面</label>
+                  <input v-model.number="setForm.thumb_position" class="field" type="number" step="0.5" min="0" />
+                </div>
+                <div class="form-row"><label>主题</label>
+                  <div class="seg">
+                    <button v-for="t in THEME_OPTIONS" :key="t.v" :class="{ on: themeKeyPreview === t.v }" @click="pickTheme(t.v)">{{ t.label }}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="split" style="margin-top:14px">
+            <div class="card">
+              <div class="card-head"><h2>转码</h2></div>
+              <div class="card-body">
+                <label class="chk-row"><input v-model="setForm.transcode" type="checkbox" /><span>浏览器不能直放的格式自动转码（HLS）</span></label>
+                <div class="form-row"><label>转码预设</label>
+                  <select v-model="setForm.transcode_preset" class="field">
+                    <option v-for="p in TRANSCODE_PRESETS" :key="p.v" :value="p.v">{{ p.label }}</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h2>局域网发现</h2></div>
+              <div class="card-body">
+                <label class="chk-row"><input v-model="setForm.discovery" type="checkbox" /><span>广播服务器地址，手机 App 能自动发现</span></label>
+                <div class="form-row"><label>发现端口（UDP）</label>
+                  <input v-model.number="setForm.discovery_port" class="field" type="number" min="1" max="65535" />
+                </div>
+                <div class="kv"><span class="k">当前监听</span><span class="v">{{ setForm.host }}:{{ setForm.port }}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:14px">
+            <div class="card-head"><h2>备份与恢复</h2></div>
+            <div class="card-body">
+              <div class="m-desc" style="font-size:12px;margin-bottom:10px">
+                备份文件把「设置 + 源文件夹 + 标签（含目标文件夹）」导出成一个 JSON，换机器或重装后导入即可还原。
+                导入只补不删：已存在的源文件夹会跳过，同名标签更新颜色和目录。
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap">
+                <button class="btn ghost" @click="backupSettings"><Icon name="download" :size="15" />备份设置</button>
+                <button class="btn ghost" :disabled="importing" @click="pickImportFile"><Icon name="upload" :size="15" />{{ importing ? '导入中…' : '导入设置' }}</button>
+                <input ref="importInput" type="file" accept=".json,application/json" hidden @change="onImportFile" />
+              </div>
+            </div>
+          </div>
+        </template>
+
         <!-- ================= 关于 ================= -->
         <template v-else>
           <div class="about-hero">
@@ -985,33 +1298,16 @@ function onResize() {
           <div class="card" style="margin-top:14px">
             <div class="card-head"><h2>更新日志</h2></div>
             <div class="card-body">
-              <div class="log-item"><span class="dt">1.3.4</span><span>Windows 桌面端修复「英文等非中文系统启动即崩」（控制台编码打印中文报错导致服务端起不来）；发版自动产出 Windows 安装包（.exe / .msi）；新增 Docker 镜像，同时发布到 Docker Hub 与 GHCR（amd64 / arm64）；安卓安装包改用固定证书签名，以后升级可直接覆盖安装、不用卸载重装（这一版仍需卸载旧包一次）。</span></div>
-              <div class="log-item"><span class="dt">1.3.3</span><span>网页端 HLS 播放也会续播了（需要转码的视频不再每次从头播）；整理时文件被占用（如正在播放）会先自动重试两次，仍不行就提示「文件正被占用，请关闭播放器后重试」；全新安装后新增第一个源目录，上传目录会自动跟到「&lt;源目录&gt;/手机上传」；会话列表会标出「当前设备」。</span></div>
-              <div class="log-item"><span class="dt">1.3.2</span><span>修复上传目录会自我嵌套（每次重启/新增源目录都多套一层「手机上传」，导致上传的视频散落在多层目录）；升级后启动会自动收敛回一层。</span></div>
-              <div class="log-item"><span class="dt">1.3.1</span><span>管理页「下载手机 App」改成强调色按钮，与「扫描全部」统一；窄屏自动显示为「下载 App」。</span></div>
-              <div class="log-item"><span class="dt">1.3.0</span><span>顶栏新增「下载手机 App」按钮（可直接从服务器下载安卓安装包）；手机浏览器打开网页端会提示安装 App。</span></div>
-              <div class="log-item"><span class="dt">1.2.0</span><span>网页端适配移动设备：窄屏侧栏收成抽屉（左上角菜单），内容单列、统计卡 2×2、标签行自动换行、视频网格自适应，播放页在手机上改为上下布局。</span></div>
-              <div class="log-item"><span class="dt">1.1.4</span><span>标签名称框常显边框；目标文件夹框恢复撑满并贴近删除按钮；预设颜色扩到 12 个。</span></div>
-              <div class="log-item"><span class="dt">1.1.3</span><span>标签颜色改为小圆角色块并挪到名称右边，目标文件夹输入框收窄。</span></div>
-              <div class="log-item"><span class="dt">1.1.2</span><span>标签管理改为行内编辑：名称、颜色、目标文件夹都可以直接在卡片上改（自动保存）；颜色支持自定义取色。</span></div>
-              <div class="log-item"><span class="dt">1.1.1</span><span>视频封面改为取每个视频的第一帧（旧封面会自动重建）；概览页四个统计卡片改为 2×2，与标签分布卡片同排、标签分布卡片固定尺寸。</span></div>
-              <div class="log-item"><span class="dt">1.1.0</span><span>扫描会同时遍历源文件夹与各标签的目标文件夹；网页端「源文件夹」管理移到视频库页；标签管理页新增扫描按钮；手机端标签管理页也新增扫描按钮。</span></div>
-              <div class="log-item"><span class="dt">1.0.11</span><span>整理过的视频重新扫描后仍留在媒体库；视频库按「源文件夹 / 标签文件夹」分组展示。</span></div>
-              <div class="log-item"><span class="dt">1.0.10</span><span>fnOS 安装包：安装向导可选择服务端口；卸载时可选择保留或删除应用数据。</span></div>
-              <div class="log-item"><span class="dt">1.0.9</span><span>筛选支持多标签（手机端与网页端都可同时勾选多个标签取并集）；手机端视频库筛选后播放器只播筛选结果，切回视频库筛选状态保留。</span></div>
-              <div class="log-item"><span class="dt">1.0.8</span><span>修复网页播放页筛选（切换全部/未打标签/待整理/已整理/标签后列表实时刷新）；安卓播放器新增预加载（预取后 2 个视频开头数据与 HLS 切片，切换起播更快）。</span></div>
-              <div class="log-item"><span class="dt">1.0.7</span><span>网页端播放页新增下载按钮；源文件夹管理显示「上传目录」角标且不可删除；视频库支持单条与批量删除（可选同时删除文件）；重新扫描后已删除文件的视频不再出现在视频库与播放列表。</span></div>
-              <div class="log-item"><span class="dt">1.0.6</span><span>上传目录纳入源文件夹管理（可改路径、不可删除），扫描覆盖上传目录；网页端新增上传（多文件+进度）与下载；手机端修「删除文件后视频库不刷新」「磁盘文件被删后播放报错」、进度条按住即跟手、长按手势分区、传输历史多选删除、播放记录去重与「视频已删除」标记。</span></div>
-              <div class="log-item"><span class="dt">1.0.5</span><span>修复视频封面与视频内容错乱：缩略图按视频 id 命名（原来同一毫秒扫描多个文件会撞名）、封面地址带版本号自动破缓存、历史脏封面自动重建。</span></div>
-                <div class="log-item"><span class="dt">1.0.4</span><span>修复窗口较矮时左侧栏底部用户栏被裁切（侧栏导航可滚动、用户栏始终可见）。</span></div>
-              <div class="log-item"><span class="dt">1.0.3</span><span>修复 .avi/.wmv 老容器转码失败（copy 失败自动回退完整转码）；静态资源不再被浏览器缓存，升级后立即生效；安卓端真机联调修 12 处。</span></div>
-              <div class="log-item"><span class="dt">1.0.1</span><span>关于页展示项目仓库与问题反馈入口；打包信息里的开发者/发布者改为项目作者。</span></div>
-              <div class="log-item"><span class="dt">1.0.0</span><span>首个公开版本：扫描源文件夹、播放器打标签、按标签整理并支持撤销、整理预览、播放历史、三档主题；安卓 App、Windows 桌面端、fnOS 应用包。</span></div>
+              <div v-for="l in recentLogs" :key="l.v" class="log-item"><span class="dt">{{ l.v }}</span><span>{{ l.text }}</span></div>
+              <a class="more-logs" href="https://github.com/mdjbn/video-sorter/releases" target="_blank" rel="noopener">查看完整更新日志 ↗</a>
             </div>
           </div>
         </template>
       </div>
     </main>
+
+    <!-- 目录选择器（非 fnOS 宿主时用它；fnOS 里用系统目录选择器） -->
+    <DirPicker v-model:open="picker.open" :start="picker.start" @pick="onDirPicked" />
 
     <!-- 标签弹窗 -->
     <div v-if="tagModal.show" class="modal-mask show" @click.self="tagModal.show = false">
@@ -1027,7 +1323,12 @@ function onResize() {
           </div>
         </div>
         <div class="form-row"><label>目的文件夹（留空则自动）</label>
-          <input v-model="tagModal.dir" class="field" placeholder="/volume1/videos/整理/旅行" spellcheck="false" />
+          <div style="display:flex;gap:8px">
+            <input v-model="tagModal.dir" class="field" placeholder="/volume1/videos/整理/旅行" spellcheck="false" />
+            <button class="btn ghost" title="选择文件夹" @click="chooseDir({ kind: 'tagModal' })">
+              <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
+            </button>
+          </div>
         </div>
         <div class="modal-actions">
           <button class="btn ghost" @click="tagModal.show = false">取消</button>

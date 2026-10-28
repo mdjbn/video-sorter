@@ -332,3 +332,23 @@
   .m-top .top-cta .lbl-long { display: none; }
   .m-top .top-cta .lbl-short { display: inline; }
 }
+
+/* 目录输入 + 「选择」按钮 */
+.dir-line { display: flex; gap: 8px; align-items: center; }
+.dir-line .field { flex: 1; min-width: 0; }
+.dir-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.trow .icon-act + .icon-act { margin-left: 0; }
+.set-warn { margin: 0 0 14px; padding: 10px 13px; border-radius: 10px; font-size: 12.5px;
+  color: var(--text); background: color-mix(in srgb, var(--warn, #f4a259) 16%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--warn, #f4a259) 42%, transparent); }
+.form-row select.field { appearance: none; }
+.chk-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; margin-bottom: 13px; cursor: pointer; }
+.chk-row input { width: 15px; height: 15px; accent-color: var(--accent); }
+/* 关于页：只显示最近 5 条 + 完整日志入口 */
+.more-logs { display: inline-block; margin-top: 11px; font-size: 12px; font-weight: 600;
+  color: var(--accent); text-decoration: none; }
+.more-logs:hover { color: var(--accent-2); }
+@media (max-width: 820px) {
+  .dir-btn .dir-btn-lbl { display: none; }
+  .dir-btn { padding: 0 10px; }
+}
