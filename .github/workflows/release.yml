@@ -46,6 +46,8 @@ jobs:
   android:
     needs: [test]
     uses: ./.github/workflows/android.yml
+    # 复用工作流不会自动拿到仓库 secrets，必须显式 inherit（Android 签名证书在 secrets 里）
+    secrets: inherit
 
   # Windows 安装包（NSIS + MSI）：PyInstaller 不能交叉编译，只能在 windows-latest 上编。
   # 20-40 分钟，和 android/fnos 并行跑；里面自带三处门禁（Rust 编译、无头装包冒烟、装机后验 ffmpeg）。
