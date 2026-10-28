@@ -35,7 +35,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $base = "http://127.0.0.1:$Port"
 $appExe = Join-Path $InstallDir 'video-sorter-desktop.exe'
-$sidecarExe = Join-Path $InstallDir 'binaries\videosorter-server\videosorter-server.exe'
+$sidecarExe = Join-Path $InstallDir 'binaries\videosorter-server.exe'
+if (-not (Test-Path $sidecarExe)) {
+    # 兼容另一种暂存方式：整个 videosorter-server 目录被放进 binaries/
+    $sidecarExe = Join-Path $InstallDir 'binaries\videosorter-server\videosorter-server.exe'
+}
 $appDataDir = Join-Path $env:APPDATA 'VideoSorter'
 $cLenName = '测试 视频_b.mp4'   # 中文 + 空格 + 下划线：一次卡住编码/空格/LIKE 通配符串号三个坑
 $asciiName = 'clip-a.mp4'
@@ -174,13 +178,16 @@ try {
     Write-Output ("   添加源 {0}" -f $r.StatusCode)
     $tid = (Get-Json "$base/api/scan" 'Post' '{}').task_id
     $t = $null
-    for ($i = 0; $i -lt 120; $i++) {
+    # 最多等 120s：这台机器上偶发「ffprobe 启动挂住」，改了 media.py 让它 20s 超时后重试，
+    # 最坏情况扫描要 40s 上下，所以窗口给足，别把偶发的慢当成失败。
+    for ($i = 0; $i -lt 240; $i++) {
         Start-Sleep -Milliseconds 500
         $t = Get-Json "$base/api/tasks/$tid"
         if ($t.status -ne 'running') { break }
     }
     Start-Sleep -Milliseconds 500
     Write-Output ("   扫描任务结束：status={0} message={1}" -f $t.status, $t.message)
+    Write-Output ("   扫描任务详情：" + ($t | ConvertTo-Json -Compress -Depth 4))
     if ($t.status -ne 'done') { Fail ("扫描任务没 done（status=$($t.status) message=$($t.message)）") }
 
     # ── 4. 视频库与源计数（bug ② 的核心断言）───────────────────────────────

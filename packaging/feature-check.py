@@ -37,7 +37,10 @@ UPDIR = TMP / "上传测试"
 CROSS = Path(r"D:\aiworkspaces\deepseekharness\videosorter\cross-device-out")
 FFMPEG = INSTALL / "tools" / "ffmpeg.exe"
 FFPROBE = INSTALL / "tools" / "ffprobe.exe"
-SIDECAR = INSTALL / "binaries" / "videosorter-server" / "videosorter-server.exe"
+SIDECAR = INSTALL / "binaries" / "videosorter-server.exe"
+if not SIDECAR.exists():
+    # 兼容另一种暂存方式：整个 videosorter-server 目录被放进 binaries/（多一层）
+    SIDECAR = INSTALL / "binaries" / "videosorter-server" / "videosorter-server.exe"
 LOG = TMP / "server.log"
 
 CHECKS: list[dict] = []
@@ -1493,7 +1496,9 @@ def main() -> int:
     INSTALL = Path(args.install)
     FFMPEG = INSTALL / "tools" / "ffmpeg.exe"
     FFPROBE = INSTALL / "tools" / "ffprobe.exe"
-    SIDECAR = INSTALL / "binaries" / "videosorter-server" / "videosorter-server.exe"
+    SIDECAR = INSTALL / "binaries" / "videosorter-server.exe"
+    if not SIDECAR.exists():
+        SIDECAR = INSTALL / "binaries" / "videosorter-server" / "videosorter-server.exe"
     PORT = args.port
     BASE = f"http://127.0.0.1:{PORT}"
     C.base_url = BASE

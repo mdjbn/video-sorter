@@ -83,6 +83,25 @@ class MediaTools:
         return self.ffmpeg, self.ffprobe  # type: ignore[return-value]
 
 
+def _run_tool(cmd: list[str], timeout: int, attempts: int = 2) -> subprocess.CompletedProcess | None:
+    """跑一个外部命令并捕获输出；超时就重试一次。
+
+    这台机器上偶发「子进程启动即挂住」（HLS 那边观察到的 0xC0000142
+    STATUS_DLL_INIT_FAILED 一类），挂住时要等满超时才返回。以前 ffprobe 单次超时是
+    60s，扫描就会整体卡住一分钟、验收脚本跟着超时误报失败；现在把单次超时压短，
+    失败再重试一次（重试几乎总是立刻成功），最坏耗时反而更短。
+    """
+    for i in range(max(1, attempts)):
+        try:
+            return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+        except subprocess.TimeoutExpired:
+            if i + 1 >= attempts:
+                return None
+        except OSError:
+            return None
+    return None
+
+
 def probe(tools: MediaTools, path: Path) -> dict[str, Any]:
     """用 ffprobe 读元数据。失败时返回尽可能多的默认值，不抛异常。"""
     ffmpeg, ffprobe = tools.require()
@@ -90,10 +109,10 @@ def probe(tools: MediaTools, path: Path) -> dict[str, Any]:
         ffprobe, "-v", "error", "-print_format", "json",
         "-show_format", "-show_streams", str(path),
     ]
+    out = _run_tool(cmd, timeout=20)
     try:
-        out = subprocess.run(cmd, capture_output=True, timeout=60, check=False)
-        data = json.loads(out.stdout.decode("utf-8", "replace") or "{}")
-    except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+        data = json.loads((out.stdout if out is not None else b"").decode("utf-8", "replace") or "{}")
+    except json.JSONDecodeError:
         return {"ok": False, "duration": 0.0, "width": 0, "height": 0,
                 "vcodec": "", "acodec": "", "bitrate": 0}
 
@@ -146,14 +165,14 @@ def make_thumb(tools: MediaTools, src: Path, out: Path, duration: float, ratio: 
         "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", str(out),
     ]
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=90, check=False)
-        if r.returncode == 0 and out.exists() and out.stat().st_size > 0:
+        r = _run_tool(cmd, timeout=45)
+        if r is not None and r.returncode == 0 and out.exists() and out.stat().st_size > 0:
             return True
         # 取首帧兜底
         cmd[4] = "0"
-        r = subprocess.run(cmd, capture_output=True, timeout=90, check=False)
-        return r.returncode == 0 and out.exists() and out.stat().st_size > 0
-    except (subprocess.SubprocessError, OSError):
+        r = _run_tool(cmd, timeout=45)
+        return r is not None and r.returncode == 0 and out.exists() and out.stat().st_size > 0
+    except OSError:
         return False
 
 
