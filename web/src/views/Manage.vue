@@ -1176,7 +1176,7 @@ function onResize() {
 
           <div v-if="setRestart" class="set-warn">有改动需要重启服务后生效。</div>
 
-          <div class="split">
+          <div class="set-grid">
             <div class="card">
               <div class="card-head"><h2>目录</h2></div>
               <div class="card-body">
@@ -1196,7 +1196,7 @@ function onResize() {
                     </button>
                   </div>
                 </div>
-                <div class="m-desc" style="font-size:11.5px">上传目录同时也是一条源文件夹，扫描时会一起遍历，不能删除。</div>
+                <div class="m-desc set-hint" style="font-size:11.5px">上传目录同时也是一条源文件夹，扫描时会一起遍历，不能删除。</div>
               </div>
             </div>
             <div class="card">
@@ -1215,9 +1215,6 @@ function onResize() {
                 </div>
               </div>
             </div>
-          </div>
-
-          <div class="split" style="margin-top:14px">
             <div class="card">
               <div class="card-head"><h2>转码</h2></div>
               <div class="card-body">
@@ -1227,6 +1224,7 @@ function onResize() {
                     <option v-for="p in TRANSCODE_PRESETS" :key="p.v" :value="p.v">{{ p.label }}</option>
                   </select>
                 </div>
+                <div class="m-desc set-hint" style="font-size:11.5px">浏览器不能直放的格式（如 HEVC、部分 MKV）会边转边放，切换视频会稍慢一点。</div>
               </div>
             </div>
             <div class="card">
@@ -1241,17 +1239,21 @@ function onResize() {
             </div>
           </div>
 
-          <div class="card" style="margin-top:14px">
-            <div class="card-head"><h2>备份与恢复</h2></div>
+          <div class="card set-backup" style="margin-top:14px">
+            <div class="card-head">
+              <h2>备份与恢复</h2>
+              <div class="spacer" />
+              <span class="card-hint">换机器 / 重装后一键还原</span>
+              <button class="btn ghost sm" @click="backupSettings"><Icon name="download" :size="14" />备份设置</button>
+              <button class="btn ghost sm" :disabled="importing" @click="pickImportFile">
+                <Icon name="upload" :size="14" />{{ importing ? '导入中…' : '导入设置' }}
+              </button>
+              <input ref="importInput" type="file" accept=".json,application/json" hidden @change="onImportFile" />
+            </div>
             <div class="card-body">
-              <div class="m-desc" style="font-size:12px;margin-bottom:10px">
+              <div class="m-desc" style="font-size:12px">
                 备份文件把「设置 + 源文件夹 + 标签（含目标文件夹）」导出成一个 JSON，换机器或重装后导入即可还原。
                 导入只补不删：已存在的源文件夹会跳过，同名标签更新颜色和目录。
-              </div>
-              <div style="display:flex;gap:10px;flex-wrap:wrap">
-                <button class="btn ghost" @click="backupSettings"><Icon name="download" :size="15" />备份设置</button>
-                <button class="btn ghost" :disabled="importing" @click="pickImportFile"><Icon name="upload" :size="15" />{{ importing ? '导入中…' : '导入设置' }}</button>
-                <input ref="importInput" type="file" accept=".json,application/json" hidden @change="onImportFile" />
               </div>
             </div>
           </div>

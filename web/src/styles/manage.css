@@ -333,6 +333,17 @@
   .m-top .top-cta .lbl-short { display: inline; }
 }
 
+/* 设置页卡片网格：同一行卡片等高，说明文字贴底 */
+.set-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; align-items: stretch; }
+.set-grid .card { display: flex; flex-direction: column; }
+.set-grid .card-body { flex: 1; display: flex; flex-direction: column; }
+.set-grid .card-body > *:last-child { margin-bottom: 0; }
+.set-grid .card-body > .set-hint,
+.set-grid .card-body > .kv:last-child { margin-top: auto; }
+.set-grid .card-head h2,
+.set-backup .card-head h2 { white-space: nowrap; }
+.card-hint { font-size: 11.5px; color: var(--muted-2); }
+
 /* 目录输入 + 「选择」按钮 */
 .dir-line { display: flex; gap: 8px; align-items: center; }
 .dir-line .field { flex: 1; min-width: 0; }
@@ -348,7 +359,15 @@
 .more-logs { display: inline-block; margin-top: 11px; font-size: 12px; font-weight: 600;
   color: var(--accent); text-decoration: none; }
 .more-logs:hover { color: var(--accent-2); }
+@media (max-width: 1180px) {
+  .set-grid { grid-template-columns: 1fr; }
+}
 @media (max-width: 820px) {
   .dir-btn .dir-btn-lbl { display: none; }
+  /* 设置页卡片头：窄屏藏起说明文字，避免标题被挤成竖排 */
+  .set-grid .card-head,
+  .set-backup .card-head { flex-wrap: wrap; row-gap: 8px; }
+  .set-grid .card-head .card-hint,
+  .set-backup .card-head .card-hint { display: none; }
   .dir-btn { padding: 0 10px; }
 }
