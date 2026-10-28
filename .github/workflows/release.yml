@@ -1,6 +1,7 @@
 name: Release
 
-# 只在推 v* 标签时发布：目前只发安卓 App 与 fnOS 安装包（Windows/Tauri 桌面端改为手动触发 windows.yml）
+# 只在推 v* 标签时发布：安卓 App + fnOS 安装包 + Windows 桌面端安装包（NSIS/MSI）
+# Windows 构建最慢也最脆，所以它单独失败不会拦住安卓/fnOS 的产物（见 publish 的 if）。
 on:
   push:
     tags: ["v*"]
@@ -46,12 +47,20 @@ jobs:
     needs: [test]
     uses: ./.github/workflows/android.yml
 
+  # Windows 安装包（NSIS + MSI）：PyInstaller 不能交叉编译，只能在 windows-latest 上编。
+  # 20-40 分钟，和 android/fnos 并行跑；里面自带三处门禁（Rust 编译、无头装包冒烟、装机后验 ffmpeg）。
+  windows:
+    needs: [test]
+    uses: ./.github/workflows/windows.yml
+
   fnos:
     needs: [test, android]
     uses: ./.github/workflows/fnos.yml
 
   publish:
-    needs: [android, fnos]
+    needs: [android, fnos, windows]
+    # Windows 失败/取消也照样发安卓和 fnOS 的包；android 或 fnos 失败才整体不发
+    if: ${{ !cancelled() && needs.android.result == 'success' && needs.fnos.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -71,6 +80,17 @@ jobs:
             cp "$f" "out/videosorter-$V-$abi.apk"
           done
           for f in artifacts/videosorter-fpk/*.fpk; do cp "$f" out/; done
+          # Windows 安装包：windows job 失败时目录不存在，跳过（不影响其余产物）
+          if [ -d artifacts/windows-desktop ]; then
+            for f in artifacts/windows-desktop/*.exe; do
+              [ -e "$f" ] || continue          # 没匹配到 glob 时别当成文件
+              cp "$f" "out/VideoSorter-$V-x64-setup.exe"
+            done
+            for f in artifacts/windows-desktop/*.msi; do
+              [ -e "$f" ] || continue
+              cp "$f" "out/VideoSorter-$V-x64.msi"
+            done
+          fi
           ls -lh out
 
       - uses: softprops/action-gh-release@v2

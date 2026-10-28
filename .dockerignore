@@ -1,0 +1,21 @@
+# Docker 构建上下文（仓库根目录）：只带镜像需要的东西，别把 node_modules / 视频 / 安装包塞进去
+.git
+.github
+.vscode
+.idea
+**/node_modules
+web/dist
+android
+src-tauri
+dist
+docs
+design
+tools
+packaging
+server/.venv
+# 测试跑出来的零散缩略图（untracked），别带进镜像
+server/*.jpg
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.DS_Store

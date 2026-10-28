@@ -3,6 +3,7 @@
 [![backend](https://github.com/mdjbn/video-sorter/actions/workflows/backend.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/backend.yml)
 [![E2E](https://github.com/mdjbn/video-sorter/actions/workflows/e2e.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/e2e.yml)
 [![android](https://github.com/mdjbn/video-sorter/actions/workflows/android.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/android.yml)
+[![docker](https://github.com/mdjbn/video-sorter/actions/workflows/docker.yml/badge.svg)](https://github.com/mdjbn/video-sorter/actions/workflows/docker.yml)
 [![release](https://img.shields.io/github/v/release/mdjbn/video-sorter)](https://github.com/mdjbn/video-sorter/releases)
 [![license](https://img.shields.io/github/license/mdjbn/video-sorter)](LICENSE)
 
@@ -24,10 +25,10 @@
 
 | 你要装的 | 下载文件 | 说明 |
 | --- | --- | --- |
-| fnOS / Linux / Windows 服务器 | `run.sh`（源码运行）或 `videosorter.fpk`（fnOS 应用中心） | 一个后端给三端用；fpk 装完在应用中心点开即可 |
-| Windows 单机使用 | `VideoSorter_*_x64-setup.exe`（NSIS）或 `.msi` | 内嵌 Python 服务与网页端，双击即用 |
-| Windows 免安装 | `VideoSorter-portable.zip` | 解压后双击 `启动.bat` |
-| 安卓手机 | `app-debug.apk` | 自签名 debug 包，需要允许「安装未知应用」 |
+| fnOS / Linux 服务器 | `run.sh`（源码运行）、`videosorter-<版本>-x86.fpk` / `-arm.fpk`（fnOS 应用中心） | 一个后端给三端用；fpk 装完在应用中心点开即可 |
+| Docker / NAS | `ghcr.io/mdjbn/video-sorter:<版本>` | 多架构镜像（amd64 / arm64），见下面「启动（Docker）」 |
+| Windows 单机使用 | `VideoSorter-<版本>-x64-setup.exe`（NSIS）或 `VideoSorter-<版本>-x64.msi` | 内嵌 Python 服务与网页端，双击即用 |
+| 安卓手机 | `videosorter-<版本>-arm64-v8a.apk` / `-armeabi-v7a.apk` | 自签名 debug 包，需要允许「安装未知应用」 |
 
 > 手机端连接同一台服务器：打开 App →「扫描局域网」或手填 `http://<服务器IP>:8080` → 登录
 > （默认 `admin` / `admin1234`，登录管理里可改）。
@@ -79,6 +80,22 @@ python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
 ### 安装向导（fnOS）
 
 安装 fpk 时向导会让你填写**服务端口**（默认 8610），装好后应用中心「打开」会自动使用该端口；卸载时可以选择**保留数据**（重装后继续用）或**删除所有数据**（只清应用自己的数据库与上传目录，不碰你的源文件夹）。详见 `docs/build.md` 第 9 节。
+
+### 启动（Docker）
+
+```bash
+docker run -d --name videosorter \
+  -p 8080:8080 \
+  -v /你的/视频目录:/videos \
+  -v /你的/数据目录:/data \
+  ghcr.io/mdjbn/video-sorter:latest
+```
+
+镜像由 CI 构建并推到 GHCR（每次发版出 `linux/amd64` + `linux/arm64` 两个架构，
+也可以本地 `docker build -f packaging/docker/Dockerfile -t videosorter:dev .`）。
+`/data` 放数据库、封面、HLS 缓存和手机上传，**必须持久化**；手机 App 的「扫描局域网」在 bridge 网络下
+发现的是容器 IP，要用 `--network host` 或让手机手填 `http://<NAS IP>:8080`。
+compose、环境变量、目录权限等完整说明见 [packaging/docker/README.md](packaging/docker/README.md)。
 
 ## 使用流程
 
@@ -185,10 +202,13 @@ cd web && npm install && npm run dev
 
 - **Android**：`android/` 是 Kotlin + Compose + Media3 工程，竖向滑动切视频、打标签、整理、上传下载、多服务器切换；登录页可「扫描局域网」自动填服务器地址（靠后端的 UDP 发现）。构建见 [docs/build.md](docs/build.md)（本机需 Android SDK；仓库里配了 GitHub Actions 出 APK）。
 - **Windows**：`src-tauri/` 用 Tauri 2 把同一份 Python 后端打成 sidecar，装完即是「自带服务」的桌面应用，可整理本机磁盘。
-  构建走 GitHub Actions（PyInstaller 不能交叉编译）；不想装也有绿色版：Windows 上跑 `packaging\build-portable.bat`，
-  得到 `dist\portable\videosorter-server\`，双击「启动.bat」即用。
-- **发版**：打 `v*` tag（或手动触发 `.github/workflows/release.yml`）会自动构建网页端、跑测试、出 APK 和 Windows 安装包，
-  并挂到 GitHub Release。
+  PyInstaller 不能交叉编译，所以安装包统一由 GitHub Actions 的 `windows-latest` 编译（发版时自动出 NSIS + MSI）；
+  想在 Windows 上自己出绿色版就跑 `packaging\build-portable.bat`，得到 `dist\portable\videosorter-server\`，双击「启动.bat」即用。
+- **Docker**：`packaging/docker/` 是镜像定义（多阶段构建：node 编网页端 → python + ffmpeg 运行时），
+  发版时自动构建 `linux/amd64` + `linux/arm64` 并推 GHCR。
+- **发版**：打 `v*` tag（或手动触发 `.github/workflows/release.yml`）会跑测试、出 APK / fpk / Windows 安装包，
+  并挂到 GitHub Release；同一个 tag 也会触发 `.github/workflows/docker.yml` 推镜像。
+  Windows 构建失败不会拦住其余产物。
 
 ## 界面预览
 
