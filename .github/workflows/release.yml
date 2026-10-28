@@ -76,7 +76,7 @@ jobs:
           mkdir -p out
           for f in artifacts/videosorter-apk/*.apk; do
             b="$(basename "$f")"
-            abi="$(printf '%s' "$b" | sed -E 's/^app-(.*)-debug\.apk$/\1/')"
+            abi="$(printf '%s' "$b" | sed -E 's/^app-(.*)-(debug|release)\.apk$/\1/')"
             cp "$f" "out/videosorter-$V-$abi.apk"
           done
           for f in artifacts/videosorter-fpk/*.fpk; do cp "$f" out/; done

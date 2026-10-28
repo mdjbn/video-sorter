@@ -27,7 +27,7 @@ chmod +x run.sh
 | fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |
 | fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **18/18 PASS**（含真实文件移动与撤销）|
 | fnOS | 应用中心里真安装 | ⚠️ 未验证 | 需要 NAS 管理员在应用中心手动安装（本机无 root）|
-| 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleDebug` → `dist/android/app-debug.apk`（20 MB，v1.0.0）；CI 也会出 APK artifact|
+| 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleRelease`（固定证书签名）→ `app-<abi>-release.apk`；CI 也会出 APK artifact|
 | 安卓 | 单元测试（normalize/主题/解析/发现） | ✅ 本机通过 | `testDebugUnitTest` → **8/8** |
 | 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
@@ -85,12 +85,12 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 | 11 | mkv 首次播放偶发失败 | 没等 HLS 切片就绪就交给 ExoPlayer | 轮询 `/hlsstatus` + 「首次播放需转码处理 · N%」提示 |
 | 12 | 播完轻点没反应 | `play()` 在 `STATE_ENDED` 下无效 | 先 `seekTo(0)` 再 `play()` |
 
-**安卓端已知限制**：只做了 `assembleDebug`（未配 release 签名与混淆）；`@zseven-w/dsh-android` 插件在本机会话里仍认不出 adb（其 `AdbToolchain` 在插件启动时就缓存了解析结果，需重启宿主服务），调试全程用原始 `adb` 命令。
+**安卓端已知限制**：用固定正式证书签 `assembleRelease`（未开混淆）；`@zseven-w/dsh-android` 插件在本机会话里仍认不出 adb（其 `AdbToolchain` 在插件启动时就缓存了解析结果，需重启宿主服务），调试全程用原始 `adb` 命令。
 
 ## 四、接下来还需要什么
 
 1. ✅ 仓库已开源：<https://github.com/mdjbn/video-sorter>，`v1.0.0` 已发布全部安装包。
-2. **手机真机**：`adb install app-debug.apk`，验证局域网发现、上下滑播放、上传下载（Media3 在真机上的行为）。
+2. **手机真机**：`adb install app-arm64-v8a-release.apk`，验证局域网发现、上下滑播放、上传下载（Media3 在真机上的行为）。
 3. **fnOS 应用中心**：用管理员在应用中心手动安装 `videosorter.fpk`，验证图标、启动/停止、授权目录。
 4. **Windows 桌面端**：装 NSIS 包，验证 sidecar 起服务、WebView2 加载、退出时子进程被回收。
 
@@ -111,7 +111,7 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 | `backend.yml` | push main / PR | `pytest`（23 项） | ✅ |
 | `web.yml` | push main | `vue-tsc` + `vite build` | ✅ |
 | `e2e.yml` | push main / PR | 起服务 + Puppeteer 真实浏览器 18 项断言 | ✅ |
-| `android.yml` | push main（android/**）/ 手动 | 单测 8 项 + `assembleDebug` → APK artifact | ✅ |
+| `android.yml` | push main（android/**）/ 手动 | 单测 + `assembleRelease`（签名校验）→ APK artifact | ✅ |
 | `windows.yml` | 手动 / 由 Release 调用 | PyInstaller sidecar + Tauri 打包 → NSIS/MSI + 绿色版 zip | ✅ |
 | `fnos.yml` | 手动 / 由 Release 调用 | `fnpack build` → `.fpk` | ✅ |
 | `release.yml` | tag `v*` | 汇总上面全部产物发 Release | ✅ |

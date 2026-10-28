@@ -82,7 +82,7 @@ Release 已发布时，先删对应 Release（或让它随 tag 一起走），�
 ```bash
 bash tools/e2e-web.sh                      # 后端 + 网页端端到端（真实浏览器）
 cd server && .venv/bin/python -m pytest -q # 后端单测
-cd android && gradle assembleDebug testDebugUnitTest   # 需要 JDK 17/21 + Android SDK
+cd android && gradle assembleRelease testDebugUnitTest   # 需要 JDK 17/21 + Android SDK + 签名证书（见 docs/build.md §3）
 bash packaging/fnos/build.sh               # 需要 fnpack
 packaging/build-portable.bat               # Windows 上打绿色版
 docker compose -f packaging/docker/docker-compose.yml config   # 校验 compose（本机没 docker 权限也能跑）

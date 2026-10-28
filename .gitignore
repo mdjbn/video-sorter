@@ -12,6 +12,9 @@ web/node_modules/
 web/dist/
 android/.gradle/
 android/local.properties
+# 正式签名证书与密码（不进仓库；CI 用 secrets 还原）
+android/keystore.properties
+android/*.keystore
 android/**/build/
 android/app/release/
 src-tauri/target/

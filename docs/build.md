@@ -44,14 +44,32 @@ npm run build    # 产出 dist/，后端自动托管
 ```bash
 # 本地（装好 SDK 后）
 cd android
-gradle assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
+gradle assembleRelease
+# 产物：app/build/outputs/apk/release/app-<abi>-release.apk
 ```
+
+发布用的 APK 必须用**仓库固定的正式证书**签名，否则用户每次升级都得先卸载（Android 校验签名，
+不一致就报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`）。证书与密码放在 `android/keystore.properties`
+（已在 `.gitignore` 里，不进仓库）；CI 从仓库 secrets 还原同名文件：
+
+| secret | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 android/videosorter-release.keystore` 的结果 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | `videosorter` |
+| `ANDROID_KEY_PASSWORD` | key 密码 |
+
+证书指纹（SHA-256）：`47:6E:E5:98:2E:E3:60:F3:1A:67:40:CF:8C:7B:66:91:16:75:05:6E:08:1B:A4:D4:AB:8B:C6:60:E1:A3:C2:25`，
+有效期到 2056-10-21。**这张证书和 `keystore.properties` 一定要备份**——丢了就再也签不出能覆盖升级的包
+（只能让所有用户卸载重装一次）。`keystore.properties` 不存在时 gradle 会退回 Android 默认 debug 签名，
+本地临时构建仍可用，但那种包不能发布。
+
+`versionCode` 由 `versionName` 自动推导（`1.3.4` → `10304`），只需要改一处 `appVersionName`。
 
 装到手机（首次需允许「安装未知来源应用」）：
 
 ```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
 ```
 
 打开 App → 填服务器地址 `192.168.1.x:8080` → 账号 `admin` / `admin1234` → 登录。
@@ -227,10 +245,10 @@ curl -s http://127.0.0.1:8612/api/health
    把源码 `tar` 复制到 `/tmp` 编，并加 `--no-build-cache`：
    ```bash
    tar -cf - --exclude=build --exclude=.gradle . | tar -xf - -C /tmp/android-src
-   chmod -R u+rwX /tmp/android-src && cd /tmp/android-src && gradle assembleDebug --no-build-cache
+   chmod -R u+rwX /tmp/android-src && cp android/keystore.properties android/videosorter-release.keystore /tmp/android-src/ && cd /tmp/android-src && gradle assembleRelease --no-build-cache
    ```
 4. **JDK 版本**：AGP 8.7 需要 **JDK 17 或 21**，用系统自带的 JDK 25 会直接失败。
-5. 不要同时跑 `assembleDebug` 和 `testDebugUnitTest` —— 两个 Gradle 进程会互相覆盖中间产物，
+5. 不要同时跑 `assembleRelease` 和 `testDebugUnitTest` —— 两个 Gradle 进程会互相覆盖中间产物，
    报一堆莫名其妙的 `Unresolved reference`；串行跑就没问题。
 
 6. **git 也要先修权限**：fNOS 上新建文件是 mode 000，git 会报
@@ -354,4 +372,4 @@ VS_ARCH=arm bash packaging/fnos/build.sh  # 单独打 arm
 splits { abi { isEnable = true; reset(); include("arm64-v8a", "armeabi-v7a"); isUniversalApk = false } }
 ```
 
-`assembleDebug` 会产出 `app-arm64-v8a-debug.apk` 与 `app-armeabi-v7a-debug.apk`（发布时 `assembleRelease` 同理），安装到对应架构手机即可；`aapt2 dump badging` 可以看到 `native-code: 'arm64-v8a'` / `'armeabi-v7a'`。
+`assembleRelease` 会产出 `app-arm64-v8a-release.apk` 与 `app-armeabi-v7a-release.apk`，安装到对应架构手机即可；`aapt2 dump badging` 可以看到 `native-code: 'arm64-v8a'` / `'armeabi-v7a'`。

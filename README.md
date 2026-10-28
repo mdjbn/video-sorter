@@ -28,7 +28,7 @@
 | fnOS / Linux 服务器 | `run.sh`（源码运行）、`videosorter-<版本>-x86.fpk` / `-arm.fpk`（fnOS 应用中心） | 一个后端给三端用；fpk 装完在应用中心点开即可 |
 | Docker / NAS | `1045188196/videosorter:<版本>`（Docker Hub）或 `ghcr.io/mdjbn/video-sorter:<版本>` | 多架构镜像（amd64 / arm64），见下面「启动（Docker）」 |
 | Windows 单机使用 | `VideoSorter-<版本>-x64-setup.exe`（NSIS）或 `VideoSorter-<版本>-x64.msi` | 内嵌 Python 服务与网页端，双击即用 |
-| 安卓手机 | `videosorter-<版本>-arm64-v8a.apk` / `-armeabi-v7a.apk` | 自签名 debug 包，需要允许「安装未知应用」 |
+| 安卓手机 | `videosorter-<版本>-arm64-v8a.apk` / `-armeabi-v7a.apk` | 统一签名的正式包，可直接覆盖升级（需允许「安装未知应用」） |
 
 > 手机端连接同一台服务器：打开 App →「扫描局域网」或手填 `http://<服务器IP>:8080` → 登录
 > （默认 `admin` / `admin1234`，登录管理里可改）。

@@ -33,7 +33,7 @@ jobs:
           shopt -s nullglob
           for f in /tmp/apk-in/*.apk; do
             b="$(basename "$f")"
-            abi="$(printf '%s' "$b" | sed -E 's/^app-(.*)-debug\.apk$/\1/')"
+            abi="$(printf '%s' "$b" | sed -E 's/^app-(.*)-(debug|release)\.apk$/\1/')"
             cp "$f" "dist/android/videosorter-$V-$abi.apk"
             echo "  内置 $V $abi"
           done

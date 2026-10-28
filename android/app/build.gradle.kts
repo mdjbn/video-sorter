@@ -1,8 +1,26 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+// 正式签名配置：让每次构建（本机与 CI）都用同一张证书，用户才能「覆盖升级」而不必卸载重装。
+// 证书与密码放在 android/keystore.properties（不进 git）里；CI 由 workflow 从 secrets 还原出同名文件。
+// 文件不存在时退回 Android 默认 debug 签名（本地临时构建仍可用，但产物不可用于发布）。
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+val hasReleaseSigning = keystoreProps.getProperty("storeFile") != null &&
+    rootProject.file(keystoreProps.getProperty("storeFile")).exists()
+
+// versionName 是唯一真源，versionCode 由它推导：1.3.4 -> 10304（Android 要求 versionCode 单调递增）
+val appVersionName = "1.3.4"
+val appVersionCode = appVersionName.split(".").let {
+    it[0].toInt() * 10000 + it[1].toInt() * 100 + it[2].toInt()
 }
 
 android {
@@ -13,14 +31,32 @@ android {
         applicationId = "com.videosorter.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.3.4"
+        versionCode = appVersionCode
+        versionName = appVersionName
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 发版用的是 release 变体；有正式证书就签它（没有则出 unsigned 包，CI 的 apksigner 校验会拦下）
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
+        }
+        debug {
+            // 调试包也签同一张证书：本机 adb install -r 与用户升级行为一致，方便验证覆盖安装；
+            // 没有证书时保持 Android 默认 debug 签名，本地开发不受影响。
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
