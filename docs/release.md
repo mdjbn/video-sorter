@@ -10,7 +10,10 @@
 ## 发一个版本
 
 ```bash
-# 1) 版本号：三处保持一致（后端 / 网页端 / 安卓 / fpk）
+# 1) 版本号：九处保持一致 —— server/videosorter/__init__.py、web/package.json、web/package-lock.json（两处）、
+#    android/app/build.gradle.kts 的 versionName、packaging/fnos/project/manifest、src-tauri/Cargo.toml、
+#    src-tauri/Cargo.lock（name = "video-sorter-desktop" 那段）、src-tauri/tauri.conf.json
+#    （另有 web/src/views/Manage.vue 的兜底版本号，跟着改）
 #    server/videosorter/__init__.py → __version__
 #    web/package.json → version
 #    android/app/build.gradle.kts → versionName
