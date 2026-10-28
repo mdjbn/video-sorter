@@ -67,12 +67,22 @@ jobs:
 
       - name: Verify APK signature
         run: |
-          set -euo pipefail
-          APKSIGNER="$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/*/apksigner | tail -1)"
+          set -uo pipefail
+          SDK="$(sed -n 's/^sdk\.dir=//p' android/local.properties)"
+          APKSIGNER="$(find "$SDK/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -1)"
+          echo "apksigner=$APKSIGNER"
+          ls -l android/app/build/outputs/apk/release/
+          fail=0
           for apk in android/app/build/outputs/apk/release/*.apk; do
             echo "== $apk"
-            "$APKSIGNER" verify --print-certs "$apk" | grep -E 'Signer #1 certificate (DN|SHA-256)'
+            out="$("$APKSIGNER" verify -v --print-certs "$apk" 2>&1)" || fail=1
+            printf '%s\n' "$out"
+            case "$out" in
+              *"Signer #1 certificate SHA-256 digest"*) ;;
+              *) echo "::error::签名校验失败：$apk 没有有效的签名者信息"; fail=1 ;;
+            esac
           done
+          exit $fail
 
       - name: Show APK info
         run: ls -lh android/app/build/outputs/apk/release/
