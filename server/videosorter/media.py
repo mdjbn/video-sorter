@@ -40,7 +40,10 @@ def _tool_dirs(cfg: Config | None) -> list[Path]:
     # 打包后：<安装目录>/tools/ffmpeg.exe（Windows 桌面端与绿色版都这么放）
     exe_dir = Path(sys.executable).resolve().parent
     dirs.append(exe_dir / "tools")
-    dirs.append(exe_dir.parent / "tools")
+    # 安装包布局是 <安装目录>/binaries/videosorter-server/videosorter-server.exe，
+    # tools 落在安装根目录，所以要往上多看两层才够（以前只看到 parent，
+    # 结果装好的应用扫描时永远报「未找到 ffmpeg」）。
+    dirs.extend(parent / "tools" for parent in list(exe_dir.parents)[:2])
     if getattr(sys, "_MEIPASS", None):             # PyInstaller 解包目录
         dirs.append(Path(sys._MEIPASS) / "tools")
     if cfg is not None:
@@ -230,7 +233,20 @@ class HlsJob:
             self.error = f"转码失败（ffmpeg 退出码 {last_rc}）" + (f"：{tail}" if tail else "")
             self._progress(1.0, self.error)
 
+    # Windows 上偶尔会碰上 ffmpeg 还没跑到自己的 main 就 0xC0000142（STATUS_DLL_INIT_FAILED）
+    # 的情况：stderr 一个字节都没有，同样的命令行重跑一次就好；两个转码同时启动时更容易撞上
+    # （实测 20 轮里约一半）。用户看到的就是「转码失败（ffmpeg 退出码 3221225794）」且怎么
+    # 重试都一样，所以这里对「启动即失败」自动补一次。
+    LAUNCH_FAILED = 3221225794
+
     def _run_ffmpeg(self, ffmpeg: str, copy: bool) -> tuple[int, str]:
+        rc, err = self._run_ffmpeg_once(ffmpeg, copy)
+        if rc == self.LAUNCH_FAILED and not err.strip():
+            time.sleep(0.3)
+            rc, err = self._run_ffmpeg_once(ffmpeg, copy)
+        return rc, err
+
+    def _run_ffmpeg_once(self, ffmpeg: str, copy: bool) -> tuple[int, str]:
         cmd = [ffmpeg, "-y", "-v", "error", "-i", str(self.src)]
         if copy:
             cmd += ["-c", "copy"]
