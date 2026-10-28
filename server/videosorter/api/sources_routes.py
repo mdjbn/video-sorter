@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..db import now_iso
+from ..pathmatch import under_dir
 from ..state import get_state
 from .deps import require_user
 
@@ -61,8 +62,9 @@ def list_sources(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]
     for r in rows:
         d = dict(r)
         d["exists"] = Path(d["path"]).exists()
+        clause, params = under_dir("path", str(d["path"]))
         total = st.db.query_one(
-            "SELECT COUNT(*) AS n FROM videos WHERE path LIKE ?", (d["path"].rstrip("/") + "/%",))
+            f"SELECT COUNT(*) AS n FROM videos WHERE {clause}", params)
         d["count"] = int(total["n"]) if total else 0
         d["kind"] = d.get("kind") or ""
         d["editable"] = True
@@ -134,8 +136,8 @@ def delete_source(source_id: int, user: dict[str, Any] = Depends(require_user)) 
         raise HTTPException(status_code=400, detail="上传目录不能删除，只能修改路径")
     st.db.execute("DELETE FROM sources WHERE id=?", (source_id,))
     # 源文件夹移除后，其下视频同步从视频库删除；播放记录保留并标注「视频已删除」
-    base = str(row["path"]).rstrip("/") + "/"
-    victims = st.db.query("SELECT id, filename FROM videos WHERE path LIKE ?", (base + "%",))
+    scope, scope_params = under_dir("path", str(row["path"]))
+    victims = st.db.query(f"SELECT id, filename FROM videos WHERE {scope}", scope_params)
     for v in victims:
         st.db.execute(
             "UPDATE play_history SET deleted=1, filename=CASE WHEN filename='' THEN ? ELSE filename END "

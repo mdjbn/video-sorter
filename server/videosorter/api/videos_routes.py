@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ..db import now_iso
 from ..media import make_thumb
+from ..pathmatch import under_dir
 from ..state import get_state
 from .deps import require_user
 from .serialize import VIDEO_SQL, video_dict
@@ -132,8 +133,9 @@ def stats(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
         "LEFT JOIN videos v ON v.tag_id = t.id GROUP BY t.id ORDER BY t.sort_order, t.id")]
     srcs = [dict(r) for r in st.db.query("SELECT * FROM sources ORDER BY id")]
     for s in srcs:
+        scope, scope_params = under_dir("path", str(s["path"]))
         s["count"] = st.db.query_one(
-            "SELECT COUNT(*) AS n FROM videos WHERE path LIKE ?", (s["path"].rstrip("/") + "/%",))["n"]
+            f"SELECT COUNT(*) AS n FROM videos WHERE {scope}", scope_params)["n"]
     return {
         "total": total["n"], "bytes": total["bytes"], "tagged": tagged, "untagged": untagged,
         "organized": counts.get("organized", 0), "tagged_pending": counts.get("tagged", 0),
