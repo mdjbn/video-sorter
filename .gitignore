@@ -28,3 +28,8 @@ src-tauri/gen/schemas/
 # 误生成在 server/ 下的缩略图（历史遗留，已清理）
 server/*.jpg
 server/*.png
+
+# 本地工具链产物：ffmpeg/ffprobe 只在装包时由 CI 或本地脚本放进 src-tauri/tools/
+server/tools/
+# 依赖锁文件的手工备份（cargo update 前留档，不入库）
+*.orig-locked
