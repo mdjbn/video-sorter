@@ -1,7 +1,7 @@
 // Windows 桌面端外壳：启动内嵌的 Python 服务（sidecar），再打开本地网页。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 
 use tauri::Manager;
 use std::sync::Mutex;
@@ -59,6 +59,13 @@ fn spawn_server() -> Option<Child> {
             break;
         }
     }
+    // 这个外壳是 windows_subsystem="windows" 的 GUI 程序，自己没有控制台。
+    // 子进程若去继承父进程那对无效的 stdio 句柄，PyInstaller 以 console=False
+    // 打出来的 sidecar 会卡在初始化阶段：进程活着，但永远不监听端口（用户看到
+    // 的就是「窗口打开了，页面白屏/连不上」）。显式挂到空设备上，句柄始终可写。
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     cmd.spawn()
         .map_err(|e| {
             eprintln!("[videosorter] 启动服务失败：{e}");
@@ -84,7 +91,10 @@ fn wait_healthy(timeout: Duration) -> bool {
 
 fn main() {
     let child = spawn_server();
-    wait_healthy(Duration::from_secs(25));
+    if !wait_healthy(Duration::from_secs(25)) {
+        // 不拦着开窗口（用户至少能看到界面），但别把失败静默吞掉。
+        eprintln!("[videosorter] 25s 内没等到 /api/health，页面可能连不上本地服务");
+    }
 
     tauri::Builder::default()
         .manage(ServerProcess(Mutex::new(child)))
