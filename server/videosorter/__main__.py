@@ -12,7 +12,27 @@ from .app import create_app
 from .config import Config
 
 
+def _safe_stdio() -> None:
+    """把 stdout/stderr 调成「宁可打问号也不要崩」。
+
+    Windows 控制台欧版/美版是 cp1252，打包成 exe 后由别的进程带管道拉起时更是如此：
+    这时打印「网页端：」这类中文会抛 UnicodeEncodeError，服务还没起来就挂了。
+    GUI 模式（console=False）下 sys.stdout 还可能是 None，一并兜住。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            enc = (getattr(stream, "encoding", "") or "").lower().replace("-", "").replace("_", "")
+            if enc.startswith("utf"):
+                continue  # 已经是 utf-8，不用管
+            stream.reconfigure(errors="replace")  # 中文编不出来就打 ?，别抛异常
+        except Exception:  # noqa: BLE001  —— StringIO 之类没有 reconfigure
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _safe_stdio()
     parser = argparse.ArgumentParser(prog="videosorter", description=f"{APP_NAME} 本地视频整理服务")
     parser.add_argument("--host", default=None, help="监听地址，默认取配置（0.0.0.0）")
     parser.add_argument("--port", type=int, default=None, help="监听端口，默认 8080")
