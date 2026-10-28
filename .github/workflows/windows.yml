@@ -39,6 +39,16 @@ jobs:
             Select-Object -First 2 | ForEach-Object { Copy-Item $_.FullName -Destination src-tauri/tools/ -Force }
           Get-ChildItem src-tauri/tools
 
+      # Windows 专属的路径分隔符 / stdio / 工具查找问题在 ubuntu 上一律绿，
+      # 所以这里单独在 windows runner 上跑一遍服务端测试（带 ffmpeg，跳过项也是 0）。
+      - name: Server tests on Windows
+        shell: pwsh
+        run: |
+          python -m pip install -U pip
+          pip install -r server/requirements-dev.txt
+          $env:Path = (Join-Path $env:GITHUB_WORKSPACE 'src-tauri\tools') + ';' + $env:Path
+          python -m pytest server/tests -q
+
       - name: Stage sidecar into tauri resources
         shell: pwsh
         run: |
@@ -56,17 +66,41 @@ jobs:
       - name: Tauri bundle (NSIS + MSI)
         run: npx --yes @tauri-apps/cli@^2 build
 
-      - name: Make portable zip
+      # 装包冒烟：真的把 NSIS 装到临时目录、起服务、走一遍扫描/删源再卸载。
+      # 这一步是唯一能挡住「装完打不开 / ffmpeg 找不到 / 删源不生效」的门禁。
+      - name: Smoke test installer (headless - sidecar + API)
         shell: pwsh
         run: |
-          $p = "dist/portable/videosorter-server"
-          New-Item -ItemType Directory -Force -Path $p | Out-Null
-          Copy-Item dist/sidecar/videosorter-server/* -Recurse -Force $p
-          Copy-Item web/dist -Recurse -Force "$p/webdist"
-          New-Item -ItemType Directory -Force -Path "$p/tools" | Out-Null
-          Copy-Item src-tauri/tools/*.exe -Destination "$p/tools" -Force
-          Copy-Item packaging/portable-启动.bat -Destination "$p/启动.bat" -Force
-          Compress-Archive -Path $p -DestinationPath dist/VideoSorter-portable.zip -Force
+          $dir = Join-Path $env:RUNNER_TEMP 'VideoSorterSmoke'
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          Write-Output "installer: $($setup.Name)"
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S', "/D=$dir" -Wait
+          try {
+            pwsh -NoProfile -File packaging/verify-installed.ps1 `
+              -InstallDir $dir -SkipUi -FfmpegDir (Join-Path $env:GITHUB_WORKSPACE 'src-tauri\tools')
+            if ($LASTEXITCODE -ne 0) { throw "smoke test 失败（exit $LASTEXITCODE）" }
+          } finally {
+            $un = Join-Path $dir 'uninstall.exe'
+            if (Test-Path $un) { Start-Process -FilePath $un -ArgumentList '/S' -Wait }
+          }
+
+      # informational：这一步专门验「双击启动时 sidecar 能不能起来」（GUI 父进程无控制台）。
+      # GitHub 托管 runner 是无人值守会话，可能根本创建不了窗口 —— 所以不设成门禁：
+      # 红但上面 headless 那条绿，多半是 runner 起不来 GUI，不是真的倒退。
+      - name: Smoke test installer (GUI launch, informational)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'VideoSorterSmokeGui'
+          $setup = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S', "/D=$dir" -Wait
+          try {
+            pwsh -NoProfile -File packaging/verify-installed.ps1 `
+              -InstallDir $dir -FfmpegDir (Join-Path $env:GITHUB_WORKSPACE 'src-tauri\tools')
+          } finally {
+            $un = Join-Path $dir 'uninstall.exe'
+            if (Test-Path $un) { Start-Process -FilePath $un -ArgumentList '/S' -Wait }
+          }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -74,5 +108,4 @@ jobs:
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
-            dist/VideoSorter-portable.zip
           if-no-files-found: warn
