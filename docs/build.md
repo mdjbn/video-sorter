@@ -63,15 +63,38 @@ App 会用 `Authorization: Bearer <token>` 调接口，token 按服务器分别�
 
 ## 4. Windows 桌面端（可选）
 
+发版时由 `release.yml` 自动触发（`uses: ./.github/workflows/windows.yml`），产物改名成
+`VideoSorter-<版本>-x64-setup.exe` / `.msi` 挂到 Release；Windows 失败不影响安卓/fnOS 的发布。
+想单独验就 Actions 里手动 Run `windows-desktop`。
+
+
 Windows 端必须能整理 **Windows 本机磁盘**，所以安装包里内嵌一份 Python 服务（sidecar）：
 
 1. GitHub Actions `windows.yml`：构建网页端 → PyInstaller 打包 `videosorter-server.exe` → 塞进
    `src-tauri/binaries/` → `cargo build --release` + Tauri NSIS/MSI 安装包。
-2. 若要把 ffmpeg 一起带上，取消 `windows.yml` 里下载 ffmpeg 的注释，安装包会大 ~80MB；
-   否则需要用户自己把 `ffmpeg.exe`/`ffprobe.exe` 放进程序目录的 `tools/`。
+2. ffmpeg 现在无条件带进安装包：`windows.yml` 下载 essentials 包并把 `ffmpeg.exe`/`ffprobe.exe` 拷到
+   `src-tauri/tools/`（安装后位于 `<安装目录>/tools/`，服务端 `media._tool_dirs()` 会找到），代价是安装包大 ~80MB。
 
 Tauri 外壳（`src-tauri/src/main.rs`）做的事：启动 sidecar → 轮询 `/api/health` → 打开
 `http://127.0.0.1:8080` 的窗口 → 退出时杀掉子进程。
+
+## 4.1 Docker 镜像（Linux 服务端）
+
+镜像定义在 `packaging/docker/`（`Dockerfile` + `docker-compose.yml` + 说明），多阶段构建：
+`node:20` 只编网页端 → `python:3.11-slim-bookworm` + `ffmpeg` + `tini`，非 root、带 `HEALTHCHECK`、`VOLUME /data`。
+
+```bash
+# 本地构建（需要有 docker daemon 权限）
+docker build -f packaging/docker/Dockerfile -t videosorter:dev .
+# 校验 compose（不需要 daemon）
+docker compose -f packaging/docker/docker-compose.yml config
+```
+
+CI：`.github/workflows/docker.yml`。main 上改了 `server/`、`web/`、`packaging/docker/`、`.dockerignore`
+→ 只构建 amd64 并起容器冒烟（等 healthy + 断言 `/api/health` 的 `version`/`media_ready`/`web`）；
+推 `v*` tag 或手动触发 → buildx 出 `linux/amd64` + `linux/arm64` 并推 `ghcr.io/mdjbn/video-sorter`
+（`latest` / 版本号 / `major.minor` / `edge` / `sha-*`）。GHCR 包公开可直接 `docker pull`，若被设成 private
+就要先把可见性改成 Public。
 
 ## 5. 绿色版（不想装东西时）
 
@@ -245,7 +268,8 @@ curl -s http://127.0.0.1:8612/api/health
    服务端 `media._tool_dirs()` 会把 exe 同级的 `tools/` 也列进去，所以用户不需要自己装 ffmpeg）；
 4. 把 sidecar 与网页端放进 `src-tauri/binaries/`（Tauri 的 `bundle.resources` 用 `binaries/**`、`tools/**`）；
 5. `cargo build --release` + `tauri build` 出 NSIS/MSI；
-6. 另外打一个 `VideoSorter-portable.zip` 绿色版（解压双击「启动.bat」即用）。
+6. 绿色版不再由 CI 出（`f226e2e` 把 portable 从 CI 移除了）：要的话在 Windows 上跑
+   `packaging\build-portable.bat`，或见 §5。
 
 Tauri 壳里的 `sidecar_path()` 会依次找
 `<exe>/binaries/videosorter-server.exe`、`<exe>/binaries/videosorter-server/…`、`<exe>/…`、

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -41,10 +42,14 @@ def test_safe_stdio_tolerates_stream_without_reconfigure() -> None:
 
 
 def test_help_works_with_cp1252_stdio() -> None:
-    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    # 子进程里没有 pytest 那套 sys.path 注入，得自己给 cwd 和 PYTHONPATH，
+    # 否则 windows runner 上会报 "No module named videosorter"（真踩过）。
+    server_dir = pathlib.Path(__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONPATH": str(server_dir)}
     proc = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "videosorter", "--help"],
         capture_output=True,
+        cwd=server_dir,
         env=env,
         timeout=120,
     )
