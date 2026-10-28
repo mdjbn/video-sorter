@@ -19,21 +19,20 @@ chmod +x run.sh
 
 | 模块 | 项目 | 状态 | 证据 |
 | --- | --- | --- | --- |
-| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **23 passed** |
+| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **47 passed** |
 | 后端 | Range 播放 + 按需 HLS 转码 | ✅ 本机通过 | pytest 内 mkv→HLS 用例（`index.m3u8` + `seg00000.ts`）|
 | 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
-| 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **18/18 PASS**（CI：`.github/workflows/e2e.yml`）|
+| 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **21/21 PASS**（CI：`.github/workflows/e2e.yml`）|
 | fnOS | 打成 `.fpk` 应用包 | ✅ 本机通过 | `bash packaging/fnos/build.sh` → `dist/fnos/videosorter.fpk`（3.5 MB）|
 | fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |
-| fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **18/18 PASS**（含真实文件移动与撤销）|
+| fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **21/21 PASS**（含真实文件移动与撤销）|
 | fnOS | 应用中心里真安装 | ⚠️ 未验证 | 需要 NAS 管理员在应用中心手动安装（本机无 root）|
 | 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleRelease`（固定证书签名）→ `app-<abi>-release.apk`；CI 也会出 APK artifact|
 | 安卓 | 单元测试（normalize/主题/解析/发现） | ✅ 本机通过 | `testDebugUnitTest` → **8/8** |
 | 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
 | 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
-| 桌面端 | 绿色版 zip | ✅ CI 通过 | `windows.yml` → `VideoSorter-portable.zip` 91 MB |
-| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.0.0` → Release 五个附件（APK / NSIS / MSI / 绿色版 zip / fpk）|
+| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.4` → Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|
 
 ## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
 
@@ -112,7 +111,7 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 | `web.yml` | push main | `vue-tsc` + `vite build` | ✅ |
 | `e2e.yml` | push main / PR | 起服务 + Puppeteer 真实浏览器 18 项断言 | ✅ |
 | `android.yml` | push main（android/**）/ 手动 | 单测 + `assembleRelease`（签名校验）→ APK artifact | ✅ |
-| `windows.yml` | 手动 / 由 Release 调用 | PyInstaller sidecar + Tauri 打包 → NSIS/MSI + 绿色版 zip | ✅ |
+| `windows.yml` | 手动 / 由 Release 调用 | PyInstaller sidecar + Tauri 打包 → NSIS/MSI | ✅ |
 | `fnos.yml` | 手动 / 由 Release 调用 | `fnpack build` → `.fpk` | ✅ |
 | `release.yml` | tag `v*` | 汇总上面全部产物发 Release | ✅ |
 
