@@ -53,6 +53,7 @@ const paths: Record<string, string> = {
   archive: '<rect x="3.5" y="4" width="17" height="4.5" rx="1.2"/><path d="M5.5 8.5V19a1.5 1.5 0 001.5 1.5h10a1.5 1.5 0 001.5-1.5V8.5M10 12.5h4"/>',
   move: '<path d="M12 3.5v17M3.5 12h17M7 7.5L12 3.5l5 4M7 16.5L12 20.5l5-4M7.5 7L3.5 12l4 5M16.5 7l4 5-4 5"/>',
   warn: '<path d="M12 4.5L21 19.5H3z"/><path d="M12 10v4M12 16.6h.01"/>',
+  grip: '<circle cx="9" cy="6" r="1.45" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.45" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.45" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.45" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.45" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.45" fill="currentColor" stroke="none"/>',
 }
 
 const body = () => paths[props.name] || paths.info

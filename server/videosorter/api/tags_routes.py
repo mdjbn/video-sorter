@@ -65,6 +65,35 @@ def create_tag(body: TagIn, user: dict[str, Any] = Depends(require_user)) -> dic
     return {"ok": True, "tag": _serialize(row, {}, st)}
 
 
+class TagOrderIn(BaseModel):
+    ids: list[int]
+
+
+@router.put("/order")
+def reorder_tags(body: TagOrderIn, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """按前端拖拽结果的顺序重排标签（只改 sort_order）。
+
+    - 只接受已知的 id，重复项与未知项忽略；
+    - 前端没提到的标签按原相对顺序排在后面，保证不会「丢标签」。
+    """
+    st = get_state()
+    existing = [r["id"] for r in st.db.query("SELECT id FROM tags ORDER BY sort_order, id")]
+    known = set(existing)
+    order: list[int] = []
+    seen: set[int] = set()
+    for tid in body.ids:
+        if tid in known and tid not in seen:
+            seen.add(tid)
+            order.append(tid)
+    order.extend(tid for tid in existing if tid not in seen)
+    for idx, tid in enumerate(order):
+        st.db.execute("UPDATE tags SET sort_order=? WHERE id=?", (idx + 1, tid))
+    rows = st.db.query("SELECT * FROM tags ORDER BY sort_order, id")
+    counts = {r["tag_id"]: r["n"] for r in
+              st.db.query("SELECT tag_id, COUNT(*) AS n FROM videos WHERE tag_id IS NOT NULL GROUP BY tag_id")}
+    return {"ok": True, "order": order, "tags": [_serialize(r, counts, st) for r in rows]}
+
+
 @router.put("/{tag_id}")
 def update_tag(tag_id: int, body: TagPatch, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()

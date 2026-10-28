@@ -213,6 +213,8 @@ export const api = {
   updateTag: (id: number, body: Partial<{ name: string; color: string; dir_path: string }>) =>
     put<{ ok: boolean; tag: Tag }>(`/tags/${id}`, body),
   deleteTag: (id: number) => del<{ ok: boolean; released: number }>(`/tags/${id}`),
+  /** 拖拽排序：把完整的标签 id 顺序发给服务端，服务端只改 sort_order */
+  reorderTags: (ids: number[]) => put<{ ok: boolean; order: number[]; tags: Tag[] }>('/tags/order', { ids }),
 
   // 视频
   videos: (q: {

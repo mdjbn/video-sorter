@@ -487,6 +487,62 @@ async function doDelTag() {
   } catch (e: any) { toast(e?.message || '删除失败', true) }
 }
 
+/* ---------------- 标签拖拽排序 ---------------- */
+const drag = reactive({ id: 0, on: false, moved: false })
+let dragStartScroll = 0
+
+function onDragHandleDown(e: PointerEvent, id: number) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  e.preventDefault()
+  drag.id = id
+  drag.on = true
+  drag.moved = false
+  dragStartScroll = window.scrollY
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', onDragMove, { passive: false })
+  window.addEventListener('pointerup', onDragEnd)
+  window.addEventListener('pointercancel', onDragEnd)
+}
+
+/** 指针经过某一行的一半时就把这一行让位，实现「拖到哪插到哪」的实时预览 */
+function onDragMove(e: PointerEvent) {
+  if (!drag.on) return
+  e.preventDefault()
+  const rows = Array.from(document.querySelectorAll<HTMLElement>('.rows > .trow'))
+  if (!rows.length) return
+  let target = rows.length - 1
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i].getBoundingClientRect()
+    if (e.clientY < r.top + r.height / 2) { target = i; break }
+  }
+  const from = tags.value.findIndex((x) => x.id === drag.id)
+  if (from < 0 || target === from) return
+  const [item] = tags.value.splice(from, 1)
+  tags.value.splice(target, 0, item)
+  drag.moved = true
+}
+
+async function onDragEnd() {
+  window.removeEventListener('pointermove', onDragMove)
+  window.removeEventListener('pointerup', onDragEnd)
+  window.removeEventListener('pointercancel', onDragEnd)
+  document.body.style.userSelect = ''
+  window.scrollTo({ top: dragStartScroll })
+  if (!drag.on) return
+  const moved = drag.moved
+  drag.on = false
+  drag.moved = false
+  if (!moved) return
+  try {
+    const r = await api.reorderTags(tags.value.map((t) => t.id))
+    tags.value = r.tags
+    toast('标签顺序已保存')
+  } catch (e) {
+    toast((e as Error).message || '保存标签顺序失败', true)
+    await loadTags()
+  }
+}
+
 /* ---------------- 目录选择器 ---------------- */
 type PickTarget =
   | { kind: 'source' }
@@ -985,7 +1041,16 @@ function onResize() {
             <button class="btn primary" @click="openTag()"><Icon name="plus" :size="15" />新建标签</button>
           </div>
           <div class="rows">
-            <div v-for="t in tags" :key="t.id" class="trow" :class="'st-' + (tagState[t.id] || 'idle')">
+            <div v-for="t in tags" :key="t.id" class="trow" :class="['st-' + (tagState[t.id] || 'idle'), { dragging: drag.on && drag.id === t.id }]">
+              <button
+                class="drag-handle"
+                :class="{ on: drag.on && drag.id === t.id }"
+                title="按住拖动可调整标签顺序"
+                aria-label="拖动排序"
+                @pointerdown="onDragHandleDown($event, t.id)"
+              >
+                <Icon name="grip" :size="16" />
+              </button>
               <input class="inline-name" v-model="draftOf(t).name" spellcheck="false" title="标签名称" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
               <button class="tag-color" :style="{ background: draftOf(t).color }" :title="`颜色 ${draftOf(t).color}（点击修改）`" @click.stop="toggleColorPop(t.id)" />
               <span class="ct">{{ t.count ?? 0 }} 个视频</span>

@@ -273,6 +273,18 @@
 
 /* 标签行内编辑 */
 .trow { position: relative; }
+/* 拖拽排序把手：只在按住把手时拖动，触屏不会和页面滚动抢手势 */
+.drag-handle {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 30px; margin-left: -4px; padding: 0;
+  border: 1px solid transparent; border-radius: 7px; background: transparent;
+  color: var(--muted-2); cursor: grab; touch-action: none;
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.drag-handle:hover { color: var(--muted); background: rgba(var(--ink), .05); border-color: rgba(var(--ink), .08); }
+.drag-handle:active, .drag-handle.on { cursor: grabbing; color: var(--accent); background: rgba(var(--accent), .1); border-color: rgba(var(--accent), .35); }
+.trow.dragging { z-index: 3; box-shadow: 0 12px 26px rgba(0, 0, 0, .18); border-color: rgba(var(--accent), .5); }
+.trow.dragging .inline-name, .trow.dragging .inline-dir, .trow.dragging .tag-color { pointer-events: none; }
 .trow .tag-color { width: 34px; height: 18px; border-radius: 5px; flex: none; border: 1px solid rgba(var(--ink), .16); transition: box-shadow .15s, transform .15s; }
 .trow .tag-color:hover { box-shadow: 0 0 0 3px rgba(var(--ink), .1); transform: translateY(-1px); }
 .inline-name { width: 156px; font-size: 13.5px; font-weight: 600; color: var(--text); background: var(--input-bg);
