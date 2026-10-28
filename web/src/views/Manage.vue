@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import DirPicker from '../components/DirPicker.vue'
@@ -211,11 +211,15 @@ function go(v: View) {
 
 /* ---------------- 扫描 ---------------- */
 const scan = reactive({ running: false, percent: 0, text: '' })
-async function runScan() {
-  if (scan.running) return
+type ScanPayload = { source_ids?: number[]; tag_ids?: number[] }
+async function runScan(payload: ScanPayload = {}) {
+  if (scan.running) {
+    toast('正在扫描，稍等一下')
+    return
+  }
   scan.running = true; scan.percent = 0; scan.text = '准备扫描…'
   try {
-    const { task_id } = await api.scan()
+    const { task_id } = await api.scan(payload)
     const task = await waitTask(task_id, (t) => {
       scan.percent = t.percent || 0
       scan.text = t.message || `扫描中 ${t.done}/${t.total}`
@@ -238,10 +242,17 @@ async function addSource() {
   const p = newSource.value.trim()
   if (!p) return
   try {
-    await api.addSource(p)
+    const r = await api.addSource(p)
     newSource.value = ''
     await Promise.all([loadSources(), loadStats()])
-    toast('已添加源文件夹')
+    const sid = (r && r.source && r.source.id) || 0
+    if (sid) {
+      // 新加的文件夹马上扫一遍，不然得手动点「扫描」才能看到里面的视频
+      toast('已添加源文件夹，正在扫描…')
+      void runScan({ source_ids: [sid] })
+    } else {
+      toast('已添加源文件夹')
+    }
   } catch (e: any) { toast(e?.message || '添加失败', true) }
 }
 async function removeSource(id: number) {
@@ -424,9 +435,9 @@ async function saveTagInline(id: number) {
   tagState[id] = 'saving'
   try {
     await api.updateTag(id, { name, color: d.color, dir_path: d.dir_path.trim() })
-    tagState[id] = 'saved'
+    tagState[id] = 'idle'
+    toast('已保存')
     await loadTags()
-    setTimeout(() => { if (tagState[id] === 'saved') tagState[id] = 'idle' }, 1600)
   } catch (e) {
     tagState[id] = 'err'
     toast((e as Error).message || '保存失败', true)
@@ -467,12 +478,23 @@ function openTag(t?: Tag) {
 async function saveTag() {
   if (!tagModal.name.trim()) return toast('请填写标签名称', true)
   tagModal.saving = true
+  const creating = !tagModal.id
   try {
+    let newId = 0
     if (tagModal.id) await api.updateTag(tagModal.id, { name: tagModal.name.trim(), color: tagModal.color, dir_path: tagModal.dir.trim() })
-    else await api.createTag({ name: tagModal.name.trim(), color: tagModal.color, dir_path: tagModal.dir.trim() })
+    else {
+      const r = await api.createTag({ name: tagModal.name.trim(), color: tagModal.color, dir_path: tagModal.dir.trim() })
+      newId = (r && r.tag && r.tag.id) || 0
+    }
     tagModal.show = false
     await Promise.all([loadTags(), loadStats()])
-    toast(tagModal.id ? '已保存标签' : '已创建标签')
+    if (creating && newId) {
+      // 新标签的文件夹里可能已经躺着整理好的视频，马上扫一次让它出现在库里
+      toast('已创建标签，正在扫描文件夹…')
+      void runScan({ tag_ids: [newId] })
+    } else {
+      toast(tagModal.id ? '已保存标签' : '已创建标签')
+    }
   } catch (e: any) { toast(e?.message || '保存失败', true) }
   finally { tagModal.saving = false }
 }
@@ -490,6 +512,34 @@ async function doDelTag() {
 /* ---------------- 标签拖拽排序 ---------------- */
 const drag = reactive({ id: 0, on: false, moved: false })
 let dragStartScroll = 0
+let dragBusy = false
+
+/** 记录每一行当前的屏幕位置，供 FLIP 动画算位移 */
+function captureRowTops(): Map<number, number> {
+  const tops = new Map<number, number>()
+  document.querySelectorAll<HTMLElement>('.rows > .trow').forEach((el) => {
+    const id = Number(el.dataset.tagId || 0)
+    if (id) tops.set(id, el.getBoundingClientRect().top)
+  })
+  return tops
+}
+
+/** 让「让位」的行从旧位置滑到新位置，而不是瞬间跳过去 */
+function playRowMove(before: Map<number, number>) {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  document.querySelectorAll<HTMLElement>('.rows > .trow').forEach((el) => {
+    const id = Number(el.dataset.tagId || 0)
+    const oldTop = before.get(id)
+    if (oldTop == null) return
+    const dy = oldTop - el.getBoundingClientRect().top
+    if (Math.abs(dy) < 1) return
+    if (reduce) return
+    el.animate(
+      [{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }],
+      { duration: 190, easing: 'cubic-bezier(.22,.72,.28,1)' },
+    )
+  })
+}
 
 function onDragHandleDown(e: PointerEvent, id: number) {
   if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -504,22 +554,31 @@ function onDragHandleDown(e: PointerEvent, id: number) {
   window.addEventListener('pointercancel', onDragEnd)
 }
 
-/** 指针经过某一行的一半时就把这一行让位，实现「拖到哪插到哪」的实时预览 */
-function onDragMove(e: PointerEvent) {
-  if (!drag.on) return
+/** 指针经过某一行的一半时就把这一行让位，实现「拖到哪插到哪」的实时预览（带滑动动画） */
+async function onDragMove(e: PointerEvent) {
+  if (!drag.on || dragBusy) return
   e.preventDefault()
-  const rows = Array.from(document.querySelectorAll<HTMLElement>('.rows > .trow'))
+  const rowsEl = document.querySelector<HTMLElement>('.rows')
+  if (!rowsEl) return
+  const rows = Array.from(rowsEl.querySelectorAll<HTMLElement>(':scope > .trow'))
   if (!rows.length) return
+  // 用 offsetTop（布局位置，不受 FLIP 动画的 transform 影响）判断落点，避免动画期间来回抽搐
+  const localY = e.clientY - rowsEl.getBoundingClientRect().top
   let target = rows.length - 1
   for (let i = 0; i < rows.length; i++) {
-    const r = rows[i].getBoundingClientRect()
-    if (e.clientY < r.top + r.height / 2) { target = i; break }
+    const center = rows[i].offsetTop - rowsEl.offsetTop + rows[i].offsetHeight / 2
+    if (localY < center) { target = i; break }
   }
   const from = tags.value.findIndex((x) => x.id === drag.id)
   if (from < 0 || target === from) return
+  dragBusy = true
+  const before = captureRowTops()
   const [item] = tags.value.splice(from, 1)
   tags.value.splice(target, 0, item)
   drag.moved = true
+  await nextTick()
+  playRowMove(before)
+  dragBusy = false
 }
 
 async function onDragEnd() {
@@ -837,7 +896,7 @@ function onResize() {
               <div class="m-desc">扫描源文件夹与标签文件夹、给视频打标签，然后一键把带标签的视频移动到对应文件夹。源文件夹的新增/移除在「视频库」页。</div>
             </div>
             <div class="sp" />
-            <button class="btn primary" :disabled="scan.running" @click="runScan">
+            <button class="btn primary" :disabled="scan.running" @click="runScan()">
               <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描全部' }}
             </button>
           </div>
@@ -909,7 +968,7 @@ function onResize() {
             <div class="sp" />
             <input ref="fileInput" type="file" accept="video/*" multiple hidden @change="onFiles" />
             <button class="btn primary" @click="pickFiles"><Icon name="upload" :size="15" />上传视频</button>
-            <button class="btn ghost" :disabled="scan.running" @click="runScan">
+            <button class="btn ghost" :disabled="scan.running" @click="runScan()">
               <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描' }}
             </button>
           </div>
@@ -943,7 +1002,7 @@ function onResize() {
           <div class="card" style="margin-bottom:14px">
               <div class="card-head">
                 <h2>源文件夹</h2><div class="sp" /><span class="badge">{{ sources.length }} 个</span>
-                <button class="btn ghost sm" :disabled="scan.running" @click="runScan">
+                <button class="btn ghost sm" :disabled="scan.running" @click="runScan()">
                   <Icon name="refresh" :size="14" />{{ scan.running ? '扫描中…' : '扫描' }}
                 </button>
               </div>
@@ -1035,13 +1094,13 @@ function onResize() {
               <div class="m-desc">每个标签对应一个目的文件夹；不填则默认在源目录下建同名文件夹。点「扫描」可同时扫描源文件夹与这些标签文件夹。</div>
             </div>
             <div class="sp" />
-            <button class="btn ghost" :disabled="scan.running" title="同时扫描源文件夹与各标签的目标文件夹" @click="runScan">
+            <button class="btn ghost" :disabled="scan.running" title="同时扫描源文件夹与各标签的目标文件夹" @click="runScan()">
               <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描' }}
             </button>
             <button class="btn primary" @click="openTag()"><Icon name="plus" :size="15" />新建标签</button>
           </div>
           <div class="rows">
-            <div v-for="t in tags" :key="t.id" class="trow" :class="['st-' + (tagState[t.id] || 'idle'), { dragging: drag.on && drag.id === t.id }]">
+            <div v-for="t in tags" :key="t.id" class="trow" :data-tag-id="t.id" :class="['st-' + (tagState[t.id] || 'idle'), { dragging: drag.on && drag.id === t.id }]">
               <button
                 class="drag-handle"
                 :class="{ on: drag.on && drag.id === t.id }"
@@ -1058,7 +1117,6 @@ function onResize() {
               <button class="icon-act" title="选择目标文件夹" @click="chooseDir({ kind: 'tag', id: t.id })"><Icon name="folder" :size="15" /></button>
               <span class="save-hint">
                 <span v-if="tagState[t.id] === 'saving'">保存中…</span>
-                <span v-else-if="tagState[t.id] === 'saved'" class="ok">已保存</span>
                 <span v-else-if="tagState[t.id] === 'err'" class="err">保存失败</span>
               </span>
               <button class="icon-act dg" title="删除" @click="delTag.tag = t; delTag.show = true"><Icon name="trash" :size="15" /></button>

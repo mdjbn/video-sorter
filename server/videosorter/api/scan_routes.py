@@ -14,6 +14,9 @@ router = APIRouter(prefix="/api", tags=["scan"])
 
 class ScanIn(BaseModel):
     source_ids: list[int] | None = None
+    # 只扫指定标签的目标文件夹（新建标签后立刻入库用）。给了 tag_ids 又没给 source_ids 时
+    # 就不扫源文件夹，避免一次小改动触发整库扫描。
+    tag_ids: list[int] | None = None
     full: bool = False
 
 
@@ -22,9 +25,10 @@ def start_scan(body: ScanIn, user: dict[str, Any] = Depends(require_user)) -> di
     st = get_state()
     if not st.tools.available:
         raise HTTPException(status_code=400, detail="未找到 ffmpeg/ffprobe，无法扫描")
+    label = "扫描标签文件夹" if (body.tag_ids and not body.source_ids) else "扫描源文件夹"
     tid = st.tasks.spawn("scan", lambda t: scan_sources(st.db, st.cfg, st.tools, st.tasks, t,
-                                                       body.source_ids, body.full),
-                         label="扫描源文件夹")
+                                                       body.source_ids, body.full, body.tag_ids),
+                         label=label)
     return {"ok": True, "task_id": tid}
 
 

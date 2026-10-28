@@ -79,3 +79,51 @@ def test_tag_folder_inside_source_is_classified(env):
     assert got["status"] == "organized", names
     assert got["tag_id"] == food["id"]
     assert names["还没整理.mp4"]["status"] == "idle"
+
+
+def _scan_tag(client, tag_ids: list[int]) -> dict:
+    r = client.post("/api/scan", json={"tag_ids": tag_ids})
+    assert r.status_code == 200, r.text
+    tid = r.json()["task_id"]
+    for _ in range(300):
+        t = client.get(f"/api/tasks/{tid}").json()
+        if t["status"] != "running":
+            assert t["status"] == "done", t
+            return t
+        time.sleep(0.05)
+    raise AssertionError("扫描超时")
+
+
+def test_scan_only_given_tag_folder(env):
+    """新建标签后要能只扫这个标签的文件夹：源文件夹里的视频这次不入库。"""
+    client, src = env["client"], Path(env["src"])
+    _login(client)
+    tags = client.get("/api/tags").json()["tags"]
+    travel = next(t for t in tags if t["name"] == "旅行")
+    client.post("/api/sources", json={"path": str(src)})
+    make_video(src / "源里的视频.mp4")
+
+    out = Path(env["data"]).parent / "归档2" / "旅行"
+    out.mkdir(parents=True)
+    make_video(out / "旧归档.mp4")
+    client.put(f"/api/tags/{travel['id']}", json={"dir_path": str(out)})
+
+    _scan_tag(client, [travel["id"]])
+    data = client.get("/api/videos?limit=50").json()
+    names = {v["filename"]: v for v in data["items"]}
+    assert "旧归档.mp4" in names, names
+    assert names["旧归档.mp4"]["tag_id"] == travel["id"]
+    assert "源里的视频.mp4" not in names, names
+
+
+def test_scan_only_given_tag_folder_without_dir(env):
+    """标签的文件夹还不存在时也不该报错崩掉，只是这次什么都没扫到。"""
+    client = env["client"]
+    _login(client)
+    tags = client.get("/api/tags").json()["tags"]
+    empty = next(t for t in tags if t["name"] == "待整理")
+    client.put(f"/api/tags/{empty['id']}", json={"dir_path": ""})
+    env["cfg"].update({"root_dir": str(Path(env["data"]).parent / "不存在的根" / "x")})
+    t = _scan_tag(client, [empty["id"]])
+    result = t.get("result") or {}
+    assert result.get("added") == 0 and result.get("failed") == 0, t

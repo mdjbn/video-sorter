@@ -40,11 +40,16 @@ def iter_videos(root: Path) -> list[Path]:
 
 
 def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegistry,
-                 task_id: str, source_ids: list[int] | None = None, full: bool = False) -> dict[str, Any]:
+                 task_id: str, source_ids: list[int] | None = None, full: bool = False,
+                 tag_ids: list[int] | None = None) -> dict[str, Any]:
     if not tools.available:
         raise RuntimeError("未找到 ffmpeg，无法扫描元数据")
 
-    if source_ids:
+    # 只给了 tag_ids 时只扫这些标签的目标文件夹（新建标签后立刻入库用），不碰源文件夹
+    only_tag_dirs = bool(tag_ids) and not source_ids
+    if only_tag_dirs:
+        rows: list[dict[str, Any]] = []
+    elif source_ids:
         marks = ",".join("?" * len(source_ids))
         rows = db.query(f"SELECT * FROM sources WHERE enabled=1 AND id IN ({marks})", source_ids)
     else:
@@ -54,13 +59,18 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
     # 标签对应的目标文件夹也算扫描范围：整理过的视频就躺在这些目录里，
     # 不扫它们的话，重装/换机后这些文件无法重新入库。
     tag_dirs: list[tuple[Path, int]] = []
-    tag_rows = db.query("SELECT id, name, dir_path FROM tags ORDER BY sort_order, id")
+    if tag_ids:
+        marks = ",".join("?" * len(tag_ids))
+        tag_rows = db.query(
+            f"SELECT id, name, dir_path FROM tags WHERE id IN ({marks}) ORDER BY sort_order, id", tag_ids)
+    else:
+        tag_rows = db.query("SELECT id, name, dir_path FROM tags ORDER BY sort_order, id")
     for t in tag_rows:
         d = resolve_tag_dir(db, cfg, {"dir_path": t["dir_path"], "name": t["name"]})
         if d is not None:
             tag_dirs.append((Path(d), int(t["id"])))
     if not roots and not tag_dirs:
-        raise RuntimeError("还没有添加源文件夹")
+        raise RuntimeError("这个标签还没有可扫描的文件夹" if only_tag_dirs else "还没有添加源文件夹")
 
     # 1) 收集文件清单（源文件夹 + 标签文件夹；同一文件按「标签文件夹」归类）
     tasks.update(task_id, message="正在遍历目录…")
@@ -94,7 +104,7 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
     tasks.set_total(task_id, len(files))
 
     # 2) 现有记录
-    existing = {r["path"]: r for r in db.query("SELECT id, path, size, mtime, thumb, status FROM videos")}
+    existing = {r["path"]: r for r in db.query("SELECT id, path, size, mtime, thumb, status, tag_id FROM videos")}
 
     stats = {"added": 0, "updated": 0, "skipped": 0, "missing": 0, "failed": 0}
     seen: set[str] = set()
@@ -127,8 +137,10 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                 continue
             if not item["need_probe"]:
                 old_row = item["old"]
-                if old_row is not None and tag_id is not None and str(old_row["status"]) != "organized":
+                if old_row is not None and tag_id is not None and (
+                        str(old_row["status"]) != "organized" or old_row["tag_id"] is None):
                     # 文件位于标签文件夹里：说明它已经被整理过，补上「已整理 + 标签」
+                    # （tag_id 为空也要补：比如标签被删过再重建、或者换机后扫描到旧归档）
                     db.execute(
                         "UPDATE videos SET status='organized', tag_id=COALESCE(tag_id, ?), "
                         "organized_at=COALESCE(organized_at, ?), scanned_at=? WHERE path=?",

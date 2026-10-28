@@ -202,7 +202,8 @@ export const api = {
   fsRoots: () => get<{ roots: DirEntry[]; home: string }>('/fs/roots'),
 
   // 扫描/任务
-  scan: (body: { source_ids?: number[]; full?: boolean } = {}) => post<{ task_id: string }>('/scan', body),
+  scan: (body: { source_ids?: number[]; tag_ids?: number[]; full?: boolean } = {}) =>
+    post<{ task_id: string }>('/scan', body),
   task: (id: string) => get<Task>(`/tasks/${id}`),
   cancelTask: (id: string) => post<{ ok: boolean }>(`/tasks/${id}/cancel`),
 
