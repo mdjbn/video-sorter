@@ -37,6 +37,19 @@ def test_can_direct_play() -> None:
     assert not can_direct_play(".mp4", "hevc", "aac")
 
 
+def test_can_direct_play_for_app_client() -> None:
+    """手机 App（ExoPlayer）能直解 MKV/HEVC/AC3，这些不该再白白转码。"""
+    assert can_direct_play(".mkv", "h264", "aac", "app")
+    assert can_direct_play(".mp4", "hevc", "aac", "app")
+    assert can_direct_play(".mkv", "hevc", "ac3", "app")
+    assert can_direct_play(".ts", "h264", "eac3", "app")
+    # 浏览器判断不受影响
+    assert not can_direct_play(".mkv", "h264", "aac")
+    # 谁都不认识的容器仍然要转码
+    assert not can_direct_play(".avi", "h264", "aac", "app")
+    assert not can_direct_play(".mp4", "mpeg4", "aac", "app")
+
+
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="需要 ffmpeg")
 def test_hls_avi_falls_back_to_transcode(tmp_path: Path, env) -> None:  # noqa: ANN001
     """avi（老容器）即使编码是 h264 也要转码成功，不能只报错退出。"""

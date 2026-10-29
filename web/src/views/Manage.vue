@@ -72,6 +72,8 @@ const setForm = reactive({
   upload_dir: '',
   theme: 'auto',
   transcode: true,
+  // 显卡转码总开关：开 = 自动探测显卡（auto），关 = 强制只用 CPU（libx264）
+  transcode_gpu: true,
   transcode_encoder: 'auto',
   transcode_preset: 'veryfast',
   thumb_position: 0,
@@ -87,13 +89,30 @@ const setRestart = ref(false)
 const importing = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
 
+// 「用显卡/不用显卡」由上面的开关表达，这里只列具体的编码器（不含 auto）
 const encoderOptions = computed(() => {
-  const list = info.value?.encoder?.choices
-  if (list && list.length) return list
-  return [
-    { name: 'auto', label: '自动（优先用显卡）', hw: false },
-    { name: 'libx264', label: 'CPU（libx264）', hw: false },
-  ]
+  const list = info.value?.encoder?.choices || []
+  const concrete = list.filter((e: { name: string }) => e.name !== 'auto')
+  if (concrete.length) return concrete
+  return [{ name: 'libx264', label: 'CPU（libx264）', hw: false }]
+})
+
+/** 显卡开关 → 实际保存的编码器：关 = libx264，开 = 原来选的硬件编码器或 auto */
+function encoderFromGpu() {
+  if (!setForm.transcode_gpu) return 'libx264'
+  return setForm.transcode_encoder === 'libx264' ? 'auto' : setForm.transcode_encoder
+}
+
+function setGpu(on: boolean) {
+  setForm.transcode_gpu = on
+  if (!on) setForm.transcode_encoder = 'libx264'
+  else if (setForm.transcode_encoder === 'libx264') setForm.transcode_encoder = 'auto'
+}
+
+// 「当前使用」以服务端实际探测结果为准；关掉显卡开关时就直接显示 CPU
+const encNow = computed(() => {
+  if (!setForm.transcode_gpu) return 'CPU（libx264）'
+  return info.value?.encoder?.label || '—'
 })
 
 const TRANSCODE_PRESETS = [
@@ -119,6 +138,7 @@ async function loadSettings() {
     setForm.theme = themeMode.value || s.theme || 'auto'
     setForm.transcode = s.transcode !== false
     setForm.transcode_encoder = s.transcode_encoder || 'auto'
+    setForm.transcode_gpu = setForm.transcode_encoder !== 'libx264'
     setForm.transcode_preset = s.transcode_preset || 'veryfast'
     setForm.thumb_position = Number(s.thumb_position ?? 0)
     setForm.scan_workers = Number(s.scan_workers ?? 3)
@@ -140,7 +160,7 @@ async function saveSettingsAll() {
       upload_dir: setForm.upload_dir.trim(),
       theme: setForm.theme,
       transcode: setForm.transcode,
-      transcode_encoder: setForm.transcode_encoder,
+      transcode_encoder: encoderFromGpu(),
       transcode_preset: setForm.transcode_preset,
       thumb_position: Number(setForm.thumb_position) || 0,
       scan_workers: Math.max(1, Math.min(16, Number(setForm.scan_workers) || 3)),
@@ -1573,20 +1593,22 @@ function onResize() {
               <div class="card-head"><h2>转码</h2></div>
               <div class="card-body">
                 <label class="chk-row"><input v-model="setForm.transcode" type="checkbox" /><span>浏览器不能直放的格式自动转码（HLS）</span></label>
-                <div class="form-row"><label>转码编码器</label>
+                <label class="chk-row"><input :checked="setForm.transcode_gpu" type="checkbox"
+                    @change="setGpu(($event.target as HTMLInputElement).checked)" /><span>使用 GPU 转码（有显卡时自动用显卡编码）</span></label>
+                <div v-if="setForm.transcode_gpu" class="form-row"><label>转码编码器</label>
                   <select v-model="setForm.transcode_encoder" class="field">
                     <option v-for="e in encoderOptions" :key="e.name" :value="e.name">{{ e.label }}</option>
                   </select>
                 </div>
                 <div class="kv"><span class="k">当前使用</span>
-                  <span class="v">{{ info?.encoder?.label || '—' }}</span>
+                  <span class="v">{{ encNow }}</span>
                 </div>
-                <div class="form-row"><label>转码预设（仅 CPU 编码时生效）</label>
-                  <select v-model="setForm.transcode_preset" class="field">
+                <div class="form-row" :class="{ muted: setForm.transcode_gpu }"><label>转码预设（仅 CPU 编码时生效）</label>
+                  <select v-model="setForm.transcode_preset" class="field" :disabled="setForm.transcode_gpu">
                     <option v-for="p in TRANSCODE_PRESETS" :key="p.v" :value="p.v">{{ p.label }}</option>
                   </select>
                 </div>
-                <div class="m-desc set-hint" style="font-size:11.5px">显卡能编码时自动用显卡（CPU 占用低、可同时转多路）；没驱动或没权限时自动回落 CPU，不会转码失败。浏览器不能直放的格式（如 HEVC、部分 MKV）会边转边放，切换视频会稍慢一点。</div>
+                <div class="m-desc set-hint" style="font-size:11.5px">打开「使用 GPU 转码」时优先用显卡编码（CPU 占用低、可同时转更多路），没驱动或没权限会自动回落 CPU，不会转码失败；关掉则只用 CPU 编码，功耗低、体积更小。手机 App 能直解的格式（MKV / HEVC / AC3 等）不会转码，直接播原文件。</div>
               </div>
             </div>
             <div class="card">

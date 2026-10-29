@@ -195,13 +195,27 @@ fun PlayerScreen(
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var loadingSrc by remember { mutableStateOf(true) }
     var lastLoadedId by remember { mutableIntStateOf(-1) }
+    var lastReloadKey by remember { mutableIntStateOf(0) }
     // 标签栏显隐（底部那排标签胶囊）
     var tagsOpen by rememberSaveable { mutableStateOf(true) }
     // 新视频的第一帧是否已经出来：没有之前用封面盖住，避免看到上一个视频的残留画面
     var videoReady by remember { mutableStateOf(false) }
     var transcodePct by remember { mutableIntStateOf(-1) }
+    // 当前这路是不是服务端转码（HLS）。直连原文件失败时要靠它决定「换转码重试」还是「报错」
+    var usingHls by remember { mutableStateOf(false) }
+    // 直连失败 → 换成转码版重放：改这个 key 让下面的 LaunchedEffect 重跑一次
+    var reloadKey by remember { mutableIntStateOf(0) }
 
     val current = videos.getOrNull(pagerState.currentPage)
+
+    /** 切到服务端转码版重来一次（同一个视频，不换页）。 */
+    fun pickHlsMode(videoId: Int) {
+        if (usingHls) return
+        api.markHlsFallback(videoId)
+        usingHls = true
+        errorMsg = null
+        reloadKey++
+    }
 
     fun effSpeed() = tempSpeed ?: lockedSpeed ?: speed
 
@@ -239,12 +253,15 @@ fun PlayerScreen(
     }
 
     // 页面切换 → 换片
-    LaunchedEffect(pagerState.currentPage, current?.id) {
+    LaunchedEffect(pagerState.currentPage, current?.id, reloadKey) {
         val v = current ?: return@LaunchedEffect
         // 列表还没到 / 正在按外部位置同步时不要回报，避免启动瞬间把定位覆盖成 0
         if (syncReady && !pagerSyncing && count > 0) onIndexChange(pagerState.currentPage)
-        if (v.id == lastLoadedId) return@LaunchedEffect
+        // reloadKey 变化（直连失败改走转码）时同一视频要重新加载一次，所以不能只看 videoId
+        if (v.id == lastLoadedId && reloadKey == lastReloadKey) return@LaunchedEffect
+        if (v.id != lastLoadedId) usingHls = api.hlsFallback(v.id)
         lastLoadedId = v.id
+        lastReloadKey = reloadKey
         errorMsg = null
         loadingSrc = true
         position = 0.0
@@ -254,7 +271,12 @@ fun PlayerScreen(
             player.stop()
             player.clearMediaItems()
         }
-        val info = runCatching { api.play(v.id) }.getOrNull()
+        // 服务端优先给「直连原文件」（手机能硬解 MKV/HEVC/AC3，不转码、不占 NAS）；
+        // 若这台机器的解码器吃不下、之前已经失败过一次，这里直接要转码版。
+        val wantHls = usingHls
+        var info = runCatching {
+            if (wantHls) api.playTranscode(v.id) else api.play(v.id)
+        }.getOrNull()
         if (info == null || info.mode == "error") {
             errorMsg = info?.message ?: "无法获取播放地址"
             loadingSrc = false
@@ -289,6 +311,7 @@ fun PlayerScreen(
             }
             transcodePct = -1
         }
+        usingHls = info.mode == "hls"
         val url = api.base + (info.url ?: "")
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
@@ -321,6 +344,13 @@ fun PlayerScreen(
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // 直连原文件失败（这台机器的解码器吃不下这个编码）→ 记下来并换成服务端转码版
+                // 重来一次；已经在转码模式还失败就如实报错，免得来回重试。
+                val v = current
+                if (v != null && !usingHls) {
+                    pickHlsMode(v.id)
+                    return
+                }
                 errorMsg = "播放失败：${error.errorCodeName}"
                 loadingSrc = false
                 videoReady = true

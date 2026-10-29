@@ -145,7 +145,24 @@ class Api(baseUrl: String, var token: String? = null) {
         exec(build("/api/videos/$videoId/tag", "POST", json.encodeToString(TagIn(tagId))))
     }
 
-    suspend fun play(videoId: Int): PlayInfo = getJson("/api/videos/$videoId/play")
+    /** 播放策略：服务端按手机 App 的宽松集合判断，能直连原文件就走 raw（不转码） */
+    suspend fun play(videoId: Int): PlayInfo =
+        getJson("/api/videos/$videoId/play?client=app")
+
+    /** 强制走服务端转码（直连失败后重试用） */
+    suspend fun playTranscode(videoId: Int): PlayInfo =
+        getJson("/api/videos/$videoId/play?client=none")
+
+    /** 这个视频是否已经确认过直连失败 —— 失败过的固定走转码，避免每次先黑一下（进程内记） */
+    fun hlsFallback(videoId: Int): Boolean =
+        fallbackIds.getOrPut(base) { mutableSetOf() }.contains(videoId)
+
+    fun markHlsFallback(videoId: Int) {
+        fallbackIds.getOrPut(base) { mutableSetOf() }.add(videoId)
+    }
+
+    private val fallbackIds = HashMap<String, MutableSet<Int>>()
+
     /** HLS 转码进度：非直放格式首次播放要等 ffmpeg 切完片 */
     suspend fun hlsStatus(videoId: Int): HlsStatus = getJson("/api/videos/$videoId/hlsstatus")
 

@@ -91,8 +91,13 @@ def raw(video_id: int, request: Request, download: int = 0,
 
 
 @router.get("/play")
-def play(video_id: int, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
-    """返回播放策略：能直放就直放，否则按需转 HLS。"""
+def play(video_id: int, client: str = "web",
+         user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """返回播放策略：能直放就直放，否则按需转 HLS。
+
+    client="app" 用手机 App 的放宽判断（ExoPlayer 能直解 MKV/HEVC/AC3 等），
+    这类片子直接走 raw 直连，不转码、不占 NAS 的 CPU；App 若真解不了会自己退回转码。
+    """
     st = get_state()
     row = _video_row(st, video_id)
     path = Path(row["path"])
@@ -101,7 +106,7 @@ def play(video_id: int, user: dict[str, Any] = Depends(require_user)) -> dict[st
     ext = "." + (row["ext"] or path.suffix.lstrip(".")).lower().lstrip(".")
     vcodec = (row["vcodec"] or "").lower()
     acodec = (row["acodec"] or "").lower()
-    if can_direct_play(ext, vcodec, acodec):
+    if can_direct_play(ext, vcodec, acodec, client):
         return {"mode": "direct", "url": f"/api/videos/{video_id}/raw",
                 "duration": row["duration"] or 0, "reason": "容器与编码可直放"}
     if not st.cfg.get("transcode"):

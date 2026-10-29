@@ -26,6 +26,14 @@ DIRECT_VCODECS = {"h264", "vp8", "vp9", "av1"}
 DIRECT_ACODECS = {"aac", "mp3", "opus", "vorbis", "none", ""}
 DIRECT_EXTS = {".mp4", ".m4v", ".webm", ".mov"}
 
+# 手机 App（ExoPlayer + 系统解码器）比浏览器能吃得多：MKV/TS 容器、HEVC/MPEG-4 视频、
+# AC3/EAC3/DTS/FLAC 音频在绝大多数机型上都能硬解直放。这类格式直连 raw 既不用转码
+# 也不占 NAS 的 CPU，播放器解不了的极端情况会自己退回到 /play 的转码链路。
+# 说明：这里只放宽「能不能交给播放器试一下」，网页端仍然用上面那套保守集合。
+CLIENT_VCODECS = DIRECT_VCODECS | {"hevc"}
+CLIENT_ACODECS = DIRECT_ACODECS | {"ac3", "eac3", "flac"}
+CLIENT_EXTS = DIRECT_EXTS | {".mkv", ".ts", ".m2ts", ".mts"}
+
 
 class MediaError(RuntimeError):
     pass
@@ -351,12 +359,21 @@ def probe(tools: MediaTools, path: Path) -> dict[str, Any]:
     }
 
 
-def can_direct_play(ext: str, vcodec: str, acodec: str) -> bool:
+def can_direct_play(ext: str, vcodec: str, acodec: str, client: str = "web") -> bool:
+    """能不能把原文件直接交给播放器。
+
+    client="web"（默认）按浏览器的保守集合判断；client="app" 用手机 App 的放宽集合
+    （ExoPlayer 能硬解 MKV/HEVC/AC3 等），避免手机端为能直放的片子白白转码。
+    """
     ext = (ext or "").lower()
+    if (client or "web").lower() == "app":
+        exts, vcodecs, acodecs = CLIENT_EXTS, CLIENT_VCODECS, CLIENT_ACODECS
+    else:
+        exts, vcodecs, acodecs = DIRECT_EXTS, DIRECT_VCODECS, DIRECT_ACODECS
     return (
-        ext in DIRECT_EXTS
-        and (vcodec or "").lower() in DIRECT_VCODECS
-        and (acodec or "").lower() in DIRECT_ACODECS
+        ext in exts
+        and (vcodec or "").lower() in vcodecs
+        and (acodec or "").lower() in acodecs
     )
 
 
