@@ -92,6 +92,7 @@ import com.videosorter.app.data.Api
 import com.videosorter.app.data.Counts
 import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -588,6 +589,28 @@ fun PlayerScreen(
                 .onSizeChanged { gestureW = it.width.toFloat().coerceAtLeast(1f) }
                 .pointerInput(current?.id, lockedSpeed) {
                     val dragThreshold = 56.dp.toPx()
+                    // 双击左右半屏快进/回退
+                    val doubleTapMs = viewConfiguration.doubleTapTimeoutMillis
+                    var lastTapAt = 0L
+                    var lastTapX = 0f
+                    var lastTapY = 0f
+                    var singleTapJob: Job? = null
+                    fun seekBy(seconds: Double) {
+                        val total = if (duration > 0) duration else (current?.duration ?: 0.0)
+                        if (total <= 0) return
+                        val target = (player.currentPosition / 1000.0 + seconds).coerceIn(0.0, total)
+                        player.seekTo((target * 1000).toLong())
+                        position = target
+                        hud = HudSpec(
+                            if (seconds > 0) "+${seconds.toInt()} 秒" else "${seconds.toInt()} 秒",
+                            fmtDuration(target),
+                            (target / total).toFloat().coerceIn(0f, 1f),
+                        )
+                        scope.launch {
+                            delay(720)
+                            hud = null
+                        }
+                    }
                     // 横向滑动 320px ≈ 1.0 倍速增量
                     val speedRange = 320f
                     awaitEachGesture {
@@ -637,7 +660,27 @@ fun PlayerScreen(
                                     swipeDir = if (dy < 0) 1 else -1
                                 }
                                 if (!ch.pressed) {
-                                    if (swipeDir == 0 && !ch.isConsumed) togglePlay()
+                                    if (swipeDir == 0 && !ch.isConsumed) {
+                                        val now = System.currentTimeMillis()
+                                        val isDouble = now - lastTapAt <= doubleTapMs &&
+                                            abs(startX - lastTapX) < gestureW * 0.18f &&
+                                            abs(startY - lastTapY) < 140f
+                                        if (isDouble) {
+                                            singleTapJob?.cancel()
+                                            lastTapAt = 0L
+                                            // 右半屏快进 10 秒，左半屏回退 5 秒
+                                            if (startX >= gestureW / 2f) seekBy(10.0) else seekBy(-5.0)
+                                        } else {
+                                            lastTapAt = now
+                                            lastTapX = startX
+                                            lastTapY = startY
+                                            singleTapJob?.cancel()
+                                            singleTapJob = scope.launch {
+                                                delay(doubleTapMs.toLong())
+                                                togglePlay()
+                                            }
+                                        }
+                                    }
                                     done = true
                                 }
                             } else if (ch.pressed) {

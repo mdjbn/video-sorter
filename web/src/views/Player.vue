@@ -433,6 +433,20 @@ function onLoaded() {
   }
   duration.value = el.duration
 }
+function stepVideo(delta: number) {
+  const list = plFiltered.value.length ? plFiltered.value : videos.value
+  const cur = current.value
+  if (!cur || !list.length) return
+  const i = list.findIndex((x) => x.id === cur.id)
+  if (i < 0) return
+  const j = Math.min(list.length - 1, Math.max(0, i + delta))
+  if (j === i) {
+    toast(delta < 0 ? '已经是第一个了' : '已经是最后一个了')
+    return
+  }
+  void selectVideo(list[j].id, { keepPlaying: playing.value, force: true })
+}
+
 function onEnded() {
   playing.value = false
   hideUI.value = false
@@ -850,6 +864,12 @@ function onKey(e: KeyboardEvent) {
     if (videoEl.value) videoEl.value.currentTime = Math.min(duration.value, videoEl.value.currentTime + 5)
   } else if (e.key === 'ArrowLeft') {
     if (videoEl.value) videoEl.value.currentTime = Math.max(0, videoEl.value.currentTime - 5)
+  } else if (e.key === 'ArrowUp' || e.code === 'Numpad8' || e.key === '8') {
+    e.preventDefault()
+    stepVideo(-1)
+  } else if (e.key === 'ArrowDown' || e.code === 'Numpad2' || e.key === '2') {
+    e.preventDefault()
+    stepVideo(1)
   } else if (e.key === 'f' || e.key === 'F') {
     toggleFull()
   } else if (e.key === 'p' || e.key === 'P') {
