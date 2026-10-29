@@ -779,11 +779,18 @@ fun PlayerScreen(
         }
 
         // ---------- 底部信息 ----------
+        // 渐隐只在最底部一小段，否则竖屏视频下半屏会被白色渐变糊掉
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(Brush.verticalGradient(t.scrimShort)),
+        )
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(t.scrim))
                 .navigationBarsPadding()
                 .padding(start = 18.dp, end = 18.dp, top = 30.dp, bottom = 92.dp),
         ) {

@@ -40,6 +40,8 @@ data class Tokens(
     val highlight: Color,
     /** 底部信息区渐隐遮罩 */
     val scrim: List<Color>,
+    /** 只在底部一小段用的短遮罩（不糊到画面中间） */
+    val scrimShort: List<Color>,
 ) {
     /** 像网页里 rgba(var(--ink), a) 一样按透明度取前景色 */
     fun ink(a: Float): Color = text.copy(alpha = a)
@@ -65,6 +67,7 @@ private val Dark = Tokens(
     glassBorder = Color(0x29FFFFFF),
     highlight = Color(0x30FFFFFF),
     scrim = listOf(Color(0x0006080C), Color(0xB806080C), Color(0xF006080C)),
+    scrimShort = listOf(Color(0x0006080C), Color(0x9906080C), Color(0xD906080C)),
 )
 
 private val Light = Tokens(
@@ -87,6 +90,7 @@ private val Light = Tokens(
     glassBorder = Color(0x1F0F1A29),
     highlight = Color(0xF2FFFFFF),
     scrim = listOf(Color(0x00F7FAFF), Color(0xE6F7FAFF), Color(0xFFF7FAFF)),
+    scrimShort = listOf(Color(0x00F7FAFF), Color(0x66F7FAFF), Color(0xA8F7FAFF)),
 )
 
 @Composable
