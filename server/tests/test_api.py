@@ -286,3 +286,5 @@ def test_history_dedupe_and_deleted(env):
     assert c.get("/api/videos").json()["items"] == []
     left = c.get("/api/history").json()["items"]
     assert left and all(i["deleted"] is True for i in left)
+    # 记录里的文件名要留着（视频行已经删了，重建文件名靠删除时回填）
+    assert all(i["filename"] for i in left)

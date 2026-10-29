@@ -200,7 +200,8 @@ export const api = {
   // 源目录
   sources: () => get<{ sources: Source[] }>('/sources'),
   addSource: (path: string) => post<{ ok: boolean; source: Source }>('/sources', { path }),
-  removeSource: (id: number) => del<{ ok: boolean }>(`/sources/${id}`),
+  removeSource: (id: number) =>
+    del<{ ok: boolean; removed: string; videos_removed: number }>(`/sources/${id}`),
   updateSource: (id: number, path: string) => put<{ ok: boolean; source: Source }>(`/sources/${id}`, { path }),
   browse: (path?: string) => get<{ path: string; parent: string | null; dirs: DirEntry[] }>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   fsRoots: () => get<{ roots: DirEntry[]; home: string }>('/fs/roots'),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import string
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +132,21 @@ def update_source(source_id: int, body: SourceIn,
     return {"ok": True, "source": {"id": source_id, "path": path, "kind": ""}}
 
 
+def _purge_media(st, ids: list[int]) -> None:
+    """删源之后清缩略图与转码产物。放后台做：几千个文件的 unlink/rmtree 比 SQL 慢得多，
+    用户在网页上等的只是「列表里视频没了」，不该等这些文件。"""
+    thumbs = st.cfg.thumb_dir
+    for vid in ids:
+        try:
+            (thumbs / f"{vid}.jpg").unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            st.hls.cleanup(vid)
+        except Exception:
+            pass
+
+
 @router.delete("/sources/{source_id}")
 def delete_source(source_id: int, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
@@ -139,22 +155,25 @@ def delete_source(source_id: int, user: dict[str, Any] = Depends(require_user)) 
         raise HTTPException(status_code=404, detail="源目录不存在")
     if (row["kind"] or "") == "upload":
         raise HTTPException(status_code=400, detail="上传目录不能删除，只能修改路径")
-    st.db.execute("DELETE FROM sources WHERE id=?", (source_id,))
-    # 源文件夹移除后，其下视频同步从视频库删除；播放记录保留并标注「视频已删除」
+    # 源文件夹移除后，其下视频同步从视频库删除；播放记录保留并标注「视频已删除」。
+    # 注意：必须一条语句批量改删（以前是每条视频两次 execute，等于几千次开启连接 + commit，
+    # NAS 上删一个 5000 条的源要 77 秒）。现在整个删除在同一个事务里，文件清理丢后台。
     scope, scope_params = under_dir("path", str(row["path"]))
-    victims = st.db.query(f"SELECT id, filename FROM videos WHERE {scope}", scope_params)
-    for v in victims:
-        st.db.execute(
-            "UPDATE play_history SET deleted=1, filename=CASE WHEN filename='' THEN ? ELSE filename END "
-            "WHERE video_id=?", (v["filename"] or "", v["id"]))
-        st.db.execute("DELETE FROM videos WHERE id=?", (v["id"],))
-        thumb = st.cfg.thumb_dir / f"{v['id']}.jpg"
-        thumb.unlink(missing_ok=True)
-        try:
-            st.hls.cleanup(v["id"])
-        except Exception:
-            pass
-    return {"ok": True, "removed": row["path"], "videos_removed": len(victims)}
+    with st.db.tx() as c:
+        # 先补文件名再删 videos：子查询依赖 videos 里还有记录
+        c.execute(
+            "UPDATE play_history SET deleted=1, "
+            "filename=CASE WHEN filename='' THEN COALESCE("
+            "(SELECT v.filename FROM videos v WHERE v.id=play_history.video_id), '') "
+            "ELSE filename END "
+            f"WHERE video_id IN (SELECT id FROM videos WHERE {scope})",
+            scope_params)
+        ids = [int(r[0]) for r in c.execute(f"SELECT id FROM videos WHERE {scope}", scope_params)]
+        c.execute(f"DELETE FROM videos WHERE {scope}", scope_params)
+        c.execute("DELETE FROM sources WHERE id=?", (source_id,))
+    if ids:
+        threading.Thread(target=_purge_media, args=(st, ids), daemon=True).start()
+    return {"ok": True, "removed": row["path"], "videos_removed": len(ids)}
 
 
 @router.get("/fs/list")

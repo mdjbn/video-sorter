@@ -268,10 +268,13 @@ async function addSource() {
 }
 async function removeSource(id: number) {
   try {
-    await api.removeSource(id)
+    const r = await api.removeSource(id)
     markLibStale()
     await Promise.all([loadSources(), loadStats()])
-    toast('已移除')
+    // 正停在视频库就立刻刷新，别让被删掉的片子还挂在网格里
+    if (view.value === 'library') await loadLibrary(true)
+    const n = Number(r?.videos_removed ?? 0)
+    toast(n > 0 ? `已移除源文件夹，删掉 ${n} 个视频` : '已移除源文件夹')
   } catch (e: any) { toast(e?.message || '移除失败', true) }
 }
 
