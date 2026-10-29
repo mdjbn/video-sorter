@@ -167,11 +167,15 @@ fun PlayerScreen(
 
     // 外部指定要播第几个（续播定位、播放历史跳转、整理页跳转、播完自动下一个）→ 同步到 pager
     LaunchedEffect(startIndex, count) {
-        if (count <= 0) return@LaunchedEffect
+        if (count <= 0) {
+            syncReady = true
+            return@LaunchedEffect
+        }
         if (startIndex in 0 until count && startIndex != pagerState.currentPage) {
             pagerSyncing = true
             try {
-                pagerState.animateScrollToPage(startIndex)
+                // 还没露过面（启动续播）就瞬间定位，避免「先显示第一个视频再滑上去」的闪烁
+                if (!syncReady) pagerState.scrollToPage(startIndex) else pagerState.animateScrollToPage(startIndex)
             } finally {
                 pagerSyncing = false
             }
@@ -511,6 +515,11 @@ fun PlayerScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // 续播定位完成前先空一帧：否则会先露出第一个视频再滑上去（闪烁）
+        if (count > 0 && !syncReady) {
+            Box(Modifier.fillMaxSize().background(Color.Black))
+            return@Box
+        }
         // ---------- 分页（视觉 + 上下滑切视频） ----------
         VerticalPager(
             state = pagerState,
@@ -654,13 +663,10 @@ fun PlayerScreen(
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // 命中进度条等控件时，那一层已经消费了按下事件 —— 这里直接让开，避免抢走拖动
                         if (down.isConsumed) return@awaitEachGesture
-                        // 只允许在视频画面矩形内起手：上下黑边（画面上下的空白区）不响应任何手势
-                        if (videoRect.height > 0f) {
-                            val p = down.position
-                            if (p.y < videoRect.top || p.y > videoRect.bottom ||
-                                p.x < videoRect.left || p.x > videoRect.right
-                            ) return@awaitEachGesture
-                        }
+                        // 上下黑边里点按/双击不响应，但上下滑切视频要能整块屏幕起手
+                        val inPicture = videoRect.height <= 0f ||
+                            (down.position.y >= videoRect.top && down.position.y <= videoRect.bottom &&
+                                down.position.x >= videoRect.left && down.position.x <= videoRect.right)
                         val startY = down.position.y
                         val startX = down.position.x
                         val longPressMs = viewConfiguration.longPressTimeoutMillis
@@ -704,7 +710,7 @@ fun PlayerScreen(
                                     swipeDir = if (dy < 0) 1 else -1
                                 }
                                 if (!ch.pressed) {
-                                    if (swipeDir == 0 && !ch.isConsumed) {
+                                    if (swipeDir == 0 && !ch.isConsumed && inPicture) {
                                         val now = System.currentTimeMillis()
                                         val isDouble = now - lastTapAt <= doubleTapMs &&
                                             abs(startX - lastTapX) < gestureW * 0.18f &&

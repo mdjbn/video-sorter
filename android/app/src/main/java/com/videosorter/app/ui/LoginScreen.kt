@@ -21,6 +21,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -332,7 +333,14 @@ private fun CheckLine(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
                 .border(1.dp, if (on) t.accent else t.line2, RoundedCornerShape(5.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            if (on) Text("✓", color = Color(0xFF04160D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            if (on) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = Color(0xFF04160D),
+                    modifier = Modifier.size(11.dp),
+                )
+            }
         }
         Spacer(Modifier.width(7.dp))
         Text(label, color = if (on) t.text else t.muted, fontSize = 11.5.sp)

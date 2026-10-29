@@ -59,7 +59,7 @@ import com.videosorter.app.data.Api
 import com.videosorter.app.data.Tag
 import com.videosorter.app.data.Video
 
-private val LIST_FILTERS = listOf("all" to "全部", "idle" to "未标记", "tagged" to "待整理", "done" to "已整理")
+private val LIST_FILTERS = listOf("all" to "全部", "idle" to "未标记", "tagged" to "待整理", "organized" to "已整理")
 
 @Composable
 fun ListScreen(
