@@ -862,7 +862,7 @@ fun PlayerScreen(
                 Box(Modifier.fillMaxWidth()) {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        contentPadding = PaddingValues(end = 40.dp),
+                        contentPadding = PaddingValues(end = 44.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         items(tags, key = { it.id }) { tag ->
@@ -894,21 +894,7 @@ fun PlayerScreen(
                             }
                         }
                     }
-                    // 右端渐隐 + 新建按钮
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(52.dp)
-                            .height(34.dp)
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        (if (dark) Color(0xFF080B10) else Color(0xFFF7FAFF)).copy(alpha = 0f),
-                                        (if (dark) Color(0xFF080B10) else Color(0xFFF7FAFF)).copy(alpha = 0.94f),
-                                    )
-                                )
-                            )
-                    )
+                    // 右端新建按钮（不再铺整块渐隐底色，否则会在画面上留一块白色矩形）
                     Box(
                         Modifier
                             .align(Alignment.CenterEnd)
