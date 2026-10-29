@@ -68,9 +68,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -78,6 +81,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -96,7 +100,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.abs
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -851,9 +854,14 @@ fun PlayerScreen(
                 .padding(start = 18.dp, end = 18.dp, top = 30.dp, bottom = 92.dp),
         ) {
             current?.let { v ->
+                // 深色主题下这两行文字改用浅色主题同款颜色（视频画面通常偏亮，白色字会糊掉），
+                // 再给一层极淡的白色光晕，保证在暗画面里也读得清
+                val infoInk = if (t.dark) Color(0xFF0B1219) else t.text
+                val infoHalo = if (t.dark) Shadow(Color(0x59FFFFFF), Offset(0f, 0f), 8f) else null
                 Text(
                     v.name,
-                    color = t.ink(0.96f),
+                    color = infoInk,
+                    style = TextStyle(shadow = infoHalo),
                     fontSize = 15.5.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -869,7 +877,8 @@ fun PlayerScreen(
                             sizeText(v.size),
                             if (v.isOrganized) "已整理" else if (v.tagId != null) "待整理" else "未标记",
                         ).joinToString(" · "),
-                        color = t.ink(0.55f),
+                        color = if (t.dark) Color(0xB30B1219) else t.ink(0.55f),
+                        style = TextStyle(shadow = infoHalo),
                         fontSize = 10.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -880,9 +889,10 @@ fun PlayerScreen(
                     Row(
                         Modifier
                             .height(30.dp)
+                            .shadow(6.dp, RoundedCornerShape(12.dp))
                             .clip(RoundedCornerShape(12.dp))
-                            .background(t.ink(0.08f))
-                            .border(1.dp, t.line, RoundedCornerShape(12.dp))
+                            .background(t.glass)
+                            .border(1.dp, t.glassBorder, RoundedCornerShape(12.dp))
                             .clickable { cycleSpeed() }
                             .padding(horizontal = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
