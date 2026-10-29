@@ -29,21 +29,14 @@ const loading = ref(true)
 // 播放列表一次最多渲染这么多条，滚到底部再追加：几千条时一次性铺满 DOM 会卡好几秒
 const PL_PAGE = 120
 const plLimit = ref(PL_PAGE)
-// 播放列表搜索：图标 → 展开输入框
+// 播放列表搜索：常驻搜索框（直接输就能过滤）
 const plQuery = ref('')
-const plSearchOpen = ref(false)
-const plSearchEl = ref<HTMLInputElement | null>(null)
 const plFiltered = computed(() => {
   const q = plQuery.value.trim().toLowerCase()
   if (!q) return videos.value
   return videos.value.filter((v) => (v.filename || '').toLowerCase().includes(q))
 })
 const visibleList = computed(() => plFiltered.value.slice(0, plLimit.value))
-function togglePlSearch() {
-  plSearchOpen.value = !plSearchOpen.value
-  if (plSearchOpen.value) nextTick(() => plSearchEl.value?.focus())
-  else plQuery.value = ''
-}
 // hls：这一路转码的起始秒。媒体时间 + hlsStart = 绝对进度
 const hlsActive = ref(false)
 const hlsStart = ref(0)
@@ -93,10 +86,6 @@ function toggleTag(id: number) {
   // 勾了标签就不再按状态过滤，取并集
   if (next.size) status.value = 'all'
 }
-const listCountText = computed(() => {
-  if (!hasFilter.value) return `未整理 ${counts.value.idle ?? 0}`
-  return `${videos.value.length} 个 · ${filterLabel.value}`
-})
 const organizedCount = computed(() => videos.value.filter((v) => v.organized).length)
 const pendingCount = computed(() => counts.value.tagged ?? 0)
 
@@ -1111,20 +1100,15 @@ defineExpose({ selectVideo })
             <span>{{ filterLabel }}</span>
             <Icon name="chevron-down" :size="12" class="chev" />
           </button>
-          <span class="fcount">{{ listCountText }}</span>
-          <div class="pl-search" :class="{ open: plSearchOpen }">
-            <button class="ps-btn" :class="{ on: plSearchOpen }" title="搜索播放列表" @click.stop="togglePlSearch">
-              <Icon name="search" :size="13" />
-            </button>
+          <div class="pl-search">
+            <Icon name="search" :size="13" class="ps-ico" />
             <input
-              v-if="plSearchOpen"
-              ref="plSearchEl"
               v-model="plQuery"
               class="ps-input"
               placeholder="搜索播放列表…"
-              @keydown.esc="togglePlSearch"
+              @keydown.esc="plQuery = ''"
             />
-            <button v-if="plSearchOpen && plQuery" class="ps-clear" title="清空" @click.stop="plQuery = ''">
+            <button v-if="plQuery" class="ps-clear" title="清空" @click.stop="plQuery = ''">
               <Icon name="close" :size="11" />
             </button>
           </div>

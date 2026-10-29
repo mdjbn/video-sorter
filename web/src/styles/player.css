@@ -393,23 +393,18 @@
 html[data-theme="light"] .dl-btn{color:#0f1a29;background:rgba(255,255,255,.72);border-color:rgba(16,24,38,.14)}
 html[data-theme="light"] .dl-btn:hover{background:rgba(15,162,103,.14);border-color:rgba(15,162,103,.4)}
 
-/* ---- 播放列表搜索 ---- */
-.pl-search { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.pl-search .ps-btn {
-  width: 24px; height: 24px; flex: none; display: grid; place-items: center;
-  border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted);
-  cursor: pointer; transition: all .16s ease;
-}
-.pl-search .ps-btn:hover { color: var(--fg); border-color: rgba(var(--accent), .45); }
-.pl-search .ps-btn.on { color: rgb(var(--accent)); border-color: rgba(var(--accent), .55); background: rgba(var(--accent), .1); }
+/* ---- 播放列表搜索（常驻输入框） ---- */
+.pl-search { position: relative; display: flex; align-items: center; margin-left: auto; }
+.pl-search .ps-ico { position: absolute; left: 8px; color: var(--muted); pointer-events: none; }
 .pl-search .ps-input {
-  width: 132px; height: 24px; padding: 0 8px; font-size: 12px;
+  width: 148px; height: 26px; padding: 0 24px 0 27px; font-size: 12px;
   border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2, rgba(127,127,127,.08));
-  color: var(--fg); outline: none;
+  color: var(--fg); outline: none; transition: border-color .16s ease, width .16s ease;
 }
-.pl-search .ps-input:focus { border-color: rgba(var(--accent), .55); }
+.pl-search .ps-input::placeholder { color: var(--muted-2); }
+.pl-search .ps-input:focus { border-color: rgba(var(--accent), .55); width: 176px; }
 .pl-search .ps-clear {
-  width: 20px; height: 20px; flex: none; display: grid; place-items: center;
+  position: absolute; right: 4px; width: 20px; height: 20px; display: grid; place-items: center;
   border: none; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer;
 }
 .pl-search .ps-clear:hover { color: var(--fg); }
