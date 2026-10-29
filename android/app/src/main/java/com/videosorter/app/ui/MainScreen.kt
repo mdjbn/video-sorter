@@ -64,6 +64,11 @@ fun MainScreen(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var playerIndex by remember { mutableIntStateOf(0) }
+    // 第一次拉到列表时用「上次播放的视频」定位，之后的过滤不要来回跳。
+    // 这个值必须在发起任何网络请求之前读出来：reload 中间有多次挂起，期间界面可能已经
+    // 把「第一个视频」写回存储，事后再读就拿不到真正的上次位置了。
+    val bootLastVideoId = remember(api.base) { session.lastVideoId(api.base) }
+    var resumedOnce by remember { mutableStateOf(false) }
     // 视频库筛选（服务端筛选）：状态 + 多个标签，播放器与视频库共用同一份结果
     var statusFilter by remember { mutableStateOf("all") }
     var tagFilter by remember { mutableStateOf<Set<Int>>(emptySet()) }
@@ -102,6 +107,11 @@ fun MainScreen(
             videos = page.items
             counts = page.counts
             tags = api.tags()
+            if (!resumedOnce) {
+                val idx = videos.indexOfFirst { it.id == bootLastVideoId }
+                if (idx >= 0) playerIndex = idx
+                resumedOnce = true
+            }
             if (playerIndex >= videos.size) playerIndex = 0
             error = null
         } catch (e: Exception) {
@@ -199,7 +209,11 @@ fun MainScreen(
                     tags = tags,
                     counts = counts,
                     startIndex = playerIndex,
-                    onIndexChange = { playerIndex = it },
+                    onIndexChange = { idx ->
+                        playerIndex = idx
+                        // 只在用户真的换片时落盘：启动初次的组合不能写，否则会把「第一个视频」覆盖上去
+                        videos.getOrNull(idx)?.let { session.setLastVideoId(it.id, api.base) }
+                    },
                     onTag = { videoId, tagId -> markTag(videoId, tagId) },
                     onCreateTag = { name, color ->
                         scope.launch {

@@ -36,3 +36,4 @@ server/*.png
 server/tools/
 # 依赖锁文件的手工备份（cargo update 前留档，不入库）
 *.orig-locked
+android/.kotlin/

@@ -63,6 +63,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -251,6 +252,8 @@ private fun tagsCountLabel(counts: Counts): String {
 
 @Composable
 private fun ServerPage(api: Api, session: Session, onToast: (String) -> Unit, onSwitch: (String) -> Unit, onBack: () -> Unit) {
+    // 删除服务器后要重算「其它服务器」列表
+    var reloadKey by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     var info by remember { mutableStateOf<com.videosorter.app.data.ServerInfo?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -295,14 +298,31 @@ private fun ServerPage(api: Api, session: Session, onToast: (String) -> Unit, on
             Spacer(Modifier.height(16.dp))
             Text("切换服务器", color = t2(), fontSize = 11.sp)
             Spacer(Modifier.height(8.dp))
-            val others = session.servers().filter { it != session.current }
+            val others = remember(reloadKey) { session.servers().filter { it != session.current } }
             if (others.isEmpty()) {
                 EmptyNote("还没有其它服务器，登录时填写就会自动记录")
             } else {
                 GroupCard {
                     others.forEachIndexed { i, url ->
                         if (i > 0) RowDivider()
-                        SettingRow(Icons.Rounded.SwapHoriz, url, "点按切换", chevron = true) {
+                        SettingRow(
+                            Icons.Rounded.SwapHoriz, url, "点按切换", chevron = false,
+                            trailing = {
+                                Icon(
+                                    Icons.Rounded.Delete, "删除 $url",
+                                    tint = tokens().danger.copy(alpha = 0.8f),
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable(onClick = {
+                                            session.removeServer(url)
+                                            onToast("已删除 $url")
+                                            reloadKey++
+                                        })
+                                        .padding(7.dp),
+                                )
+                            },
+                        ) {
                             onToast("切换到 $url")
                             onSwitch(url)
                         }

@@ -6,6 +6,13 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -63,11 +70,11 @@ private fun AppRoot() {
     var themeMode by remember { mutableStateOf(session.theme) }
     var api by remember { mutableStateOf<Api?>(null) }
 
-    // 启动时若有已保存的服务器 + token，直接用
+    // 启动时若有已保存的服务器 + 未过期的令牌，直接用（勾了「七天内保持登录」才落盘）
     remember {
         val saved = session.current
         if (saved.isNotBlank()) {
-            val token = session.token(saved)
+            val token = session.validToken(saved)
             if (token.isNotBlank()) api = Api(saved, token)
         }
         true
@@ -86,38 +93,51 @@ private fun AppRoot() {
     }
 
     VideoSorterTheme(mode = themeMode) {
-        val current = api
-        if (current == null) {
-            LoginScreen(
-                session = session,
-                themeMode = themeMode,
-                onThemeChange = { themeMode = it; session.theme = it },
-                onLoggedIn = { a, user ->
-                    session.addServer(a.base)
-                    session.setToken(a.token ?: "", a.base)
-                    session.setLastUser(user, a.base)
-                    api = a
-                },
-            )
-        } else {
-            // 切换服务器时必须重建整棵子树：否则视频列表/标签等状态会沿用上一个服务器的数据
-            // （表现为列表里还是旧服务器的视频，缩略图 404，直到杀掉进程重启）
-            key(current.base) {
-            MainScreen(
-                api = current,
-                session = session,
-                themeMode = themeMode,
-                onThemeChange = { themeMode = it; session.theme = it },
-                onLogout = {
-                    session.clearToken(current.base)
-                    api = null
-                },
-                onSwitchServer = { url ->
-                    session.current = url
-                    val token = session.token(url)
-                    api = if (token.isNotBlank()) Api(url, token) else null
-                },
-            )
+        // 登录 ↔ 主界面之间加过渡动画（登录页从下往上淡入、退出时往下淡出）
+        AnimatedContent(
+            targetState = api,
+            transitionSpec = {
+                val enter = fadeIn(tween(300)) + slideInVertically(tween(360)) { it / 8 }
+                val exit = fadeOut(tween(200)) + slideOutVertically(tween(360)) { -it / 8 }
+                enter togetherWith exit
+            },
+            label = "auth",
+        ) { current ->
+            if (current == null) {
+                LoginScreen(
+                    session = session,
+                    themeMode = themeMode,
+                    onThemeChange = { themeMode = it; session.theme = it },
+                    onLoggedIn = { a, user ->
+                        session.addServer(a.base)
+                        session.setTokenWithExpiry(
+                            a.token ?: "", a.base,
+                            keepDays = if (session.keepLogin) 7 else 0,
+                        )
+                        session.setLastUser(user, a.base)
+                        api = a
+                    },
+                )
+            } else {
+                // 切换服务器时必须重建整棵子树：否则视频列表/标签等状态会沿用上一个服务器的数据
+                // （表现为列表里还是旧服务器的视频，缩略图 404，直到杀掉进程重启）
+                key(current.base) {
+                MainScreen(
+                    api = current,
+                    session = session,
+                    themeMode = themeMode,
+                    onThemeChange = { themeMode = it; session.theme = it },
+                    onLogout = {
+                        session.clearToken(current.base)
+                        api = null
+                    },
+                    onSwitchServer = { url ->
+                        session.current = url
+                        val token = session.validToken(url)
+                        api = if (token.isNotBlank()) Api(url, token) else null
+                    },
+                )
+                }
             }
         }
     }

@@ -159,11 +159,24 @@ fun PlayerScreen(
         }
     }
 
-    // 外部指定要播第几个（播放历史跳转、整理页跳转、播完自动下一个）→ 同步到 pager
+    // 正在按外部指定位置滚动 pager（此时 currentPage 的变化不该回报给上层，否则会把
+    // 「续播定位」当成用户换片，直接把位置改回第一个）
+    var pagerSyncing by remember { mutableStateOf(false) }
+    // 首次按 startIndex 定位完成之前，pager 的 currentPage 不算数（否则会把续播定位冲掉）
+    var syncReady by remember { mutableStateOf(false) }
+
+    // 外部指定要播第几个（续播定位、播放历史跳转、整理页跳转、播完自动下一个）→ 同步到 pager
     LaunchedEffect(startIndex, count) {
-        if (count > 0 && startIndex in 0 until count && startIndex != pagerState.currentPage) {
-            pagerState.animateScrollToPage(startIndex)
+        if (count <= 0) return@LaunchedEffect
+        if (startIndex in 0 until count && startIndex != pagerState.currentPage) {
+            pagerSyncing = true
+            try {
+                pagerState.animateScrollToPage(startIndex)
+            } finally {
+                pagerSyncing = false
+            }
         }
+        syncReady = true
     }
 
     var playing by remember { mutableStateOf(true) }
@@ -224,7 +237,8 @@ fun PlayerScreen(
     // 页面切换 → 换片
     LaunchedEffect(pagerState.currentPage, current?.id) {
         val v = current ?: return@LaunchedEffect
-        onIndexChange(pagerState.currentPage)
+        // 列表还没到 / 正在按外部位置同步时不要回报，避免启动瞬间把定位覆盖成 0
+        if (syncReady && !pagerSyncing && count > 0) onIndexChange(pagerState.currentPage)
         if (v.id == lastLoadedId) return@LaunchedEffect
         lastLoadedId = v.id
         errorMsg = null
@@ -881,10 +895,10 @@ fun PlayerScreen(
                 .padding(start = 18.dp, end = 18.dp, top = 30.dp, bottom = 92.dp),
         ) {
             current?.let { v ->
-                // 深色主题下这两行文字改用浅色主题同款颜色（视频画面通常偏亮，白色字会糊掉），
-                // 再给一层极淡的白色光晕，保证在暗画面里也读得清
-                val infoInk = if (t.dark) Color(0xFF0B1219) else t.text
-                val infoHalo = if (t.dark) Shadow(Color(0x59FFFFFF), Offset(0f, 0f), 8f) else null
+                // 浅色主题也统一用白字（和深色主题一致），再压一层深色阴影，
+                // 这样画面偏亮时也能看清
+                val infoInk = Color.White
+                val infoHalo = Shadow(Color(0x99000000), Offset(0f, 1f), 10f)
                 Text(
                     v.name,
                     color = infoInk,
@@ -904,7 +918,7 @@ fun PlayerScreen(
                             sizeText(v.size),
                             if (v.isOrganized) "已整理" else if (v.tagId != null) "待整理" else "未标记",
                         ).joinToString(" · "),
-                        color = if (t.dark) Color(0xB30B1219) else t.ink(0.55f),
+                        color = Color(0xE6FFFFFF),
                         style = TextStyle(shadow = infoHalo),
                         fontSize = 10.5.sp,
                         maxLines = 1,

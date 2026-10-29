@@ -89,6 +89,7 @@ fun SettingRow(
     subtitle: String? = null,
     danger: Boolean = false,
     chevron: Boolean = true,
+    trailing: (@Composable () -> Unit)? = null,
     onClick: (() -> Unit)? = null,
 ) {
     val t = tokens()
@@ -112,6 +113,10 @@ fun SettingRow(
                 Spacer(Modifier.height(2.dp))
                 Text(subtitle, color = t.muted2, fontSize = 10.sp, maxLines = 2)
             }
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(8.dp))
+            trailing()
         }
         if (chevron) {
             Icon(Icons.Rounded.ChevronRight, null, tint = t.muted2, modifier = Modifier.size(15.dp))

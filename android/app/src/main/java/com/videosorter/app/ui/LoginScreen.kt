@@ -62,7 +62,9 @@ fun LoginScreen(
     val scope = rememberCoroutineScope()
     var server by remember { mutableStateOf(session.current.ifBlank { "192.168.1.8:8080" }) }
     var user by remember { mutableStateOf(session.lastUser().ifBlank { "admin" }) }
-    var pass by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf(session.password(Session.normalize(server))) }
+    var savePass by remember { mutableStateOf(session.savePassword) }
+    var keepLogin by remember { mutableStateOf(session.keepLogin) }
     var showPass by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
@@ -88,6 +90,9 @@ fun LoginScreen(
                     err = "连不上服务器，请检查地址和端口"
                 } else {
                     val auth = api.login(user, pass)
+                    session.savePassword = savePass
+                    session.keepLogin = keepLogin
+                    session.setPassword(if (savePass) pass else "", base)
                     onLoggedIn(api, auth.user?.username ?: user)
                 }
             } catch (e: Exception) {
@@ -234,6 +239,15 @@ fun LoginScreen(
                 onDone = { doLogin() },
             )
 
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                CheckLine("保存密码", savePass) { savePass = it; session.savePassword = it }
+                CheckLine("七天内保持登录", keepLogin) { keepLogin = it; session.keepLogin = it }
+            }
+
             if (err.isNotEmpty()) {
                 Text(
                     err,
@@ -297,6 +311,31 @@ fun LoginScreen(
                 Text("局域网直连 · 不上传任何第三方", color = t.muted2, fontSize = 10.sp)
             }
         }
+    }
+}
+
+@Composable
+private fun CheckLine(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    val t = tokens()
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .clickable { onChange(!on) }
+            .padding(end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(15.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (on) t.accent.copy(alpha = 0.9f) else t.ink(0.05f))
+                .border(1.dp, if (on) t.accent else t.line2, RoundedCornerShape(5.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (on) Text("✓", color = Color(0xFF04160D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(7.dp))
+        Text(label, color = if (on) t.text else t.muted, fontSize = 11.5.sp)
     }
 }
 
