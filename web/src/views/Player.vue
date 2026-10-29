@@ -29,15 +29,37 @@ const loading = ref(true)
 // 播放列表一次最多渲染这么多条，滚到底部再追加：几千条时一次性铺满 DOM 会卡好几秒
 const PL_PAGE = 120
 const plLimit = ref(PL_PAGE)
-const visibleList = computed(() => videos.value.slice(0, plLimit.value))
+// 播放列表搜索：图标 → 展开输入框
+const plQuery = ref('')
+const plSearchOpen = ref(false)
+const plSearchEl = ref<HTMLInputElement | null>(null)
+const plFiltered = computed(() => {
+  const q = plQuery.value.trim().toLowerCase()
+  if (!q) return videos.value
+  return videos.value.filter((v) => (v.filename || '').toLowerCase().includes(q))
+})
+const visibleList = computed(() => plFiltered.value.slice(0, plLimit.value))
+function togglePlSearch() {
+  plSearchOpen.value = !plSearchOpen.value
+  if (plSearchOpen.value) nextTick(() => plSearchEl.value?.focus())
+  else plQuery.value = ''
+}
+// hls：这一路转码的起始秒。媒体时间 + hlsStart = 绝对进度
+const hlsActive = ref(false)
+const hlsStart = ref(0)
+const hlsAvail = ref(0)
+let hlsPendingSeek: number | null = null
+let hlsRestarting = false
+// 重新起一路转码后，等新媒体就绪再续播（attach 完立刻 play() 会因还没有数据被拒）
+let wantPlayOnAttach = false
 let plScrollLock = false
 function onPlScroll() {
   if (plScrollLock) return
   const el = listEl.value
   if (!el) return
   if (el.scrollTop + el.clientHeight < el.scrollHeight - 240) return
-  if (plLimit.value >= videos.value.length) return
-  plLimit.value = Math.min(videos.value.length, plLimit.value + PL_PAGE)
+  if (plLimit.value >= plFiltered.value.length) return
+  plLimit.value = Math.min(plFiltered.value.length, plLimit.value + PL_PAGE)
 }
 // 从管理页回来时正在恢复现场：这段时间里筛选 watch 不要触发重新拉列表
 let restoring = false
@@ -158,6 +180,8 @@ function teardown() {
     el.load()
   }
   playing.value = false
+  hlsActive.value = false
+  wantPlayOnAttach = false
 }
 
 async function selectVideo(
@@ -172,6 +196,9 @@ async function selectVideo(
   teardown()
   const v = videos.value.find((x) => x.id === id) || (await api.video(id))
   current.value = v
+  hlsActive.value = false
+  hlsStart.value = 0
+  hlsAvail.value = 0
   seekTarget = typeof opts.resumeAt === 'number' ? opts.resumeAt : null
   curTime.value = seekTarget ?? (v.position || 0)
   duration.value = v.duration || 0
@@ -185,8 +212,9 @@ async function selectVideo(
 }
 
 function scrollActiveIntoView() {
-  const idx = videos.value.findIndex((v) => v.id === current.value?.id)
-  if (idx >= plLimit.value) plLimit.value = Math.min(videos.value.length, idx + PL_PAGE)
+  const idx = plFiltered.value.findIndex((v) => v.id === current.value?.id)
+  if (idx < 0) return
+  if (idx >= plLimit.value) plLimit.value = Math.min(plFiltered.value.length, idx + PL_PAGE)
   nextTick(() => {
     const el = listEl.value?.querySelector('.pl-item.active') as HTMLElement | null
     if (!el) return
@@ -234,17 +262,25 @@ async function startPlayback(v: Video) {
     }
     return
   }
-  // HLS：先等后端切出第一个分片，再交给 hls.js
+  // HLS：先等后端切出第一个分片，再交给 hls.js。
+  // 有续播进度时直接从「那一段」开始转（-ss 输入端 seek），不用从 0 转起，也不用等全片。
   playMode.value = 'hls'
-  hlsMsg.value = '正在转码为流式播放…'
-  await waitHlsReady(v.id)
+  const resume = seekTarget ?? v.position ?? 0
+  seekTarget = null
+  const start = resume > 3 ? Math.max(0, Math.floor(resume) - 2) : 0
+  hlsStart.value = start
+  hlsAvail.value = start
+  hlsPendingSeek = resume > 3 ? resume : null
+  duration.value = v.duration || info.duration || duration.value
+  hlsMsg.value = start > 0 ? `正在从 ${fmtDur(start)} 处开始转码…` : '正在转码为流式播放…'
+  await waitHlsReady(v.id, start)
 }
 
-async function waitHlsReady(videoId: number) {
+async function waitHlsReady(videoId: number, start = 0) {
   window.clearInterval(hlsPoll)
   const tick = async () => {
     try {
-      const s = await api.hlsStatus(videoId)
+      const s = await api.hlsStatus(videoId, start)
       hlsPercent.value = s.percent || 0
       if (s.status === 'error') {
         playMode.value = 'error'
@@ -254,7 +290,7 @@ async function waitHlsReady(videoId: number) {
       }
       if (s.ready) {
         window.clearInterval(hlsPoll)
-        attachHls(videoId)
+        await attachHls(videoId, start)
       }
     } catch {
       /* 忽略轮询错误 */
@@ -264,11 +300,14 @@ async function waitHlsReady(videoId: number) {
   hlsPoll = window.setInterval(tick, 800)
 }
 
-async function attachHls(videoId: number) {
+async function attachHls(videoId: number, start = 0) {
   const el = videoEl.value
   if (!el) return
   playMode.value = 'direct'
-  const url = `/api/videos/${videoId}/hls/index.m3u8`
+  hlsActive.value = true
+  hlsStart.value = start
+  hlsAvail.value = start
+  const url = `/api/videos/${videoId}/hls/s${Math.floor(start)}/index.m3u8`
   if (el.canPlayType('application/vnd.apple.mpegurl')) {
     el.src = url
   } else {
@@ -276,6 +315,13 @@ async function attachHls(videoId: number) {
     const Hls = mod.default
     if (Hls.isSupported()) {
       hls = new Hls({ enableWorker: true, maxBufferLength: 30 })
+      // 记下「这一路已经转好多少」：evet playlist 的 totalduration 就是已切好的秒数
+      hls.on(Hls.Events.LEVEL_LOADED, (_e: unknown, data: any) => {
+        const d = data?.details
+        if (d && Number.isFinite(d.totalduration) && d.totalduration > 0) {
+          hlsAvail.value = hlsStart.value + d.totalduration
+        }
+      })
       hls.loadSource(url)
       hls.attachMedia(el)
     } else {
@@ -283,12 +329,49 @@ async function attachHls(videoId: number) {
     }
   }
   el.playbackRate = effSpeed.value
-  // 续播对 HLS 同样生效：等元数据就绪后跳到上次的位置
-  if (seekTarget !== null) {
-    seekToResume(el, seekTarget, 0)
-    seekTarget = null
-  } else {
-    seekToResume(el, current.value?.position)
+  if (wantPlayOnAttach) {
+    // 新起的一路要等首段到了才 play()，否则会被浏览器直接拒掉
+    const kick = () => {
+      if (!wantPlayOnAttach) return
+      el.play()
+        .then(() => {
+          wantPlayOnAttach = false
+        })
+        .catch(() => {
+          /* 还没数据就等下一个事件再试 */
+        })
+    }
+    el.addEventListener('loadedmetadata', kick)
+    el.addEventListener('canplay', kick)
+    el.addEventListener('canplaythrough', kick)
+  }
+  // 跳到「相对这一路起点」的位置（绝对进度 - start）
+  const want = hlsPendingSeek ?? seekTarget ?? current.value?.position ?? 0
+  hlsPendingSeek = null
+  seekTarget = null
+  if (want > start) seekToResume(el, want - start, 0)
+}
+
+/** 拖到还没转好的位置：从那一秒重新起一路转码（秒级就绪），而不是卡住等。 */
+async function restartHlsAt(abs: number) {
+  const v = current.value
+  if (!v || hlsRestarting) return
+  hlsRestarting = true
+  const wasPlaying = playing.value
+  const start = Math.max(0, Math.floor(abs) - 2)
+  try {
+    teardown()
+    current.value = v
+    hlsStart.value = start
+    hlsAvail.value = start
+    hlsPendingSeek = abs
+    wantPlayOnAttach = wasPlaying
+    playMode.value = 'loading'
+    hlsMsg.value = `正在从 ${fmtDur(abs)} 处开始转码…`
+    hlsPercent.value = 0
+    await attachHls(v.id, start)
+  } finally {
+    hlsRestarting = false
   }
 }
 
@@ -340,12 +423,26 @@ function onPause() {
 function onTime() {
   const el = videoEl.value
   if (!el) return
-  curTime.value = el.currentTime
+  if (hlsActive.value) {
+    // HLS 的时间轴是「相对这一路起点」的，对外显示绝对进度
+    if (!seeking.value) curTime.value = hlsStart.value + el.currentTime
+    if (el.duration && Number.isFinite(el.duration)) {
+      duration.value = Math.max(duration.value || 0, hlsStart.value + el.duration)
+    }
+    return
+  }
+  if (!seeking.value) curTime.value = el.currentTime
   if (el.duration && isFinite(el.duration)) duration.value = el.duration
 }
 function onLoaded() {
   const el = videoEl.value
-  if (el && el.duration && isFinite(el.duration)) duration.value = el.duration
+  if (!el || !el.duration || !isFinite(el.duration)) return
+  // HLS 的时间轴是「这一路转了多少」，不能拿它当全片时长（否则进度条比例全错）
+  if (hlsActive.value) {
+    duration.value = Math.max(duration.value || 0, hlsStart.value + el.duration)
+    return
+  }
+  duration.value = el.duration
 }
 function onEnded() {
   playing.value = false
@@ -661,31 +758,56 @@ function onWheel(e: WheelEvent) {
 
 // ---------- 拖动进度 ----------
 const seeking = ref(false)
-function seekTo(clientX: number) {
+// 拖动时记下「松手要跳到的绝对秒数」：拖动中只改预览，松手后才真正换路
+let pendingSeekAbs: number | null = null
+function seekTo(clientX: number, commit = true) {
   const el = videoEl.value
   const bar = document.getElementById('seek')
   if (!el || !bar) return
   const rect = bar.getBoundingClientRect()
   const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-  if (duration.value) {
-    el.currentTime = ratio * duration.value
-    curTime.value = el.currentTime
+  if (!duration.value) return
+  const abs = ratio * duration.value
+  if (!hlsActive.value) {
+    el.currentTime = abs
+    curTime.value = abs
+    return
+  }
+  const ready = Math.max(hlsAvail.value - 1, hlsStart.value)
+  if (abs >= hlsStart.value && abs <= ready) {
+    // 已转好的范围内：边拖边跳，跟手
+    pendingSeekAbs = null
+    el.currentTime = abs - hlsStart.value
+    curTime.value = abs
+    return
+  }
+  // 超出已转好的范围：只记下来，松手时再换一路（否则每移动一像素起一个 ffmpeg）
+  curTime.value = abs
+  pendingSeekAbs = abs
+  if (commit) {
+    const target = pendingSeekAbs
+    pendingSeekAbs = null
+    void restartHlsAt(target)
   }
 }
 function startSeek(e: PointerEvent) {
   seeking.value = true
   ;(e.currentTarget as HTMLElement).classList.add('drag')
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-  seekTo(e.clientX)
+  seekTo(e.clientX, false)
 }
 function moveSeek(e: PointerEvent) {
-  if (seeking.value) seekTo(e.clientX)
+  // 拖动过程中只改预览位置，松手时再决定要不要换一路（否则每移动一像素就起一个 ffmpeg）
+  if (seeking.value) seekTo(e.clientX, false)
 }
 function endSeek(e: PointerEvent) {
   if (!seeking.value) return
   seeking.value = false
   ;(e.currentTarget as HTMLElement).classList.remove('drag')
-  toast(`跳到 ${fmtDur(videoEl.value?.currentTime || 0)}`)
+  const target = pendingSeekAbs
+  pendingSeekAbs = null
+  if (target !== null) void restartHlsAt(target)
+  toast(`跳到 ${fmtDur(curTime.value || 0)}`)
 }
 
 // ---------- 控件显隐 ----------
@@ -859,6 +981,13 @@ defineExpose({ selectVideo })
           <div class="hintpill">
             <kbd>滚轮</kbd>切换 <kbd>单击</kbd>暂停 <kbd>长按</kbd>2× <kbd>长按拖动</kbd>调速
           </div>
+          <span
+            v-if="current?.transcode"
+            class="tc-badge"
+            :title="current.transcode_reason || '这个视频需要转码才能播放'"
+          >
+            <Icon name="speed" :size="12" /><span>转码</span>
+          </span>
           <button
             v-if="current"
             class="dl-btn"
@@ -983,6 +1112,22 @@ defineExpose({ selectVideo })
             <Icon name="chevron-down" :size="12" class="chev" />
           </button>
           <span class="fcount">{{ listCountText }}</span>
+          <div class="pl-search" :class="{ open: plSearchOpen }">
+            <button class="ps-btn" :class="{ on: plSearchOpen }" title="搜索播放列表" @click.stop="togglePlSearch">
+              <Icon name="search" :size="13" />
+            </button>
+            <input
+              v-if="plSearchOpen"
+              ref="plSearchEl"
+              v-model="plQuery"
+              class="ps-input"
+              placeholder="搜索播放列表…"
+              @keydown.esc="togglePlSearch"
+            />
+            <button v-if="plSearchOpen && plQuery" class="ps-clear" title="清空" @click.stop="plQuery = ''">
+              <Icon name="close" :size="11" />
+            </button>
+          </div>
           <div v-if="filterOpen" class="fmenu">
             <button :class="{ on: status === 'all' && !pickedTags.size }" @click="pickStatus('all')">
               全部视频<span class="cnt">{{ counts.all ?? 0 }}</span>
@@ -1033,6 +1178,11 @@ defineExpose({ selectVideo })
                   <span class="dot" />{{ v.tag_name }}
                 </span>
                 <span v-else class="pl-tag none">未打标签</span>
+                <span
+                  v-if="v.transcode"
+                  class="pl-tc"
+                  :title="v.transcode_reason || '这个视频需要转码才能播放'"
+                >转码</span>
                 <span class="pl-dur2">{{ fmtSize(v.size) }}</span>
               </div>
             </div>

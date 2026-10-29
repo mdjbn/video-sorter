@@ -170,10 +170,10 @@ def test_play_direct_and_hls(env):
     # mkv → HLS（copy 模式，秒级）
     p = c.get(f"/api/videos/{mkv['id']}/play").json()
     assert p["mode"] == "hls", p
-    playlist = c.get(f"/api/videos/{mkv['id']}/hls/index.m3u8")
+    playlist = c.get(f"/api/videos/{mkv['id']}/hls/s0/index.m3u8")
     assert playlist.status_code == 200, playlist.text
     assert b"#EXTM3U" in playlist.content
-    seg = c.get(f"/api/videos/{mkv['id']}/hls/seg00000.ts")
+    seg = c.get(f"/api/videos/{mkv['id']}/hls/s0/seg00000.ts")
     assert seg.status_code == 200 and len(seg.content) > 1000
 
 

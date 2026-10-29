@@ -404,3 +404,11 @@
   .set-backup .card-head .card-hint { display: none; }
   .dir-btn { padding: 0 10px; }
 }
+
+/* ---- 转码标记（视频库 / 播放历史） ---- */
+.tc-chip {
+  display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 5px;
+  font-size: 9.5px; letter-spacing: .02em; cursor: help; white-space: nowrap;
+  color: rgb(var(--accent)); background: rgba(var(--accent), .14);
+  border: 1px solid rgba(var(--accent), .28);
+}

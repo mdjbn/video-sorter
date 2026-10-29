@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
-from ..media import can_direct_play
+from ..media import can_direct_play, transcode_reason
 from ..state import get_state
 from .deps import require_user
 
@@ -19,6 +19,7 @@ status_router = APIRouter(prefix="/api", tags=["stream"])
 
 RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 HLS_NAME_RE = re.compile(r"^(index\.m3u8|seg\d{5}\.ts)$")
+HLS_PART_RE = re.compile(r"^s(\d+)$")
 CHUNK = 1 << 20
 
 
@@ -111,28 +112,33 @@ def play(video_id: int, user: dict[str, Any] = Depends(require_user)) -> dict[st
     job = st.hls.ensure(video_id, path, row["duration"] or 0, vcodec, acodec)
     return {
         "mode": "hls",
-        "url": f"/api/videos/{video_id}/hls/index.m3u8",
+        "url": f"/api/videos/{video_id}/hls/s0/index.m3u8",
         "status": job.status,
         "copy": job.copy_mode,
         "percent": getattr(job, "percent", 0),
         "duration": row["duration"] or 0,
-        "reason": f"{vcodec or '?'}/{acodec or '?'} 需要转 HLS",
+        "reason": transcode_reason(ext, vcodec, acodec),
+        "seek": True,
     }
 
 
-@router.get("/hls/{name}")
-async def hls_file(video_id: int, name: str,
+@router.get("/hls/{part}/{name}")
+async def hls_file(video_id: int, part: str, name: str,
                    user: dict[str, Any] = Depends(require_user)):
+    """HLS 分片。part 形如 `s120` —— 表示「从第 120 秒开始切的那一路」，
+    播放器拖动进度条超出已转码范围时会换到新的 part，从而秒级从目标位置继续。"""
     st = get_state()
-    if not HLS_NAME_RE.match(name):
+    m = HLS_PART_RE.match(part)
+    if not m or not HLS_NAME_RE.match(name):
         raise HTTPException(404, "分片不存在")
+    start = float(m.group(1))
     row = _video_row(st, video_id)
     path = Path(row["path"])
     if not path.exists():
         raise HTTPException(404, "文件不存在或已被移动")
     job = st.hls.ensure(video_id, path, row["duration"] or 0,
-                        row["vcodec"] or "", row["acodec"] or "")
-    target = st.cfg.hls_dir / str(video_id) / name
+                        row["vcodec"] or "", row["acodec"] or "", start=start)
+    target = job.dir / name
     if not target.exists():
         for _ in range(150):  # 最多等 30 秒
             if target.exists():
@@ -149,10 +155,12 @@ async def hls_file(video_id: int, name: str,
 
 
 @status_router.get("/videos/{video_id}/hlsstatus")
-def hls_status(video_id: int, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+def hls_status(video_id: int, start: int = 0,
+               user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
     row = _video_row(st, video_id)
-    job = st.hls.jobs.get(video_id)
+    # start > 0：查「从第 start 秒开始切的那一路」的进度
+    job = st.hls.jobs.get((video_id, max(0, int(start)))) or st.hls.job_for_video(video_id)
     return {
         "video_id": video_id,
         "status": job.status if job else "idle",

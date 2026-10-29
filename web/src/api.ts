@@ -19,6 +19,10 @@ export type Video = {
   status: 'idle' | 'tagged' | 'organized' | 'missing'
   organized: boolean
   has_tag: boolean
+  /** 必须转码才能播（播放页 / 播放历史显示「转码」小标） */
+  transcode?: boolean
+  /** 为什么要转码，例如「HEVC 视频编码、AC3 音频编码…」 */
+  transcode_reason?: string
   position?: number
   watched_at?: string
   added_at?: string
@@ -240,7 +244,10 @@ export const api = {
   renameVideo: (id: number, name: string) => post<Video>(`/videos/${id}/rename`, { name }),
   deleteVideo: (id: number, file = false) => del<{ ok: boolean; file_removed: boolean }>(`/videos/${id}?file=${file ? 1 : 0}`),
   play: (id: number) => get<{ mode: 'direct' | 'hls' | 'missing' | 'error'; url?: string; status?: string; percent?: number; duration?: number; message?: string; warning?: string; reason?: string }>(`/videos/${id}/play`),
-  hlsStatus: (id: number) => get<{ status: string; percent: number; ready: boolean; finished: boolean; error: string }>(`/videos/${id}/hlsstatus`),
+  hlsStatus: (id: number, start = 0) =>
+    get<{ status: string; percent: number; ready: boolean; finished: boolean; error: string }>(
+      `/videos/${id}/hlsstatus${start > 0 ? `?start=${Math.floor(start)}` : ''}`,
+    ),
 
   // 播放历史
   history: (limit = 60) => get<{ items: HistoryItem[] }>(`/history?limit=${limit}`),

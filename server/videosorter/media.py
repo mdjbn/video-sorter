@@ -155,6 +155,36 @@ def can_direct_play(ext: str, vcodec: str, acodec: str) -> bool:
     )
 
 
+def needs_transcode(ext: str, vcodec: str, acodec: str) -> bool:
+    """这个文件是不是必须转码才能在浏览器里播。"""
+    return not can_direct_play(ext, vcodec, acodec)
+
+
+CODEC_LABEL = {
+    "h264": "H.264", "hevc": "HEVC", "h265": "HEVC", "vp8": "VP8", "vp9": "VP9", "av1": "AV1",
+    "mpeg4": "MPEG-4", "msmpeg4v3": "MS MPEG-4", "wmv3": "WMV3", "vc1": "VC-1", "theora": "Theora",
+    "aac": "AAC", "mp3": "MP3", "ac3": "AC3", "eac3": "E-AC3", "dts": "DTS", "opus": "Opus",
+    "vorbis": "Vorbis", "flac": "FLAC", "truehd": "TrueHD", "pcm_s16le": "PCM", "wmav2": "WMA",
+}
+
+
+def transcode_reason(ext: str, vcodec: str, acodec: str) -> str:
+    """给「转码标记」用的中文原因，例如「HEVC 视频编码 浏览器不能直放…」。"""
+    ext = (ext or "").lower()
+    vcodec = (vcodec or "").lower()
+    acodec = (acodec or "").lower()
+    parts: list[str] = []
+    if ext not in DIRECT_EXTS:
+        parts.append(f"{ext or '未知格式'} 容器")
+    if vcodec not in DIRECT_VCODECS:
+        parts.append(f"{CODEC_LABEL.get(vcodec, vcodec or '未知')} 视频编码")
+    if acodec not in DIRECT_ACODECS:
+        parts.append(f"{CODEC_LABEL.get(acodec, acodec or '未知')} 音频编码")
+    if not parts:
+        return "浏览器不能直放，边转码边播放（H.264/AAC）"
+    return "、".join(parts) + "，浏览器不能直放 → 边转码边播放（H.264/AAC）"
+
+
 def make_thumb(tools: MediaTools, src: Path, out: Path, duration: float, ratio: float = 0.0) -> bool:
     ffmpeg, _ = tools.require()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -181,17 +211,24 @@ class HlsJob:
 
     def __init__(self, tools: MediaTools, cfg: Config, video_id: int, src: Path,
                  duration: float, vcodec: str, acodec: str,
-                 on_progress: Callable[[float, str], None] | None = None):
+                 on_progress: Callable[[float, str], None] | None = None,
+                 start: float = 0.0):
         self.tools = tools
         self.cfg = cfg
         self.video_id = video_id
         self.src = src
         self.duration = duration
         self.on_progress = on_progress
+        # start > 0：从这一秒开始切（拖动进度条时用），产物放在 s<秒> 子目录，
+        # 时间轴从 0 开始，播放器那边把「媒体时间 + start」当作绝对位置。
+        self.start = max(0.0, float(start or 0.0))
         self.lock = threading.Lock()
+        # 拖动进度条会连续换起点：新起点起来时要把旧那一路掐掉，别在 NAS 上跑一堆 ffmpeg
+        self.cancel = threading.Event()
         self.status = "pending"     # pending | running | done | error
         self.error = ""
-        self.dir = cfg.hls_dir / str(video_id)
+        sub = "" if self.start <= 0 else f"/s{int(self.start)}"
+        self.dir = cfg.hls_dir / str(video_id) if not sub else cfg.hls_dir / str(video_id) / f"s{int(self.start)}"
         self.playlist = self.dir / "index.m3u8"
         # -c copy 只对「mp4/mkv 家族 + h264 + aac/无音轨」安全；.avi/.wmv 这类老容器
         # 直接 copy 到 MPEG-TS 常被 ffmpeg 拒掉（真机调试时 镜头语言笔记.avi 就挂了），宁可转码。
@@ -243,6 +280,12 @@ class HlsJob:
                     (self.dir / ".done").write_text(str(time.time()), encoding="utf-8")
                     self._progress(1.0, "转码完成")
                     return
+            if self.cancel.is_set():
+                # 被更新的起点取代：不算失败，也别喊「转码失败」
+                self.status = "error"
+                self.error = "已切换到更近的转码位置"
+                self._progress(1.0, self.error)
+                return
             # 全部尝试失败：清掉半截产物，别让播放器拿到坏 playlist
             for f in self.dir.glob("seg*.ts"):
                 f.unlink(missing_ok=True)
@@ -266,7 +309,11 @@ class HlsJob:
         return rc, err
 
     def _run_ffmpeg_once(self, ffmpeg: str, copy: bool) -> tuple[int, str]:
-        cmd = [ffmpeg, "-y", "-v", "error", "-i", str(self.src)]
+        cmd = [ffmpeg, "-y", "-v", "error"]
+        if self.start > 0:
+            # 输入端 seek（在 -i 之前）走关键帧，秒级就绪；输出时间轴仍然从 0 起
+            cmd += ["-ss", f"{self.start:.3f}"]
+        cmd += ["-i", str(self.src)]
         if copy:
             cmd += ["-c", "copy"]
         else:
@@ -299,10 +346,13 @@ class HlsJob:
         th.start()
         assert proc.stdout is not None
         for line in proc.stdout:
+            if self.cancel.is_set():
+                proc.terminate()
+                break
             line = line.strip()
             if line.startswith("out_time_ms=") and self.duration > 0:
                 try:
-                    sec = int(line.split("=", 1)[1]) / 1_000_000
+                    sec = self.start + int(line.split("=", 1)[1]) / 1_000_000
                 except ValueError:
                     continue
                 self._progress(sec / self.duration, "转码中")
@@ -321,25 +371,40 @@ class HlsManager:
         self.lock = threading.Lock()
 
     def job_for(self, video_id: int, src: Path, duration: float,
-                vcodec: str, acodec: str) -> HlsJob:
+                vcodec: str, acodec: str, start: float = 0.0) -> HlsJob:
+        key = (video_id, int(max(0.0, float(start or 0.0))))
         with self.lock:
-            job = self.jobs.get(video_id)
+            job = self.jobs.get(key)
             if job is None or job.src != src:
-                job = HlsJob(self.tools, self.cfg, video_id, src, duration, vcodec, acodec)
-                self.jobs[video_id] = job
+                job = HlsJob(self.tools, self.cfg, video_id, src, duration, vcodec, acodec,
+                             start=key[1])
+                self.jobs[key] = job
+                # 同一个视频换了起点：把其它「拖动出来」的转码任务停掉（一次拖动只留最新那一路）。
+                # 注意不能停 s0 那一路：正片可能还在播它，掐了会直接黑屏。
+                if key[1] > 0:
+                    for (vid, other_start), other in self.jobs.items():
+                        if (vid == video_id and other_start > 0 and other_start != key[1]
+                                and other.status == "running"):
+                            other.cancel.set()
             return job
 
     def ensure(self, video_id: int, src: Path, duration: float,
-               vcodec: str, acodec: str) -> HlsJob:
-        job = self.job_for(video_id, src, duration, vcodec, acodec)
+               vcodec: str, acodec: str, start: float = 0.0) -> HlsJob:
+        job = self.job_for(video_id, src, duration, vcodec, acodec, start)
         if job.status in {"done", "error"} and job.finished:
             return job
         if job.status == "running":
             return job
-        t = threading.Thread(target=job.run, name=f"hls-{video_id}", daemon=True)
+        t = threading.Thread(target=job.run, name=f"hls-{video_id}-{int(job.start)}", daemon=True)
         job.status = "running"
         t.start()
         return job
+
+    def job_for_video(self, video_id: int) -> HlsJob | None:
+        """给状态接口用：优先全片任务（start=0），没有就返回任意一个。"""
+        with self.lock:
+            return self.jobs.get((video_id, 0)) or next(
+                (j for (vid, _), j in self.jobs.items() if vid == video_id), None)
 
     def clear_all(self) -> None:
         """清空所有转码产物与任务状态（「清除缓存」用）。"""
@@ -354,4 +419,5 @@ class HlsManager:
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
         with self.lock:
-            self.jobs.pop(video_id, None)
+            for key in [k for k in self.jobs if k[0] == video_id]:
+                self.jobs.pop(key, None)

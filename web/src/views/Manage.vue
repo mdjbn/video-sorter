@@ -232,8 +232,9 @@ async function runScan(payload: ScanPayload = {}) {
     if (added) bits.push(`新增 ${added} 个`)
     if (removed) bits.push(`移除 ${removed} 个`)
     toast(bits.length ? `扫描完成，${bits.join('、')}视频` : '扫描完成，没有变化')
+    markLibStale()
     await Promise.all([loadStats(), loadSources(), loadTags()])
-    if (view.value === 'library') await loadLibrary()
+    if (view.value === 'library') await loadLibrary(true)
     if (view.value === 'organize') await loadPlan()
   } catch (e: any) {
     toast(e?.message || '扫描失败', true)
@@ -268,6 +269,7 @@ async function addSource() {
 async function removeSource(id: number) {
   try {
     await api.removeSource(id)
+    markLibStale()
     await Promise.all([loadSources(), loadStats()])
     toast('已移除')
   } catch (e: any) { toast(e?.message || '移除失败', true) }
@@ -450,9 +452,23 @@ function chipClick(c: any) {
     lib.status = c.k
     lib.tags.clear()
   }
+  resetLibScroll()
   loadLibrary()
 }
-async function loadLibrary() {
+// 视频库缓存：几千个视频时每次切页签都重新拉全量（几 MB JSON）会很卡，
+// 所以只在「第一次打开 / 数据变了 / 换个筛选」时才请求；切回来直接用内存里的。
+const libCache = reactive({ key: '', loaded: false, at: 0 })
+function libQueryKey() {
+  return [lib.status, [...lib.tags].sort().join(','), lib.q.trim()].join('|')
+}
+function markLibStale() {
+  libCache.loaded = false
+}
+async function loadLibrary(force = false) {
+  const key = libQueryKey()
+  if (!force && libCache.loaded && libCache.key === key && videos.value.length) {
+    return
+  }
   libLoading.value = true
   try {
     const r = await api.videos({
@@ -463,6 +479,9 @@ async function loadLibrary() {
     })
     videos.value = r.items
     counts.lib = ((r.counts as any)?.total) || r.items.length
+    libCache.key = key
+    libCache.loaded = true
+    libCache.at = Date.now()
   } catch (e: any) { toast(e?.message || '加载失败', true) }
   finally { libLoading.value = false }
 }
@@ -476,7 +495,7 @@ async function bulkTag(tagId: number) {
     await Promise.all([...sel].map((id) => api.setTag(id, tagId)))
     toast(`已为 ${sel.size} 个视频打标签`)
     sel.clear()
-    await Promise.all([loadLibrary(), loadStats(), loadTags()])
+    await Promise.all([loadLibrary(true), loadStats(), loadTags()])
   } catch (e: any) { toast(e?.message || '操作失败', true) }
   finally { busy.value = false }
 }
@@ -519,7 +538,7 @@ async function onFiles(ev: Event) {
     for (const f of files) await uploadOne(f)
     const ok = uploads.value.filter((u) => u.state === 'ok').length
     toast(`上传完成 ${ok} 个，正在刷新视频库`)
-    await Promise.all([loadLibrary(), loadStats()])
+    await Promise.all([loadLibrary(true), loadStats()])
   } catch (e: any) { toast(e?.message || '上传失败', true) }
 }
 
@@ -542,7 +561,7 @@ async function doDelVideo() {
     for (const id of ids) await api.deleteVideo(id, withFile)
     sel.clear()
     toast(withFile ? `已删除 ${ids.length} 个视频（含文件）` : `已删除 ${ids.length} 条记录`)
-    await Promise.all([loadLibrary(), loadStats(), loadTags()])
+    await Promise.all([loadLibrary(true), loadStats(), loadTags()])
   } catch (e: any) { toast(e?.message || '删除失败', true) }
   finally { busy.value = false }
 }
@@ -856,8 +875,9 @@ async function runOrganize() {
     orgRun.text = `完成：移动 ${res.moved ?? 0} 个，失败 ${res.failed?.length ?? 0} 个`
     toast(`整理完成，移动 ${res.moved ?? 0} 个视频`)
     orgInit.value = false
+    markLibStale()
     await Promise.all([loadPlan(), loadStats(), loadRecords(), loadTags()])
-    if (view.value === 'library') await loadLibrary()
+    if (view.value === 'library') await loadLibrary(true)
   } catch (e: any) { toast(e?.message || '整理失败', true) }
   finally {
     orgRun.running = false
@@ -1242,6 +1262,11 @@ function onResize() {
                   <span>{{ fmtSize(v.size) }}</span>
                   <span v-if="v.tag_name" class="tag" :style="{ '--c': v.tag_color || '#8d98a8' }">{{ v.tag_name }}</span>
                   <span v-else class="badge gray">未打标签</span>
+                  <span
+                    v-if="v.transcode"
+                    class="tc-chip"
+                    :title="v.transcode_reason || '这个视频需要转码才能播放'"
+                  >转码</span>
                   <span v-if="v.organized" class="badge green" style="margin-left:auto">已整理</span>
                 </div>
               </div>
@@ -1407,6 +1432,11 @@ function onResize() {
                 <div class="vmeta">
                   <span>{{ fmtDur(h.duration) }}</span>
                   <span v-if="h.tag_name" class="tag" :style="{ '--c': h.tag_color || '#8d98a8' }">{{ h.tag_name }}</span>
+                  <span
+                    v-if="h.transcode"
+                    class="tc-chip"
+                    :title="h.transcode_reason || '这个视频需要转码才能播放'"
+                  >转码</span>
                   <span style="margin-left:auto">{{ histPct(h) }}%</span>
                 </div>
               </div>

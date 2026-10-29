@@ -3,7 +3,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..media import needs_transcode, transcode_reason
 from ..state import get_state
+
+
+def transcode_enabled() -> bool:
+    try:
+        return bool(get_state().cfg.get("transcode"))
+    except Exception:
+        return True
 
 
 def _thumb_version(name: str) -> int:
@@ -37,6 +45,14 @@ def video_dict(row: Any) -> dict[str, Any]:
     d["size"] = int(d.get("size") or 0)
     d["organized"] = d.get("status") == "organized"
     d["has_tag"] = bool(d.get("tag_id"))
+    # 这一步转码才能播的标记：播放页与播放历史都拿这个字段显示「转码」小标 + 悬浮原因
+    need = needs_transcode(d["ext"], d.get("vcodec") or "", d.get("acodec") or "")
+    enabled = transcode_enabled()
+    d["transcode"] = bool(need and enabled)
+    reason = transcode_reason(d["ext"], d.get("vcodec") or "", d.get("acodec") or "") if need else ""
+    if need and not enabled:
+        reason = "需要转码，但设置里关掉了转码（浏览器可能无法播放）"
+    d["transcode_reason"] = reason
     return d
 
 
