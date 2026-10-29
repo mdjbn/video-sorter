@@ -949,8 +949,11 @@ fun PlayerScreen(
                 var dragging by remember { mutableStateOf(false) }
                 var widthPx by remember { mutableFloatStateOf(1f) }
                 var scrub by remember { mutableFloatStateOf(0f) }
-                val frac = if (duration > 0) {
-                    ((if (dragging) scrub else position.toFloat()) / duration.toFloat()).coerceIn(0f, 1f)
+                // scrub 本身已经是 0..1 的比例，不能再除以 duration（否则滑块会跑到最左边）
+                val frac = if (dragging) {
+                    scrub.coerceIn(0f, 1f)
+                } else if (duration > 0) {
+                    (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
                 } else {
                     0f
                 }
