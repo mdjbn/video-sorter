@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +66,8 @@ fun MainScreen(
     // 视频库筛选（服务端筛选）：状态 + 多个标签，播放器与视频库共用同一份结果
     var statusFilter by remember { mutableStateOf("all") }
     var tagFilter by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    // 视频库搜索词放在这一层：切到别的 tab 再回来（ListScreen 被销毁重建）也不会丢
+    var libQuery by rememberSaveable { mutableStateOf("") }
 
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -214,6 +217,8 @@ fun MainScreen(
                     error = error,
                     status = statusFilter,
                     selectedTags = tagFilter,
+                    query = libQuery,
+                    onQuery = { libQuery = it },
                     onStatus = { next ->
                         applyFilter(next, if (next == "all") emptySet() else tagFilter)
                     },

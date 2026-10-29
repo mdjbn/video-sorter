@@ -661,11 +661,38 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
     val t = tokens()
     val scope = rememberCoroutineScope()
     var scanning by remember { mutableStateOf(false) }
+    var scanTagId by remember { mutableStateOf<Int?>(null) }
     var editing by remember { mutableStateOf<Tag?>(null) }
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var color by remember { mutableStateOf(TAG_COLORS[0]) }
     var dir by remember { mutableStateOf("") }
+
+    /** 只扫这个标签的文件夹（服务端 tag_ids），整理过的视频就在那里 */
+    fun scanOne(tag: Tag) {
+        if (scanning) return
+        scanning = true
+        scanTagId = tag.id
+        scope.launch {
+            try {
+                val taskId = api.scan(tagIds = listOf(tag.id))
+                while (true) {
+                    val task = api.task(taskId)
+                    if (task.status != "running") {
+                        onToast("「${tag.name}」扫描完成：${task.message.ifEmpty { "ok" }}")
+                        break
+                    }
+                    kotlinx.coroutines.delay(400)
+                }
+                onRefresh()
+            } catch (e: Throwable) {
+                onToast("扫描失败：${e.message ?: ""}")
+            } finally {
+                scanning = false
+                scanTagId = null
+            }
+        }
+    }
 
     fun openEdit(tag: Tag) {
         editing = tag
@@ -736,6 +763,33 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                             )
                         }
                         Text("${tag.count} 个", color = t.muted2, fontSize = 10.5.sp)
+                        Spacer(Modifier.width(6.dp))
+                        // 每个标签自己的扫描按钮：只扫这个标签对应的文件夹
+                        Box(
+                            Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(t.ink(0.05f))
+                                .clickable {
+                                    if (scanning) onToast("正在扫描，稍等一下") else scanOne(tag)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (scanTagId == tag.id) {
+                                CircularProgressIndicator(
+                                    Modifier.size(13.dp),
+                                    strokeWidth = 1.6.dp,
+                                    color = t.accent,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Rounded.Refresh,
+                                    contentDescription = "扫描「${tag.name}」的文件夹",
+                                    tint = t.ink(0.55f),
+                                    modifier = Modifier.size(15.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

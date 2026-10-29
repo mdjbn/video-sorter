@@ -2,9 +2,12 @@ package com.videosorter.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
@@ -41,6 +44,8 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Label
+import androidx.compose.material.icons.rounded.LabelOff
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Speed
@@ -56,6 +61,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -166,6 +172,10 @@ fun PlayerScreen(
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var loadingSrc by remember { mutableStateOf(true) }
     var lastLoadedId by remember { mutableIntStateOf(-1) }
+    // 标签栏显隐（底部那排标签胶囊）
+    var tagsOpen by rememberSaveable { mutableStateOf(true) }
+    // 新视频的第一帧是否已经出来：没有之前用封面盖住，避免看到上一个视频的残留画面
+    var videoReady by remember { mutableStateOf(false) }
     var transcodePct by remember { mutableIntStateOf(-1) }
 
     val current = videos.getOrNull(pagerState.currentPage)
@@ -202,6 +212,12 @@ fun PlayerScreen(
         errorMsg = null
         loadingSrc = true
         position = 0.0
+        // 换片：立刻盖住封面，并把上一路彻底停掉，否则新 surface 会先画出旧视频的最后一帧
+        videoReady = false
+        runCatching {
+            player.stop()
+            player.clearMediaItems()
+        }
         val info = runCatching { api.play(v.id) }.getOrNull()
         if (info == null || info.mode == "error") {
             errorMsg = info?.message ?: "无法获取播放地址"
@@ -251,6 +267,10 @@ fun PlayerScreen(
                 playing = isPlaying
             }
 
+            override fun onRenderedFirstFrame() {
+                videoReady = true
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) loadingSrc = false
                 if (state == Player.STATE_ENDED) {
@@ -262,6 +282,7 @@ fun PlayerScreen(
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 errorMsg = "播放失败：${error.errorCodeName}"
                 loadingSrc = false
+                videoReady = true
             }
         }
         player.addListener(listener)
@@ -509,6 +530,32 @@ fun PlayerScreen(
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
+                    // 第一帧出来之前用封面盖住：换片时 ExoPlayer 的 surface 会先画出上一个视频的残留帧
+                    val coverAlpha by animateFloatAsState(
+                        targetValue = if (videoReady) 0f else 1f,
+                        animationSpec = tween(220),
+                        label = "video-cover",
+                    )
+                    if (coverAlpha > 0.01f) {
+                        Box(Modifier.fillMaxSize().graphicsLayer { alpha = coverAlpha }) {
+                            if (v != null) {
+                                AsyncImage(
+                                    model = api.thumbUrl(v),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().blur(26.dp),
+                                    colorFilter = ColorFilter.colorMatrix(
+                                        ColorMatrix().apply { setToSaturation(0.5f) }
+                                    ),
+                                )
+                            }
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.42f))
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -784,6 +831,15 @@ fun PlayerScreen(
                         )
                     }
                     Spacer(Modifier.width(6.dp))
+                    // 标签栏开关：「···」左边，收起后整块标签区折起来，上方信息一起下移
+                    GlassIconButton(
+                        icon = if (tagsOpen) Icons.Rounded.LabelOff else Icons.Rounded.Label,
+                        onClick = { tagsOpen = !tagsOpen },
+                        size = 30,
+                        iconSize = 16,
+                        contentDescription = if (tagsOpen) "收起标签栏" else "展开标签栏",
+                    )
+                    Spacer(Modifier.width(6.dp))
                     // 「更多」放在信息区右侧（原在右上角，按设计反馈下移）
                     GlassIconButton(
                         icon = Icons.Rounded.MoreHoriz,
@@ -794,8 +850,15 @@ fun PlayerScreen(
                     )
                 }
 
+                // 标签胶囊 + 新建（可收起：收起后这一块高度归零，上面的标题/信息跟着下移）
+                AnimatedVisibility(
+                    visible = tagsOpen,
+                    enter = expandVertically(tween(240), expandFrom = Alignment.Bottom) + fadeIn(tween(200)),
+                    exit = shrinkVertically(tween(220), shrinkTowards = Alignment.Bottom) + fadeOut(tween(140)),
+                    label = "tag-bar",
+                ) {
+                Column {
                 Spacer(Modifier.height(12.dp))
-                // 标签胶囊 + 新建
                 Box(Modifier.fillMaxWidth()) {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -858,6 +921,8 @@ fun PlayerScreen(
                     ) {
                         Icon(Icons.Rounded.Add, contentDescription = "新建标签", tint = t.ink(0.88f), modifier = Modifier.size(15.dp))
                     }
+                }
+                }
                 }
 
                 Spacer(Modifier.height(13.dp))

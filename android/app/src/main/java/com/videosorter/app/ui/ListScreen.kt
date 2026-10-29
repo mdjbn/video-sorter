@@ -70,6 +70,8 @@ fun ListScreen(
     error: String?,
     status: String,
     selectedTags: Set<Int>,
+    query: String,
+    onQuery: (String) -> Unit,
     onStatus: (String) -> Unit,
     onToggleTag: (Int) -> Unit,
     onOpen: (Int) -> Unit,
@@ -82,9 +84,9 @@ fun ListScreen(
     sheets: SheetState,
 ) {
     val t = tokens()
-    var query by remember { mutableStateOf("") }
 
-    // 状态与标签筛选都在 MainScreen 里（服务端筛选），这里只做关键词过滤
+    // 状态、标签与搜索词都在 MainScreen 里：前两个走服务端筛选，搜索词由这一层传进来，
+    // 这样切到别的 tab 再回视频库，搜出来的结果还在。
     val shown = videos.filter { v -> query.isBlank() || v.name.contains(query, ignoreCase = true) }
 
     fun openTagSheet(v: Video) {
@@ -177,7 +179,7 @@ fun ListScreen(
                 }
                 BasicTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = onQuery,
                     singleLine = true,
                     textStyle = TextStyle(color = t.text, fontSize = 12.5.sp),
                     cursorBrush = SolidColor(t.accent),
@@ -192,7 +194,7 @@ fun ListScreen(
                     modifier = Modifier
                         .size(14.dp)
                         .clip(CircleShape)
-                        .clickable { query = "" },
+                        .clickable { onQuery("") },
                 )
             }
         }

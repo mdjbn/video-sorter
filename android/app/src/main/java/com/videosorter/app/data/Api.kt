@@ -169,8 +169,19 @@ class Api(baseUrl: String, var token: String? = null) {
         exec(build("/api/videos/$videoId?file=$withFile", "DELETE"))
     }
 
-    // 服务端是 POST /api/scan
-    suspend fun scan(): String = sendJson<ScanOut>("/api/scan", "POST", "{}").taskId
+    // 服务端是 POST /api/scan；tagIds 非空时只扫这些标签的文件夹（源目录不扫）
+    suspend fun scan(tagIds: List<Int>? = null, sourceIds: List<Int>? = null): String {
+        val body = buildString {
+            append("{")
+            if (!tagIds.isNullOrEmpty()) append("\"tag_ids\":[").append(tagIds.joinToString(",")).append("]")
+            if (!sourceIds.isNullOrEmpty()) {
+                if (length > 1) append(",")
+                append("\"source_ids\":[").append(sourceIds.joinToString(",")).append("]")
+            }
+            append("}")
+        }
+        return sendJson<ScanOut>("/api/scan", "POST", body).taskId
+    }
 
     // ---------- 源文件夹 / 上传目录 / 单条历史 ----------
 
