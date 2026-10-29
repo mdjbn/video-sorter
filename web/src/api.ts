@@ -118,6 +118,14 @@ export type ImportResult = {
 
 export type DirEntry = { name: string; path: string }
 
+export type EncoderInfo = {
+  configured: string
+  resolved: string
+  label: string
+  hardware: boolean
+  choices: { name: string; label: string; hw: boolean }[]
+}
+
 export type Info = {
   version: string
   data_dir: string
@@ -126,6 +134,7 @@ export type Info = {
   ffmpeg: string
   ffprobe: string
   media_ready: boolean
+  encoder?: EncoderInfo
   root_dir: string
   web_dir: string
 }

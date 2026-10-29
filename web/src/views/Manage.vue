@@ -72,6 +72,7 @@ const setForm = reactive({
   upload_dir: '',
   theme: 'auto',
   transcode: true,
+  transcode_encoder: 'auto',
   transcode_preset: 'veryfast',
   thumb_position: 0,
   scan_workers: 3,
@@ -85,6 +86,15 @@ const setSaving = ref(false)
 const setRestart = ref(false)
 const importing = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
+
+const encoderOptions = computed(() => {
+  const list = info.value?.encoder?.choices
+  if (list && list.length) return list
+  return [
+    { name: 'auto', label: '自动（优先用显卡）', hw: false },
+    { name: 'libx264', label: 'CPU（libx264）', hw: false },
+  ]
+})
 
 const TRANSCODE_PRESETS = [
   { v: 'ultrafast', label: '最快（体积大）' },
@@ -108,6 +118,7 @@ async function loadSettings() {
     setForm.upload_dir = s.upload_dir || ''
     setForm.theme = themeMode.value || s.theme || 'auto'
     setForm.transcode = s.transcode !== false
+    setForm.transcode_encoder = s.transcode_encoder || 'auto'
     setForm.transcode_preset = s.transcode_preset || 'veryfast'
     setForm.thumb_position = Number(s.thumb_position ?? 0)
     setForm.scan_workers = Number(s.scan_workers ?? 3)
@@ -129,6 +140,7 @@ async function saveSettingsAll() {
       upload_dir: setForm.upload_dir.trim(),
       theme: setForm.theme,
       transcode: setForm.transcode,
+      transcode_encoder: setForm.transcode_encoder,
       transcode_preset: setForm.transcode_preset,
       thumb_position: Number(setForm.thumb_position) || 0,
       scan_workers: Math.max(1, Math.min(16, Number(setForm.scan_workers) || 3)),
@@ -204,7 +216,7 @@ function go(v: View) {
   if (v === 'library') loadLibrary()
   if (v === 'organize') loadPlan()
   if (v === 'history') loadHistory()
-  if (v === 'settings') loadSettings()
+  if (v === 'settings') { loadSettings(); loadInfo() }
   if (v === 'account') loadSessions()
   if (v === 'about') loadInfo()
 }
@@ -975,7 +987,7 @@ const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeM
 
 /* ---------------- 更新日志（关于页只显示最近 5 条） ---------------- */
 const LOGS: { v: string; text: string }[] = [
-  { v: '1.3.5', text: '新增「设置」页：整理根目录、上传目录、缩略图位置、扫描线程数、转码、局域网发现都可以在网页里改；新增「备份设置 / 导入设置」，把配置、源文件夹、标签一起导出成一个 JSON 文件，换机器或重装后一键还原（导入只补不会删）；关于页的更新日志只显示最近 5 条，完整历史去 GitHub Releases 看；所有填目录的输入框后面多了「选择」按钮，可直接点选文件夹（fnOS 里调系统目录选择器，其它环境用内置目录浏览）。' },
+  { v: '1.3.5', text: '新增「设置」页：整理根目录、上传目录、缩略图位置、扫描线程数、转码、局域网发现都可以在网页里改；新增「备份设置 / 导入设置」，把配置、源文件夹、标签一起导出成一个 JSON 文件，换机器或重装后一键还原（导入只补不会删）；关于页的更新日志只显示最近 5 条，完整历史去 GitHub Releases 看；所有填目录的输入框后面多了「选择」按钮，可直接点选文件夹（fnOS 里调系统目录选择器，其它环境用内置目录浏览）。转码默认改用显卡：有 NVIDIA / Intel 核显 / AMD 显卡 / Apple 芯片时优先硬件编码，CPU 时间大幅下降（实测 1080p 快 4～5 倍）、可同时转更多路；没驱动或没权限时自动回落 CPU，不会转码失败；设置页新增「转码编码器」选项（自动 / 指定硬件 / 只用 CPU）并显示当前实际使用的编码器；即使只用 CPU 编码，解码也尽量交给显卡。' },
   { v: '1.3.4', text: 'Windows 桌面端修复「英文等非中文系统启动即崩」（控制台编码打印中文报错导致服务端起不来）；发版自动产出 Windows 安装包（.exe / .msi）；新增 Docker 镜像，同时发布到 Docker Hub 与 GHCR（amd64 / arm64）；安卓安装包改用固定证书签名，以后升级可直接覆盖安装、不用卸载重装（这一版仍需卸载旧包一次）。' },
   { v: '1.3.3', text: '网页端 HLS 播放也会续播了（需要转码的视频不再每次从头播）；整理时文件被占用（如正在播放）会先自动重试两次，仍不行就提示「文件正被占用，请关闭播放器后重试」；全新安装后新增第一个源目录，上传目录会自动跟到「<源目录>/手机上传」；会话列表会标出「当前设备」。' },
   { v: '1.3.2', text: '修复上传目录会自我嵌套（每次重启/新增源目录都多套一层「手机上传」，导致上传的视频散落在多层目录）；升级后启动会自动收敛回一层。' },
@@ -1561,12 +1573,20 @@ function onResize() {
               <div class="card-head"><h2>转码</h2></div>
               <div class="card-body">
                 <label class="chk-row"><input v-model="setForm.transcode" type="checkbox" /><span>浏览器不能直放的格式自动转码（HLS）</span></label>
-                <div class="form-row"><label>转码预设</label>
+                <div class="form-row"><label>转码编码器</label>
+                  <select v-model="setForm.transcode_encoder" class="field">
+                    <option v-for="e in encoderOptions" :key="e.name" :value="e.name">{{ e.label }}</option>
+                  </select>
+                </div>
+                <div class="kv"><span class="k">当前使用</span>
+                  <span class="v">{{ info?.encoder?.label || '—' }}</span>
+                </div>
+                <div class="form-row"><label>转码预设（仅 CPU 编码时生效）</label>
                   <select v-model="setForm.transcode_preset" class="field">
                     <option v-for="p in TRANSCODE_PRESETS" :key="p.v" :value="p.v">{{ p.label }}</option>
                   </select>
                 </div>
-                <div class="m-desc set-hint" style="font-size:11.5px">浏览器不能直放的格式（如 HEVC、部分 MKV）会边转边放，切换视频会稍慢一点。</div>
+                <div class="m-desc set-hint" style="font-size:11.5px">显卡能编码时自动用显卡（CPU 占用低、可同时转多路）；没驱动或没权限时自动回落 CPU，不会转码失败。浏览器不能直放的格式（如 HEVC、部分 MKV）会边转边放，切换视频会稍慢一点。</div>
               </div>
             </div>
             <div class="card">

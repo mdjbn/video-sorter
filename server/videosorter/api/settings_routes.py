@@ -24,6 +24,7 @@ class SettingsIn(BaseModel):
     allow_lan: bool | None = None
     theme: str | None = None
     transcode: bool | None = None
+    transcode_encoder: str | None = None
     transcode_preset: str | None = None
     thumb_position: float | None = None
     scan_workers: int | None = None
@@ -45,6 +46,13 @@ def put_settings(body: SettingsIn, user: dict[str, Any] = Depends(require_user))
     if "host" in patch and patch["host"] not in {"0.0.0.0", "127.0.0.1", "localhost"}:
         patch.pop("host")
     values = st.cfg.update(patch)
+    if "transcode_encoder" in patch:
+        # 换了编码器要把探测缓存清掉，否则新选择不会生效
+        from ..media import ENCODER_SPECS, reset_encoder_cache
+        if patch["transcode_encoder"] not in ENCODER_SPECS and patch["transcode_encoder"] != "auto":
+            patch["transcode_encoder"] = "auto"
+            st.cfg.update({"transcode_encoder": "auto"})
+        reset_encoder_cache()
     if "upload_dir" in patch:
         # 上传目录同时是一条内置源目录，路径变了要同步
         from .sources_routes import ensure_upload_source
@@ -58,6 +66,12 @@ def put_settings(body: SettingsIn, user: dict[str, Any] = Depends(require_user))
 @router.get("/info")
 def info(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
+    from ..media import encoder_info
+    try:
+        enc = encoder_info(st.cfg, st.tools)
+    except Exception:  # noqa: BLE001  探测失败不影响别的作用
+        enc = {"configured": "auto", "resolved": "libx264", "label": "CPU（libx264）",
+               "hardware": False, "choices": []}
     return {
         "version": st.cfg.version,
         "data_dir": str(st.cfg.data_dir),
@@ -66,6 +80,7 @@ def info(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
         "ffmpeg": st.tools.ffmpeg or "",
         "ffprobe": st.tools.ffprobe or "",
         "media_ready": st.tools.available,
+        "encoder": enc,
         "root_dir": st.cfg.get("root_dir") or "",
         "upload_dir": st.cfg.get("upload_dir") or "",
         "web_dir": str(st.web_dir or ""),
@@ -83,7 +98,7 @@ EXPORT_VERSION = 1
 
 # 导出哪些配置项；端口/监听地址属于「这台机器怎么跑」，只放进 server 段做参考，导入时不套用
 EXPORT_SETTINGS = (
-    "root_dir", "upload_dir", "theme", "transcode", "transcode_preset",
+    "root_dir", "upload_dir", "theme", "transcode", "transcode_encoder", "transcode_preset",
     "thumb_position", "scan_workers", "discovery", "discovery_port", "allow_lan",
 )
 

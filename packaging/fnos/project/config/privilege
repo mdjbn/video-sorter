@@ -1,4 +1,7 @@
 {
+    "username": "videosorter",
+    "groupname": "videosorter",
+    "join-groups": ["video", "render"],
     "defaults": {
         "run-as": "package"
     }

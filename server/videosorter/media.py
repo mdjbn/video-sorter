@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -100,6 +101,210 @@ def _run_tool(cmd: list[str], timeout: int, attempts: int = 2) -> subprocess.Com
         except OSError:
             return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# 转码编码器：能用显卡就用显卡，探测不到（没驱动 / 没权限 / 容器里没设备）自动回落 CPU。
+#
+# 为什么要探测而不是先验判断：硬件编码器「有没有被编译进 ffmpeg」和「这台机器能不能用」
+# 是两件事——Windows 包里 ffmpeg 同时带 nvenc/qsv/amf，但机器只有 NVIDIA 时 qsv 会报
+# `Error creating a MFX session: -9`、amf 会报 `DLL amfrt64.dll failed to open`；
+# fnOS 上 /dev/dri 存在但应用用户不在 render 组时 qsv 也是同样的错。所以统一用一次
+# 极小的 lavfi 编码试跑（256x144 一帧）来判定，结果按 (ffmpeg, 用户选择) 缓存。
+# ---------------------------------------------------------------------------
+
+QUALITY = 23  # 画质基准：x264 的 crf / qsv 的 global_quality / nvenc 的 cq 都用它
+
+
+@dataclass(frozen=True)
+class EncoderSpec:
+    name: str
+    label: str
+    hw: bool = True
+    hwaccel: tuple[str, ...] = ()   # 放在 -i 之前的硬件初始化参数
+    decoder_args: tuple[str, ...] = ()  # 放在 -i 之前的解码加速参数（-hwaccel …）
+    vargs: tuple[str, ...] = ()     # 跟在 -c:v 后面的画质参数
+    vf_extra: str = ""              # 追加到 -vf 末尾（vaapi 需要 format=nv12,hwupload）
+
+    @property
+    def key(self) -> str:
+        return self.name
+
+
+ENCODER_SPECS: dict[str, EncoderSpec] = {
+    "h264_nvenc": EncoderSpec(
+        "h264_nvenc", "NVIDIA 显卡（NVENC）",
+        decoder_args=("-hwaccel", "cuda"),
+        vargs=("-preset", "p4", "-rc", "vbr", "-cq", str(QUALITY), "-b:v", "0"),
+    ),
+    "h264_qsv": EncoderSpec(
+        "h264_qsv", "Intel 核显（Quick Sync）",
+        decoder_args=("-hwaccel", "qsv"),
+        vargs=("-global_quality", str(QUALITY)),
+    ),
+    "h264_amf": EncoderSpec(
+        "h264_amf", "AMD 显卡（AMF）",
+        decoder_args=("-hwaccel", "d3d11va"),
+        vargs=("-rc", "cqp", "-qp_i", str(QUALITY), "-qp_p", str(QUALITY)),
+    ),
+    "h264_videotoolbox": EncoderSpec(
+        "h264_videotoolbox", "Apple 芯片（VideoToolbox）",
+        decoder_args=("-hwaccel", "videotoolbox"),
+        vargs=("-q:v", "55"),
+    ),
+    "h264_vaapi": EncoderSpec(
+        "h264_vaapi", "Intel/AMD 核显（VAAPI）",
+        hwaccel=("-vaapi_device", "/dev/dri/renderD128"),
+        decoder_args=("-hwaccel", "vaapi"),
+        vargs=("-qp", str(QUALITY)),
+        vf_extra=",format=nv12,hwupload",
+    ),
+    "libx264": EncoderSpec(
+        "libx264", "CPU（libx264）", hw=False,
+        # 即使编码在 CPU 上，解码也可以交给显卡（实测 1080p HEVC 解码 CPU 时间减半）；
+        # 硬件解不了的编码 ffmpeg 会自动回落软解，不会因此失败。
+        decoder_args=("-hwaccel", "auto"),
+        vargs=("-preset", "veryfast", "-crf", str(QUALITY)),
+    ),
+}
+
+CPU_ENCODER = "libx264"
+
+# 每台机器的候选顺序：显卡厂商不同，先试最可能的那个，探测失败再下一个
+def _candidate_encoders() -> list[str]:
+    if IS_WIN:
+        return ["h264_nvenc", "h264_qsv", "h264_amf"]
+    if sys.platform == "darwin":
+        return ["h264_videotoolbox"]
+    return ["h264_qsv", "h264_vaapi"]
+
+
+_ENC_LOCK = threading.Lock()
+_ENC_CACHE: dict[tuple[str, str], str] = {}   # (ffmpeg 路径, 用户选择) -> 实际编码器名
+_ENC_BROKEN: set[str] = set()                 # 本进程里实测转码失败的硬件编码器
+# 少数老显卡不认新参数（Pascal 及更早的 NVENC 没有 p1..p7 预设名），探测时按「先新后旧」
+# 试一遍，把能用的那档记下来；真实转码用同一档，避免「探测通过、转码失败」。
+_VARIANTS: dict[str, dict[str, str]] = {}
+NVENC_PRESETS = ("p4", "medium", "slow")
+
+
+def _vargs_for(name: str) -> tuple[str, ...]:
+    if name == "h264_nvenc":
+        preset = _VARIANTS.get("h264_nvenc", {}).get("preset", "p4")
+        return ("-preset", preset, "-rc", "vbr", "-cq", str(QUALITY), "-b:v", "0")
+    return ENCODER_SPECS[name].vargs
+
+
+def _probe_attempts(spec: EncoderSpec) -> list[tuple[str, ...]]:
+    """探测要试的参数组合（一般只有一种，NVENC 会逐档降级）。"""
+    if spec.name == "h264_nvenc":
+        return [(("-preset", p, "-rc", "vbr", "-cq", str(QUALITY), "-b:v", "0"))
+                for p in NVENC_PRESETS]
+    return [spec.vargs]
+
+
+def reset_encoder_cache() -> None:
+    """设置改了编码器、或想重新探测时调用（测试也靠它清缓存）。"""
+    with _ENC_LOCK:
+        _ENC_CACHE.clear()
+        _ENC_BROKEN.clear()
+        _VARIANTS.clear()
+
+
+def encoder_choices() -> list[dict[str, Any]]:
+    """给设置页用的候选列表（顺序按当前平台的可能程度排）。"""
+    out = [{"name": "auto", "label": "自动（优先用显卡）", "hw": False}]
+    for name in _candidate_encoders():
+        spec = ENCODER_SPECS.get(name)
+        if spec is not None:
+            out.append({"name": name, "label": spec.label, "hw": True})
+    out.append({"name": CPU_ENCODER, "label": ENCODER_SPECS[CPU_ENCODER].label, "hw": False})
+    return out
+
+
+def _probe_encoder(ffmpeg: str, spec: EncoderSpec, timeout: int = 20) -> bool:
+    """用一帧 testsrc2 试编码，退出码 0 才算可用。"""
+    for vargs in _probe_attempts(spec):
+        vf = "format=nv12,hwupload" if spec.vf_extra else ""
+        args = [ffmpeg, "-hide_banner", "-v", "error", *spec.hwaccel,
+                "-f", "lavfi", "-i", "testsrc2=size=256x144:rate=5", "-t", "1"]
+        if vf:
+            args += ["-vf", vf]
+        args += ["-c:v", spec.name, *vargs]
+        if not spec.vf_extra:
+            args += ["-pix_fmt", "yuv420p"]
+        args += ["-f", "null", "-"]
+        r = _run_tool(args, timeout=timeout, attempts=1)
+        if r is not None and r.returncode == 0:
+            if spec.name == "h264_nvenc" and vargs and "-preset" in vargs:
+                _VARIANTS.setdefault("h264_nvenc", {})["preset"] = vargs[1]
+            return True
+    return False
+
+
+def _detect_encoder(choice: str, ffmpeg: str | None) -> str:
+    """在给定选择下判定实际编码器；任何异常都回落 libx264。"""
+    if not ffmpeg:
+        return CPU_ENCODER
+    wanted = str(choice or "auto").strip().lower()
+    if wanted not in {"", "auto"}:
+        spec = ENCODER_SPECS.get(wanted)
+        if spec is None:
+            return CPU_ENCODER
+        if not spec.hw:
+            return CPU_ENCODER
+        if wanted in _ENC_BROKEN:
+            return CPU_ENCODER
+        return wanted if _probe_encoder(ffmpeg, spec) else CPU_ENCODER
+    for name in _candidate_encoders():
+        spec = ENCODER_SPECS.get(name)
+        if spec is None or name in _ENC_BROKEN:
+            continue
+        try:
+            if _probe_encoder(ffmpeg, spec):
+                return name
+        except OSError:
+            continue
+    return CPU_ENCODER
+
+
+def pick_encoder(cfg: Config, ffmpeg: str | None = None) -> EncoderSpec:
+    """决定本次转码用哪个编码器（带进程级缓存，探测只跑一次）。"""
+    choice = str(cfg.get("transcode_encoder", "auto") or "auto").strip().lower()
+    if choice not in ENCODER_SPECS and choice != "auto":
+        choice = "auto"
+    key = (str(ffmpeg or ""), choice)
+    with _ENC_LOCK:
+        cached = _ENC_CACHE.get(key)
+    if cached is not None:
+        return ENCODER_SPECS[cached]
+    name = _detect_encoder(choice, ffmpeg)
+    with _ENC_LOCK:
+        _ENC_CACHE[key] = name
+    return ENCODER_SPECS[name]
+
+
+def mark_encoder_broken(name: str) -> None:
+    """真实转码时硬件编码失败：本进程内不再尝试它（下次直接 CPU，免得每次都白跑一遍）。"""
+    if not name or name == CPU_ENCODER:
+        return
+    with _ENC_LOCK:
+        _ENC_BROKEN.add(name)
+        for key in list(_ENC_CACHE):
+            if _ENC_CACHE[key] == name:
+                _ENC_CACHE[key] = CPU_ENCODER
+
+
+def encoder_info(cfg: Config, tools: MediaTools) -> dict[str, Any]:
+    """当前生效的编码器（给 /api/info 与设置页显示）。"""
+    spec = pick_encoder(cfg, tools.ffmpeg)
+    return {
+        "configured": str(cfg.get("transcode_encoder", "auto") or "auto"),
+        "resolved": spec.name,
+        "label": spec.label,
+        "hardware": spec.hw,
+        "choices": encoder_choices(),
+    }
 
 
 def probe(tools: MediaTools, path: Path) -> dict[str, Any]:
@@ -227,6 +432,7 @@ class HlsJob:
         self.cancel = threading.Event()
         self.status = "pending"     # pending | running | done | error
         self.error = ""
+        self.encoder = ""           # 实际用的编码器（转码结束后填，便于排查）
         sub = "" if self.start <= 0 else f"/s{int(self.start)}"
         self.dir = cfg.hls_dir / str(video_id) if not sub else cfg.hls_dir / str(video_id) / f"s{int(self.start)}"
         self.playlist = self.dir / "index.m3u8"
@@ -268,17 +474,35 @@ class HlsJob:
             self.status = "running"
             # copy 失败时自动回退到完整转码：容器/编码稍有不对劲，copy 就会整段失败，
             # 而用户只看到「转码失败」——多试一次能救回绝大多数文件。
-            attempts = [True, False] if self.copy_mode else [False]
-            last_rc, last_err = 0, ""
-            for copy in attempts:
+            attempts: list[tuple[bool, str]] = []
+            if self.copy_mode:
+                attempts.append((True, ""))
+            attempts.append((False, ""))   # 空 override = 自动（显卡优先）
+            last_rc, last_err, last_enc = 0, "", ""
+            for copy, override in attempts:
                 for f in self.dir.glob("seg*.ts"):
                     f.unlink(missing_ok=True)
                 self.playlist.unlink(missing_ok=True)
-                last_rc, last_err = self._run_ffmpeg(ffmpeg, copy)
+                last_rc, last_err, last_enc = self._run_ffmpeg(ffmpeg, copy, override)
                 if last_rc == 0 and self.ready and self.playlist.stat().st_size > 0:
                     self.status = "done"
+                    self.encoder = last_enc
                     (self.dir / ".done").write_text(str(time.time()), encoding="utf-8")
                     self._progress(1.0, "转码完成")
+                    return
+            # 硬件编码器在实际转码里挂了（驱动刚更新、显存不够、权限变了……探测那一下
+            # 试不出来），再用 CPU 补一次，不让用户看到「转码失败」。
+            if not self.copy_mode and last_enc and last_enc != CPU_ENCODER:
+                mark_encoder_broken(last_enc)
+                for f in self.dir.glob("seg*.ts"):
+                    f.unlink(missing_ok=True)
+                self.playlist.unlink(missing_ok=True)
+                last_rc, last_err, last_enc = self._run_ffmpeg(ffmpeg, False, CPU_ENCODER)
+                if last_rc == 0 and self.ready and self.playlist.stat().st_size > 0:
+                    self.status = "done"
+                    self.encoder = last_enc
+                    (self.dir / ".done").write_text(str(time.time()), encoding="utf-8")
+                    self._progress(1.0, "转码完成（已回落 CPU）")
                     return
             if self.cancel.is_set():
                 # 被更新的起点取代：不算失败，也别喊「转码失败」
@@ -301,15 +525,21 @@ class HlsJob:
     # 重试都一样，所以这里对「启动即失败」自动补一次。
     LAUNCH_FAILED = 3221225794
 
-    def _run_ffmpeg(self, ffmpeg: str, copy: bool) -> tuple[int, str]:
-        rc, err = self._run_ffmpeg_once(ffmpeg, copy)
+    def _run_ffmpeg(self, ffmpeg: str, copy: bool, override: str = "") -> tuple[int, str, str]:
+        rc, err, enc = self._run_ffmpeg_once(ffmpeg, copy, override)
         if rc == self.LAUNCH_FAILED and not err.strip():
             time.sleep(0.3)
-            rc, err = self._run_ffmpeg_once(ffmpeg, copy)
-        return rc, err
+            rc, err, enc = self._run_ffmpeg_once(ffmpeg, copy, override)
+        return rc, err, enc
 
-    def _run_ffmpeg_once(self, ffmpeg: str, copy: bool) -> tuple[int, str]:
-        cmd = [ffmpeg, "-y", "-v", "error"]
+    def _encoder(self, override: str = "") -> EncoderSpec:
+        if override:
+            return ENCODER_SPECS.get(override, ENCODER_SPECS[CPU_ENCODER])
+        return pick_encoder(self.cfg, self.tools.ffmpeg)
+
+    def _run_ffmpeg_once(self, ffmpeg: str, copy: bool, override: str = "") -> tuple[int, str, str]:
+        spec = self._encoder(override)
+        cmd = [ffmpeg, "-y", "-v", "error", *spec.hwaccel, *spec.decoder_args]
         if self.start > 0:
             # 输入端 seek（在 -i 之前）走关键帧，秒级就绪；输出时间轴仍然从 0 起
             cmd += ["-ss", f"{self.start:.3f}"]
@@ -317,10 +547,17 @@ class HlsJob:
         if copy:
             cmd += ["-c", "copy"]
         else:
+            vf = "scale='min(1920,iw)':-2" + spec.vf_extra
+            vargs = _vargs_for(spec.name)
+            if spec.name == CPU_ENCODER:
+                # CPU 编码沿用设置里的「转码预设」（ultrafast…slow）
+                vargs = ("-preset", str(self.cfg.get("transcode_preset", "veryfast")),
+                         "-crf", str(QUALITY))
+            cmd += ["-c:v", spec.name, *vargs]
+            if not spec.vf_extra:
+                cmd += ["-pix_fmt", "yuv420p"]
             cmd += [
-                "-c:v", "libx264", "-preset", str(self.cfg.get("transcode_preset", "veryfast")),
-                "-crf", "23", "-pix_fmt", "yuv420p",
-                "-vf", "scale='min(1920,iw)':-2",
+                "-vf", vf,
                 "-c:a", "aac", "-b:a", "128k", "-ac", "2",
             ]
         cmd += [
@@ -332,7 +569,7 @@ class HlsJob:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, bufsize=1)
         except (OSError, subprocess.SubprocessError) as e:
-            return 1, str(e)
+            return 1, str(e), spec.name
         err_lines: list[str] = []
 
         def _drain() -> None:
@@ -358,7 +595,7 @@ class HlsJob:
                 self._progress(sec / self.duration, "转码中")
         proc.wait()
         th.join(timeout=2)
-        return proc.returncode, "\n".join(err_lines[-6:])
+        return proc.returncode, "\n".join(err_lines[-6:]), spec.name
 
 
 class HlsManager:

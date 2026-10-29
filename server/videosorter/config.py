@@ -20,6 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "allow_lan": True,
     "theme": "auto",
     "transcode": True,          # 允许按需 HLS 转码
+    "transcode_encoder": "auto",  # auto=显卡优先（NVENC/QSV/AMF/VideoToolbox），也可指定 libx264
     "transcode_preset": "veryfast",
     "thumb_position": 0.0,      # 0 = 取视频第一帧作为封面
     "scan_workers": 3,
