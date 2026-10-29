@@ -862,8 +862,9 @@ fun PlayerScreen(
                 Box(Modifier.fillMaxWidth()) {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        contentPadding = PaddingValues(end = 44.dp),
-                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(end = 8.dp),
+                        // 右侧留出「+」按钮的位置，标签不会滑到按钮底下
+                        modifier = Modifier.fillMaxWidth().padding(end = 40.dp),
                     ) {
                         items(tags, key = { it.id }) { tag ->
                             val on = v.tagId == tag.id
