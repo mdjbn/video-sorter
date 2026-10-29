@@ -899,11 +899,16 @@ async function undo(batchId: string) {
 async function delHist(videoId: number) {
   try {
     await api.deleteHistory(videoId)
-    await loadHistory()
+    // 删掉播放记录 = 续播进度一起没了，视频库里的进度条也要跟着消失
+    await Promise.all([loadHistory(), loadLibrary(true)])
   } catch (e: any) { toast(e?.message || '删除失败', true) }
 }
 async function clearHist() {
-  try { await api.clearHistory(); await loadHistory(); toast('已清空播放历史') }
+  try {
+    await api.clearHistory()
+    await Promise.all([loadHistory(), loadLibrary(true)])
+    toast('已清空播放历史')
+  }
   catch (e: any) { toast(e?.message || '清空失败', true) }
 }
 function histPct(h: any) { return h.duration ? Math.min(100, Math.round((h.position / h.duration) * 100)) : 0 }

@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.videosorter.app.data.Api
 import com.videosorter.app.data.ApiException
 import com.videosorter.app.data.Counts
+import com.videosorter.app.data.LibraryHub
 import com.videosorter.app.data.Transfers
 import com.videosorter.app.data.Session
 import com.videosorter.app.data.Tag
@@ -108,6 +109,11 @@ fun MainScreen(
         } finally {
             loading = false
         }
+    }
+
+    // 别处改了播放记录（进度被清掉）时，把视频列表重新拉一趟，避免卡片上还挂着旧进度
+    LaunchedEffect(LibraryHub.version) {
+        if (LibraryHub.version > 0) reload(silent = true)
     }
 
     fun applyFilter(next: String, tags: Set<Int>) {

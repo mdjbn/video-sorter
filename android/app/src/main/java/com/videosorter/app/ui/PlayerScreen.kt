@@ -184,6 +184,18 @@ fun PlayerScreen(
 
     fun applySpeed() = player.setPlaybackSpeed(effSpeed())
 
+    /**
+     * 保存进度：播到结尾（含结尾 1.5 秒内）就记成 0，
+     * 否则会留下 00:15/00:15 这种记录，下次进来又卡在结尾。
+     */
+    fun savePos(videoId: Int) {
+        val dur = if (duration > 0) duration else (player.duration.coerceAtLeast(0L) / 1000.0)
+        var pos = player.currentPosition / 1000.0
+        if (dur > 0 && pos >= dur - 1.5) pos = 0.0
+        if (pos < 0) pos = 0.0
+        scope.launch { runCatching { api.saveProgress(videoId, pos, dur) } }
+    }
+
     fun speedText(v: Float): String {
         val text = if (v % 1f == 0f) "%.1f".format(v) else "%.2f".format(v).trimEnd('0').trimEnd('.')
         return "$text×"
@@ -257,8 +269,12 @@ fun PlayerScreen(
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare()
         applySpeed()
+        // 续播：只有「看到一半」才跳过去；已经看到结尾（进度接近总时长）的当作从头播，
+        // 否则 seek 到时长末尾会立刻 STATE_ENDED，看起来就是「打不开、直接跳下一个」
         val resume = v.position ?: 0.0
-        if (resume > 3) player.seekTo((resume * 1000).toLong())
+        val totalSec = if (v.duration > 0) v.duration else 0.0
+        val nearEnd = totalSec > 0 && resume >= totalSec - 2.0
+        if (resume > 3 && !nearEnd) player.seekTo((resume * 1000).toLong())
     }
 
     DisposableEffect(player) {
@@ -274,7 +290,8 @@ fun PlayerScreen(
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) loadingSrc = false
                 if (state == Player.STATE_ENDED) {
-                    // 播完自动下一个
+                    // 播完了：进度记 0（下次从头播），再自动下一个
+                    current?.let { savePos(it.id) }
                     if (pagerState.currentPage + 1 < count) onIndexChange(pagerState.currentPage + 1)
                 }
             }
@@ -302,7 +319,7 @@ fun PlayerScreen(
         val v = current ?: return@LaunchedEffect
         while (playing) {
             delay(5000)
-            runCatching { api.saveProgress(v.id, player.currentPosition / 1000.0, duration) }
+            savePos(v.id)
         }
     }
 
@@ -779,14 +796,7 @@ fun PlayerScreen(
         }
 
         // ---------- 底部信息 ----------
-        // 渐隐只在最底部一小段，否则竖屏视频下半屏会被白色渐变糊掉
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(200.dp)
-                .background(Brush.verticalGradient(t.scrimShort)),
-        )
+        // 试做版：完全去掉底部渐隐，画面一刀不糊
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -948,24 +958,36 @@ fun PlayerScreen(
                             .height(28.dp)
                             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
                             .pointerInput(duration) {
-                                // 按下即跟手：不做长按等待，按下就进入拖动（绝对位置），松手才真正 seek
+                                // 抖音式拖动：按下就跳到手指位置，拖动实时跟随（节流 seek），松手收尾
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = true)
-                                    // 立刻消费按下事件：告诉下层的「点按播放/长按倍速」手势层，这一下是进度条在拖
+                                    // 消费按下：告诉下层的「点按播放/长按倍速」手势层，这一下是进度条在拖
                                     down.consume()
+                                    val w = size.width.toFloat().coerceAtLeast(1f)
+                                    if (duration <= 0f) return@awaitEachGesture
+                                    fun seekToX(x: Float) {
+                                        val f = (x / w).coerceIn(0f, 1f)
+                                        scrub = f
+                                        position = f * duration
+                                        player.seekTo((f * duration * 1000).toLong())
+                                    }
                                     dragging = true
-                                    scrub = (down.position.x / widthPx).coerceIn(0f, 1f)
+                                    seekToX(down.position.x)
+                                    var lastSeekAt = System.currentTimeMillis()
                                     while (true) {
                                         val ev = awaitPointerEvent()
                                         val ch = ev.changes.firstOrNull() ?: break
-                                        scrub = (ch.position.x / widthPx).coerceIn(0f, 1f)
                                         ch.consume()
+                                        scrub = (ch.position.x / w).coerceIn(0f, 1f)
+                                        position = scrub * duration
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastSeekAt >= 45 || !ch.pressed) {
+                                            player.seekTo((scrub * duration * 1000).toLong())
+                                            lastSeekAt = now
+                                        }
                                         if (!ch.pressed) break
                                     }
-                                    if (duration > 0) player.seekTo((scrub * duration * 1000).toLong())
-                                    position = (scrub * duration)
                                     dragging = false
-                                    toast("跳到 ${fmtDuration(scrub * duration)}")
                                 }
                             },
                         contentAlignment = Alignment.CenterStart,

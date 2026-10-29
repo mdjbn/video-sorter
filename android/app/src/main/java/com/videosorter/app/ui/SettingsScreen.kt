@@ -916,6 +916,8 @@ private fun HistoryPage(api: Api, onToast: (String) -> Unit, onOpenVideo: (Int) 
             picked.clear()
             selecting = false
             load()
+            // 删了播放记录 = 续播进度也一起清了，让播放页/视频库重新拉一次列表
+            com.videosorter.app.data.LibraryHub.bump()
             onToast("已删除 ${ids.size} 条记录")
         }
     }
