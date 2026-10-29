@@ -572,6 +572,8 @@ fun PlayerScreen(
                     val speedRange = 320f
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        // 命中进度条等控件时，那一层已经消费了按下事件 —— 这里直接让开，避免抢走拖动
+                        if (down.isConsumed) return@awaitEachGesture
                         val startY = down.position.y
                         val startX = down.position.x
                         val longPressMs = viewConfiguration.longPressTimeoutMillis
@@ -859,54 +861,64 @@ fun PlayerScreen(
                 ) {
                 Column {
                 Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth()) {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        contentPadding = PaddingValues(end = 8.dp),
-                        // 右侧留出「+」按钮的位置，标签不会滑到按钮底下
-                        modifier = Modifier.fillMaxWidth().padding(end = 40.dp),
-                    ) {
-                        items(tags, key = { it.id }) { tag ->
-                            val on = v.tagId == tag.id
-                            val c = hexColor(tag.color)
-                            Row(
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(end = 8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    items(tags, key = { it.id }) { tag ->
+                        val on = v.tagId == tag.id
+                        val c = hexColor(tag.color)
+                        Row(
+                            Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (on) c else t.glass)
+                                .border(1.dp, if (on) Color.Transparent else t.glassBorder, RoundedCornerShape(14.dp))
+                                .clickable { onTag(v.id, if (on) null else tag.id) }
+                                .padding(horizontal = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Box(
                                 Modifier
-                                    .height(28.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(if (on) c else t.glass)
-                                    .border(1.dp, if (on) Color.Transparent else t.glassBorder, RoundedCornerShape(14.dp))
-                                    .clickable { onTag(v.id, if (on) null else tag.id) }
-                                    .padding(horizontal = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size(5.dp)
-                                        .clip(CircleShape)
-                                        .background(if (on) Color(0xFF062016) else t.ink(0.7f))
-                                )
-                                Text(
-                                    tag.name,
-                                    color = if (on) Color(0xFF062016) else t.ink(0.7f),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                            }
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(if (on) Color(0xFF062016) else t.ink(0.7f))
+                            )
+                            Text(
+                                tag.name,
+                                color = if (on) Color(0xFF062016) else t.ink(0.7f),
+                                fontSize = 11.sp,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                            )
                         }
                     }
-                    // 右端新建按钮（不再铺整块渐隐底色，否则会在画面上留一块白色矩形）
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterEnd)
-                            .size(29.dp)
-                            .clip(CircleShape)
-                            .background(t.glass)
-                            .border(1.dp, t.glassBorder, CircleShape)
-                            .clickable { openNewTag() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "新建标签", tint = t.ink(0.88f), modifier = Modifier.size(15.dp))
+                    // 新建标签：当作最后一个「标签胶囊」排在列表末尾，跟着一起滚动
+                    item(key = "new-tag") {
+                        Row(
+                            Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(t.glass)
+                                .border(1.dp, t.glassBorder, RoundedCornerShape(14.dp))
+                                .clickable { openNewTag() }
+                                .padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.Add,
+                                contentDescription = "新建标签",
+                                tint = t.ink(0.88f),
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                "新建",
+                                color = t.ink(0.7f),
+                                fontSize = 11.sp,
+                            )
+                        }
                     }
                 }
                 }
@@ -929,24 +941,11 @@ fun PlayerScreen(
                             .height(28.dp)
                             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
                             .pointerInput(duration) {
-                                // 长按进度条后进入拖动：进度条立即跟手（绝对位置），逐帧跟随，松手才真正 seek
+                                // 按下即跟手：不做长按等待，按下就进入拖动（绝对位置），松手才真正 seek
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = true)
-                                    val longPressMs = viewConfiguration.longPressTimeoutMillis
-                                    val slopPx = viewConfiguration.touchSlop
-                                    // 在长按阈值内：若抬起或移动超阈值 → 取消
-                                    val early = withTimeoutOrNull(longPressMs) {
-                                        while (true) {
-                                            val ev = awaitPointerEvent()
-                                            val ch = ev.changes.firstOrNull() ?: return@withTimeoutOrNull Unit
-                                            if (!ch.pressed) return@withTimeoutOrNull Unit
-                                            val moved = (ch.position - down.position).getDistance()
-                                            if (moved > slopPx) return@withTimeoutOrNull Unit
-                                        }
-                                        @Suppress("UNREACHABLE_CODE")
-                                        Unit
-                                    }
-                                    if (early != null) return@awaitEachGesture
+                                    // 立刻消费按下事件：告诉下层的「点按播放/长按倍速」手势层，这一下是进度条在拖
+                                    down.consume()
                                     dragging = true
                                     scrub = (down.position.x / widthPx).coerceIn(0f, 1f)
                                     while (true) {
