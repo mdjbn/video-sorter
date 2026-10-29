@@ -226,8 +226,12 @@ async function startPlayback(v: Video) {
     el.src = info.url
     el.playbackRate = effSpeed.value
     el.load()
-    seekToResume(el, seekTarget ?? v.position)
-    seekTarget = null
+    if (seekTarget !== null) {
+      seekToResume(el, seekTarget, 0)
+      seekTarget = null
+    } else {
+      seekToResume(el, v.position)
+    }
     return
   }
   // HLS：先等后端切出第一个分片，再交给 hls.js
@@ -280,12 +284,19 @@ async function attachHls(videoId: number) {
   }
   el.playbackRate = effSpeed.value
   // 续播对 HLS 同样生效：等元数据就绪后跳到上次的位置
-  seekToResume(el, current.value?.position)
+  if (seekTarget !== null) {
+    seekToResume(el, seekTarget, 0)
+    seekTarget = null
+  } else {
+    seekToResume(el, current.value?.position)
+  }
 }
 
 /** 续播：把播放头挪回上次看到的位置（超过 3 秒才跳），direct 与 HLS 共用。 */
-function seekToResume(el: HTMLVideoElement, pos?: number | null) {
-  if (!pos || pos <= 3) return
+// minSec：小于这个秒数就不跳（默认 3 秒，避免刚点开就 seek 到片头附近）；
+// 从管理页返回时传 0 —— 那是「接着刚才的位置继续」，几秒也要接着。
+function seekToResume(el: HTMLVideoElement, pos?: number | null, minSec = 3) {
+  if (!pos || pos <= minSec) return
   const seek = () => {
     try {
       const end = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : duration.value
@@ -753,7 +764,10 @@ onMounted(async () => {
   const snap = readPlayerSnapshot()
   try {
     const wanted = Number(route.query.v)
-    if (snap && snap.videos.length) {
+    const wantId = Number.isFinite(wanted) && wanted > 0 ? wanted : null
+    // 只有当目标视频就在上次的列表里时才复用快照；从视频库里点开另一个视频要重新拉列表
+    const reuse = !!snap && snap.videos.length > 0 && (wantId === null || snap.videos.some((v) => v.id === wantId))
+    if (reuse) {
       // 从管理页回来：先把上次的列表 / 当前视频 / 进度原样恢复，避免「空白几秒 + 从第一个重播」
       restoring = true
       tags.value = snap.tags
@@ -762,12 +776,14 @@ onMounted(async () => {
       status.value = (snap.status as FilterStatus) || 'all'
       pickedTags.value = new Set(snap.pickedTags)
       loading.value = false
-      const id = Number.isFinite(wanted) && wanted > 0 ? wanted : (snap.currentId ?? snap.videos[0].id)
+      const id = wantId ?? (snap.currentId ?? snap.videos[0].id)
       const target = videos.value.find((v) => v.id === id) || videos.value[0]
       restoring = false
       if (target) {
-        await selectVideo(target.id, { resumeAt: snap.position, force: true })
-        if (snap.playing) void togglePlay(true)
+        // 只有「回到同一个视频」才沿用上次的进度；换个视频就从它自己服务端记录的进度开始
+        const resumeAt = wantId === null || wantId === snap.currentId ? snap.position : undefined
+        await selectVideo(target.id, { resumeAt, force: true })
+        if (snap.playing && (wantId === null || wantId === snap.currentId)) void togglePlay(true)
       }
       void loadTags()
       await loadPlan()
