@@ -594,9 +594,10 @@ fun PlayerScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                     // 第一帧出来之前用封面盖住：换片时 ExoPlayer 的 surface 会先画出上一个视频的残留帧
+                    // 用封面做「封面→首帧」的过渡：不模糊、淡得快，避免启动时闪一下
                     val coverAlpha by animateFloatAsState(
                         targetValue = if (videoReady) 0f else 1f,
-                        animationSpec = tween(220),
+                        animationSpec = tween(160),
                         label = "video-cover",
                     )
                     if (coverAlpha > 0.01f) {
@@ -606,16 +607,16 @@ fun PlayerScreen(
                                     model = api.thumbUrl(v),
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize().blur(26.dp),
+                                    modifier = Modifier.fillMaxSize(),
                                     colorFilter = ColorFilter.colorMatrix(
-                                        ColorMatrix().apply { setToSaturation(0.5f) }
+                                        ColorMatrix().apply { setToSaturation(0.85f) }
                                     ),
                                 )
                             }
                             Box(
                                 Modifier
                                     .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.42f))
+                                    .background(Color.Black.copy(alpha = 0.22f))
                             )
                         }
                     }

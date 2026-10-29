@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -26,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.videosorter.app.data.Api
@@ -69,6 +71,8 @@ fun MainScreen(
     // 把「第一个视频」写回存储，事后再读就拿不到真正的上次位置了。
     val bootLastVideoId = remember(api.base) { session.lastVideoId(api.base) }
     var resumedOnce by remember { mutableStateOf(false) }
+    // 续播位置确定之前先别渲染播放页，否则会先画出第一个视频再切过去（闪一下）
+    var bootResolved by remember(api.base) { mutableStateOf(false) }
     // 视频库筛选（服务端筛选）：状态 + 多个标签，播放器与视频库共用同一份结果
     var statusFilter by remember { mutableStateOf("all") }
     var tagFilter by remember { mutableStateOf<Set<Int>>(emptySet()) }
@@ -112,12 +116,14 @@ fun MainScreen(
                 if (idx >= 0) playerIndex = idx
                 resumedOnce = true
             }
+            bootResolved = true
             if (playerIndex >= videos.size) playerIndex = 0
             error = null
         } catch (e: Exception) {
             if (!authFail(e)) error = friendlyError(e)
         } finally {
             loading = false
+            bootResolved = true
         }
     }
 
@@ -203,7 +209,9 @@ fun MainScreen(
             label = "tab-content",
         ) { target ->
             when (target) {
-                0 -> PlayerScreen(
+                0 -> if (!bootResolved) {
+                    Box(Modifier.fillMaxSize().background(Color.Black))
+                } else PlayerScreen(
                     api = api,
                     videos = videos,
                     tags = tags,
