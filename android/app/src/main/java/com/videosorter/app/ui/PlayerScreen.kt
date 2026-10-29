@@ -168,6 +168,8 @@ fun PlayerScreen(
     var lockedSpeed by remember { mutableStateOf<Float?>(null) }
     var position by remember { mutableStateOf(0.0) }
     var duration by remember { mutableStateOf(0.0) }
+    // 正在拖进度条（拖动期间 position 是预览值，轮询不要覆盖它）
+    var scrubActive by remember { mutableStateOf(false) }
     var hud by remember { mutableStateOf<HudSpec?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var loadingSrc by remember { mutableStateOf(true) }
@@ -306,9 +308,10 @@ fun PlayerScreen(
         onDispose { player.removeListener(listener) }
     }
 
+    // 进度条拖动期间不要被 250ms 轮询覆盖（拖动时 position 是预览值）
     LaunchedEffect(Unit) {
         while (true) {
-            position = player.currentPosition / 1000.0
+            if (!scrubActive) position = player.currentPosition / 1000.0
             duration = (player.duration.takeIf { it > 0 } ?: 0L) / 1000.0
             delay(250)
         }
@@ -958,36 +961,34 @@ fun PlayerScreen(
                             .height(28.dp)
                             .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
                             .pointerInput(duration) {
-                                // 抖音式拖动：按下就跳到手指位置，拖动实时跟随（节流 seek），松手收尾
+                                // 相对拖动：按下时滑块从当前位置冒出，手指往前/后移动多少，
+                                // 滑块就往前/后移动多少；拖动过程中不 seek（视频照常播），松手才 seek
                                 awaitEachGesture {
                                     val down = awaitFirstDown(requireUnconsumed = true)
                                     // 消费按下：告诉下层的「点按播放/长按倍速」手势层，这一下是进度条在拖
                                     down.consume()
                                     val w = size.width.toFloat().coerceAtLeast(1f)
-                                    if (duration <= 0f) return@awaitEachGesture
-                                    fun seekToX(x: Float) {
-                                        val f = (x / w).coerceIn(0f, 1f)
-                                        scrub = f
-                                        position = f * duration
-                                        player.seekTo((f * duration * 1000).toLong())
-                                    }
+                                    val total = duration
+                                    if (total <= 0.0) return@awaitEachGesture
                                     dragging = true
-                                    seekToX(down.position.x)
-                                    var lastSeekAt = System.currentTimeMillis()
+                                    scrubActive = true
+                                    val base = position.coerceIn(0.0, total)
+                                    scrub = (base / total).toFloat().coerceIn(0f, 1f)
+                                    val startX = down.position.x
                                     while (true) {
                                         val ev = awaitPointerEvent()
                                         val ch = ev.changes.firstOrNull() ?: break
                                         ch.consume()
-                                        scrub = (ch.position.x / w).coerceIn(0f, 1f)
-                                        position = scrub * duration
-                                        val now = System.currentTimeMillis()
-                                        if (now - lastSeekAt >= 45 || !ch.pressed) {
-                                            player.seekTo((scrub * duration * 1000).toLong())
-                                            lastSeekAt = now
-                                        }
+                                        val dx = ch.position.x - startX
+                                        scrub = ((base + (dx / w) * total) / total).toFloat().coerceIn(0f, 1f)
                                         if (!ch.pressed) break
                                     }
+                                    // 松手才真正跳过去（拖动期间不打断播放）
+                                    val target = scrub * total
+                                    player.seekTo((target * 1000).toLong())
+                                    position = target
                                     dragging = false
+                                    scrubActive = false
                                 }
                             },
                         contentAlignment = Alignment.CenterStart,
