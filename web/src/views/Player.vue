@@ -8,6 +8,7 @@ import {
 import { toast } from '../toast'
 import { nextThemeMode, setThemeMode, themeIcon, themeMode, THEME_LABEL } from '../theme'
 import Icon from '../components/Icon.vue'
+import { readPlayerSnapshot, writePlayerSnapshot } from '../playerState'
 import '../styles/player.css'
 
 const props = defineProps<{ user: { id: number; username: string } | null }>()
@@ -25,6 +26,23 @@ const status = ref<FilterStatus>('all')
 const pickedTags = ref<Set<number>>(new Set())
 const filterOpen = ref(false)
 const loading = ref(true)
+// 播放列表一次最多渲染这么多条，滚到底部再追加：几千条时一次性铺满 DOM 会卡好几秒
+const PL_PAGE = 120
+const plLimit = ref(PL_PAGE)
+const visibleList = computed(() => videos.value.slice(0, plLimit.value))
+let plScrollLock = false
+function onPlScroll() {
+  if (plScrollLock) return
+  const el = listEl.value
+  if (!el) return
+  if (el.scrollTop + el.clientHeight < el.scrollHeight - 240) return
+  if (plLimit.value >= videos.value.length) return
+  plLimit.value = Math.min(videos.value.length, plLimit.value + PL_PAGE)
+}
+// 从管理页回来时正在恢复现场：这段时间里筛选 watch 不要触发重新拉列表
+let restoring = false
+// 恢复现场时要跳到的进度（优先于服务端记录的 position）
+let seekTarget: number | null = null
 
 const STATUS_LABEL: Record<FilterStatus, string> = {
   all: '全部视频', idle: '未打标签', tagged: '待整理', organized: '已整理',
@@ -72,6 +90,7 @@ async function loadVideos(keepId?: number) {
   const res = await api.videos({ ...q, limit: 0, sort: 'added', order: 'asc' })
   videos.value = res.items
   counts.value = res.counts
+  plLimit.value = PL_PAGE
   loading.value = false
   if (!res.items.length) {
     current.value = null
@@ -85,6 +104,7 @@ async function loadVideos(keepId?: number) {
 
 // 切换筛选条件（状态 / 多个标签）后重新拉列表
 watch([status, pickedTags], () => {
+  if (restoring) return
   void loadVideos()
 }, { deep: true })
 
@@ -140,7 +160,10 @@ function teardown() {
   playing.value = false
 }
 
-async function selectVideo(id: number, opts: { keepPlaying?: boolean; force?: boolean } = {}) {
+async function selectVideo(
+  id: number,
+  opts: { keepPlaying?: boolean; force?: boolean; resumeAt?: number } = {},
+) {
   if (!opts.force && current.value?.id === id) {
     if (opts.keepPlaying && !playing.value) void togglePlay(true)
     return
@@ -149,7 +172,8 @@ async function selectVideo(id: number, opts: { keepPlaying?: boolean; force?: bo
   teardown()
   const v = videos.value.find((x) => x.id === id) || (await api.video(id))
   current.value = v
-  curTime.value = v.position || 0
+  seekTarget = typeof opts.resumeAt === 'number' ? opts.resumeAt : null
+  curTime.value = seekTarget ?? (v.position || 0)
   duration.value = v.duration || 0
   speed.value = 1
   tempSpeed.value = null
@@ -161,9 +185,15 @@ async function selectVideo(id: number, opts: { keepPlaying?: boolean; force?: bo
 }
 
 function scrollActiveIntoView() {
+  const idx = videos.value.findIndex((v) => v.id === current.value?.id)
+  if (idx >= plLimit.value) plLimit.value = Math.min(videos.value.length, idx + PL_PAGE)
   nextTick(() => {
     const el = listEl.value?.querySelector('.pl-item.active') as HTMLElement | null
-    el?.scrollIntoView({ block: 'nearest' })
+    if (!el) return
+    // scrollIntoView 会触发 scroll 事件，别让它被当成「用户滚到底了」而无限追加
+    plScrollLock = true
+    el.scrollIntoView({ block: 'nearest' })
+    window.setTimeout(() => { plScrollLock = false }, 260)
   })
 }
 
@@ -196,7 +226,8 @@ async function startPlayback(v: Video) {
     el.src = info.url
     el.playbackRate = effSpeed.value
     el.load()
-    seekToResume(el, v.position)
+    seekToResume(el, seekTarget ?? v.position)
+    seekTarget = null
     return
   }
   // HLS：先等后端切出第一个分片，再交给 hls.js
@@ -719,11 +750,33 @@ onMounted(async () => {
   window.addEventListener('beforeunload', () => {
     void saveProgress()
   })
+  const snap = readPlayerSnapshot()
   try {
     const wanted = Number(route.query.v)
+    if (snap && snap.videos.length) {
+      // 从管理页回来：先把上次的列表 / 当前视频 / 进度原样恢复，避免「空白几秒 + 从第一个重播」
+      restoring = true
+      tags.value = snap.tags
+      videos.value = snap.videos
+      counts.value = snap.counts
+      status.value = (snap.status as FilterStatus) || 'all'
+      pickedTags.value = new Set(snap.pickedTags)
+      loading.value = false
+      const id = Number.isFinite(wanted) && wanted > 0 ? wanted : (snap.currentId ?? snap.videos[0].id)
+      const target = videos.value.find((v) => v.id === id) || videos.value[0]
+      restoring = false
+      if (target) {
+        await selectVideo(target.id, { resumeAt: snap.position, force: true })
+        if (snap.playing) void togglePlay(true)
+      }
+      void loadTags()
+      await loadPlan()
+      return
+    }
     await Promise.all([loadTags(), loadVideos(Number.isFinite(wanted) && wanted > 0 ? wanted : undefined)])
     await loadPlan()
   } catch (e) {
+    restoring = false
     toast(e instanceof ApiError ? e.message : '加载失败', true)
   }
 })
@@ -731,6 +784,18 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   document.removeEventListener('click', closeMenus)
+  // 记住现场：切到管理页再回来时用（position 用播放器真实进度，比 curTime 更准）
+  writePlayerSnapshot({
+    videos: videos.value,
+    counts: counts.value,
+    tags: tags.value,
+    currentId: current.value?.id ?? null,
+    position: Math.round(videoEl.value?.currentTime || curTime.value || 0),
+    status: status.value,
+    pickedTags: [...pickedTags.value],
+    playing: playing.value,
+    at: Date.now(),
+  })
   window.clearInterval(saveTimer)
   window.clearTimeout(hideTimer)
   window.clearInterval(hlsPoll)
@@ -929,9 +994,9 @@ defineExpose({ selectVideo })
           </div>
         </div>
 
-        <div ref="listEl" class="pl-list">
+        <div ref="listEl" class="pl-list" @scroll.passive="onPlScroll">
           <div
-            v-for="v in videos"
+            v-for="v in visibleList"
             :key="v.id"
             class="pl-item"
             :class="{ active: current?.id === v.id, playing: playing && current?.id === v.id, done: v.organized }"

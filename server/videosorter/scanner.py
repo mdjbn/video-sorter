@@ -95,12 +95,23 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
             continue
         got = iter_videos(tdir)
         for p in got:
+            prev = planned.get(_key(p))
+            if prev is not None and prev[1] is None and not _under_prefix(str(p), str(tdir)):
+                # 同一个文件被源目录先扫到，而它的字面路径并不在标签目录下（只是 resolve 后撞了路径）：
+                # 保持「源文件夹里的文件」，不要因为同名目录把它算成标签文件夹。
+                continue
             planned[_key(p)] = (p, tid)  # 标签文件夹优先
         if got:
             tasks.update(task_id, message=f"标签文件夹 {tdir.name}：{len(got)} 个视频")
 
     files: list[tuple[Path, int | None]] = list(planned.values())
     in_scope_roots = roots + [d for d, _ in tag_dirs]
+    tag_dirs_only = [d for d, _ in tag_dirs]
+
+    def tag_dir_of(p: Path) -> bool:
+        """文件是否真的躺在某个标签文件夹里（按真实路径 + 字符串前缀双重判断）。"""
+        return any(_is_under(p, d) for d in tag_dirs_only)
+
     tasks.set_total(task_id, len(files))
 
     # 2) 现有记录
@@ -137,6 +148,19 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                 continue
             if not item["need_probe"]:
                 old_row = item["old"]
+                if (old_row is not None and tag_id is None
+                        and str(old_row["status"]) == "organized"
+                        and not tag_dir_of(p)):
+                    # 记录是「已整理」，但文件其实还在源文件夹里、不在任何标签文件夹下：
+                    # 多半是标签默认目录（源目录/标签名）和用户自己的同名子目录撞名，纠正回来。
+                    fixed = "tagged" if old_row["tag_id"] is not None else "idle"
+                    db.execute(
+                        "UPDATE videos SET status=?, organized_at=NULL, scanned_at=? WHERE id=?",
+                        (fixed, now_iso(), old_row["id"]),
+                    )
+                    stats["updated"] += 1
+                    tasks.step(task_id, f"归位（不在标签文件夹里）：{p.name}")
+                    continue
                 if old_row is not None and tag_id is not None and (
                         str(old_row["status"]) != "organized" or old_row["tag_id"] is None):
                     # 文件位于标签文件夹里：说明它已经被整理过，补上「已整理 + 标签」
@@ -163,6 +187,11 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
             # 先入库拿到真实 id，再用 id 命名缩略图（之前用时间戳当 id，同一毫秒内会撞名 →
             # 多个视频指向同一张缩略图，表现为「封面和视频对不上」）
             vid = _upsert(db, p, item, "", tag_id=tag_id)
+            if vid and tag_id is None and item["old"] is not None \
+                    and str(item["old"]["status"]) == "organized" and not tag_dir_of(p):
+                fixed = "tagged" if item["old"]["tag_id"] is not None else "idle"
+                db.execute("UPDATE videos SET status=?, organized_at=NULL WHERE id=?",
+                           (fixed, item["old"]["id"]))
             if vid:
                 try:
                     thumb_path = cfg.thumb_dir / f"{vid}.jpg"

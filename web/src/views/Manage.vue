@@ -340,34 +340,80 @@ const libLoading = ref(false)
 
 function pickLibFilter(k: LibKey, v: number | 'all') {
   libPick[k] = v
+  resetLibScroll(k)
   nextTick(() => measureLib(k))
 }
 function bindLibBody(k: LibKey, el: any) {
   libBodies[k] = el as HTMLElement | null
+  if (el) (el as HTMLElement).scrollTop = libScroll[k]
   measureLib(k)
 }
 // 量出卡片高度与每行几列：高度 = 行数 × 卡片高 + 行间距。
-// 不能用 scrollHeight（容器有固定高度时它不会变小），也不能写死列数（窄屏会换列）。
-function libColsIn(el: HTMLElement, cards: HTMLElement[]) {
-  if (!cards.length) return 0
-  const top = Math.round(cards[0].getBoundingClientRect().top)
-  return cards.filter((c) => Math.round(c.getBoundingClientRect().top) === top).length
-}
+// 列数直接从 grid-template-columns 算（不用量每个卡片的 top），这样窗口化只渲染几行也能算准。
 function measureLib(k?: LibKey) {
   for (const key of (k ? [k] : (['source', 'organized'] as LibKey[]))) {
     const el = libBodies[key]
     if (!el) continue
-    const cards = [...el.querySelectorAll<HTMLElement>('.vcard')]
-    if (!cards.length) {
+    const grid = el.querySelector<HTMLElement>('.grid')
+    const card = el.querySelector<HTMLElement>('.vcard')
+    if (!grid || !card) {
       libH[key].rowH = 0; libH[key].cols = 0; libH[key].full = 0
       continue
     }
-    const rowH = cards[0].offsetHeight
-    const cols = libColsIn(el, cards)
-    const rows = new Set(cards.map((c) => Math.round(c.getBoundingClientRect().top))).size
+    const cols = (getComputedStyle(grid).gridTemplateColumns || '').split(' ').filter(Boolean).length || 1
+    const rowH = card.offsetHeight
     libH[key].rowH = rowH
     libH[key].cols = cols
-    libH[key].full = rows * rowH + (rows - 1) * LIB_GAP
+    libH[key].full = rowH
+  }
+}
+
+// 窗口化：几千个视频时不能一次性把它们全渲染出来（每张卡片都要加载一张缩略图）。
+// 只渲染滚动窗口内的几行，用 padding-top 顶出前面的行占位。
+const LIB_OVERSCAN = 1
+const libScroll = reactive<Record<LibKey, number>>({ source: 0, organized: 0 })
+let libScrollRaf = 0
+const libPendingScroll = { source: 0, organized: 0 }
+
+function libViewport(k: LibKey, items: Video[]) {
+  const s = libH[k]
+  if (!s.rowH || !s.cols) return { items, pad: 0, totalH: 0 }
+  const rows = Math.min(Math.max(1, Math.ceil(items.length / s.cols)), LIB_MAX_ROWS)
+  const bodyH = rows * s.rowH + (rows - 1) * LIB_GAP
+  const pitch = s.rowH + LIB_GAP
+  const top = Math.max(0, libScroll[k])
+  const firstRow = Math.max(0, Math.floor(top / pitch) - LIB_OVERSCAN)
+  const lastRow = Math.floor((top + bodyH) / pitch) + LIB_OVERSCAN
+  const start = firstRow * s.cols
+  const end = Math.min(items.length, (lastRow + 1) * s.cols)
+  const pad = start ? firstRow * pitch : 0
+  const allRows = Math.max(1, Math.ceil(items.length / s.cols))
+  const totalH = allRows * s.rowH + (allRows - 1) * LIB_GAP
+  return { items: items.slice(start, Math.max(end, start)), pad, totalH }
+}
+
+const libViews = computed(() => {
+  const out = {} as Record<LibKey, { items: Video[]; pad: number; totalH: number }>
+  for (const g of libGroups.value) out[g.k] = libViewport(g.k, g.items)
+  return out
+})
+
+function onLibScroll(k: LibKey, e: Event) {
+  libPendingScroll[k] = (e.target as HTMLElement).scrollTop
+  if (libScrollRaf) return
+  libScrollRaf = requestAnimationFrame(() => {
+    libScrollRaf = 0
+    libScroll.source = libPendingScroll.source
+    libScroll.organized = libPendingScroll.organized
+  })
+}
+
+function resetLibScroll(k?: LibKey) {
+  for (const key of (k ? [k] : (['source', 'organized'] as LibKey[]))) {
+    libPendingScroll[key] = 0
+    libScroll[key] = 0
+    const el = libBodies[key]
+    if (el) el.scrollTop = 0
   }
 }
 // 卡片高度按「这个分组一共多少视频」算，不看当前筛选结果 —— 筛选时卡片大小不跟着跳
@@ -1167,9 +1213,19 @@ function onResize() {
                 <span v-if="o.color" class="dot" :style="{ background: o.color }" />{{ o.label }}<span class="n">{{ o.n }}</span>
               </button>
             </div>
-            <div v-if="g.items.length" class="lib-body" :ref="(el) => bindLibBody(g.k, el)" :style="libBodyStyle(g.k, g.total)">
-              <div class="grid" :class="{ 'as-list': lib.mode === 'list' }">
-              <div v-for="v in g.items" :key="v.id" class="vcard" :class="{ sel: sel.has(v.id) }" @click="openVideo(v)">
+            <div
+              v-if="g.items.length"
+              class="lib-body"
+              :ref="(el) => bindLibBody(g.k, el)"
+              :style="libBodyStyle(g.k, g.total)"
+              @scroll.passive="onLibScroll(g.k, $event)"
+            >
+              <div
+                class="grid"
+                :class="{ 'as-list': lib.mode === 'list' }"
+                :style="{ paddingTop: libViews[g.k].pad + 'px', minHeight: libViews[g.k].totalH ? libViews[g.k].totalH + 'px' : undefined }"
+              >
+              <div v-for="v in libViews[g.k].items" :key="v.id" class="vcard" :class="{ sel: sel.has(v.id) }" @click="openVideo(v)">
               <div class="vthumb" :style="v.thumb_url ? { backgroundImage: `url(${v.thumb_url})` } : {}">
                 <span class="pick" @click.stop="toggleSel(v.id)"><Icon name="check" :size="12" /></span>
                 <a class="dl" :href="`/api/videos/${v.id}/raw?download=1`" :download="v.filename" title="下载到本机" @click.stop>
