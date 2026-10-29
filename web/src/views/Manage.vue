@@ -225,8 +225,13 @@ async function runScan(payload: ScanPayload = {}) {
       scan.text = t.message || `扫描中 ${t.done}/${t.total}`
     })
     const r: any = task.result || {}
-    scan.text = `扫描完成：新增 ${r.added ?? 0}，更新 ${r.updated ?? 0}，丢失 ${r.missing ?? 0}`
-    toast(`扫描完成，新增 ${r.added ?? 0} 个视频`)
+    const added = Number(r.added ?? 0)
+    const removed = Number(r.missing ?? 0)
+    scan.text = `扫描完成：新增 ${added}，更新 ${r.updated ?? 0}，移除 ${removed}`
+    const bits: string[] = []
+    if (added) bits.push(`新增 ${added} 个`)
+    if (removed) bits.push(`移除 ${removed} 个`)
+    toast(bits.length ? `扫描完成，${bits.join('、')}视频` : '扫描完成，没有变化')
     await Promise.all([loadStats(), loadSources(), loadTags()])
     if (view.value === 'library') await loadLibrary()
     if (view.value === 'organize') await loadPlan()
@@ -278,10 +283,12 @@ const organizedVideos = computed(() => videos.value.filter((v) => v.organized))
 type LibKey = 'source' | 'organized'
 // 分组内筛选：纯前端过滤，只影响视频库这两张卡片的展示，不影响播放列表
 const libPick = reactive<Record<LibKey, number | 'all'>>({ source: 'all', organized: 'all' })
-const libOpen = reactive<Record<LibKey, boolean>>({ source: false, organized: false })
-const libH = reactive<Record<LibKey, { full: number; collapsed: number; rowH: number }>>({
-  source: { full: 0, collapsed: 0, rowH: 0 },
-  organized: { full: 0, collapsed: 0, rowH: 0 },
+// 两张卡片固定大小：一屏最多 4 行卡片，超出部分在卡片内部滚动
+const LIB_MAX_ROWS = 4
+const LIB_GAP = 13
+const libH = reactive<Record<LibKey, { rowH: number; cols: number; full: number }>>({
+  source: { rowH: 0, cols: 0, full: 0 },
+  organized: { rowH: 0, cols: 0, full: 0 },
 })
 const libBodies: Partial<Record<LibKey, HTMLElement | null>> = {}
 
@@ -335,43 +342,42 @@ function pickLibFilter(k: LibKey, v: number | 'all') {
   libPick[k] = v
   nextTick(() => measureLib(k))
 }
-function toggleLibGroup(k: LibKey) {
-  libOpen[k] = !libOpen[k]
-  nextTick(() => measureLib(k))
-}
 function bindLibBody(k: LibKey, el: any) {
   libBodies[k] = el as HTMLElement | null
   measureLib(k)
 }
-// 收起时固定露两行卡片；展开时铺开全部，高度过渡做动画。
-// 高度按「行数 × 卡片高 + 间距」算，不用 scrollHeight（容器有固定高度时 scrollHeight 不会变小）
+// 量出卡片高度与每行几列：高度 = 行数 × 卡片高 + 行间距。
+// 不能用 scrollHeight（容器有固定高度时它不会变小），也不能写死列数（窄屏会换列）。
+function libColsIn(el: HTMLElement, cards: HTMLElement[]) {
+  if (!cards.length) return 0
+  const top = Math.round(cards[0].getBoundingClientRect().top)
+  return cards.filter((c) => Math.round(c.getBoundingClientRect().top) === top).length
+}
 function measureLib(k?: LibKey) {
   for (const key of (k ? [k] : (['source', 'organized'] as LibKey[]))) {
     const el = libBodies[key]
     if (!el) continue
     const cards = [...el.querySelectorAll<HTMLElement>('.vcard')]
     if (!cards.length) {
-      libH[key].rowH = 0; libH[key].full = 0; libH[key].collapsed = 0
+      libH[key].rowH = 0; libH[key].cols = 0; libH[key].full = 0
       continue
     }
     const rowH = cards[0].offsetHeight
+    const cols = libColsIn(el, cards)
     const rows = new Set(cards.map((c) => Math.round(c.getBoundingClientRect().top))).size
-    const full = rows * rowH + (rows - 1) * 13
     libH[key].rowH = rowH
-    libH[key].full = full
-    libH[key].collapsed = Math.min(full, rowH * 2 + 13)
+    libH[key].cols = cols
+    libH[key].full = rows * rowH + (rows - 1) * LIB_GAP
   }
 }
-function libCanToggle(k: LibKey) {
+// 卡片高度按「这个分组一共多少视频」算，不看当前筛选结果 —— 筛选时卡片大小不跟着跳
+function libBodyStyle(k: LibKey, total: number) {
   const s = libH[k]
-  return s.full > s.collapsed + 1
-}
-function libBodyStyle(k: LibKey) {
-  const s = libH[k]
-  const h = libCanToggle(k) && !libOpen[k] ? s.collapsed : s.full
   const style: Record<string, string> = {}
-  if (h) style.height = `${h}px`
-  if (s.rowH) style['--lib-card-h'] = `${s.rowH}px`
+  if (!s.rowH || !s.cols) return style
+  const rows = Math.min(Math.max(1, Math.ceil(total / s.cols)), LIB_MAX_ROWS)
+  style.height = `${rows * s.rowH + (rows - 1) * LIB_GAP}px`
+  style['--lib-card-h'] = `${s.rowH}px`
   return style
 }
 watch([videos, sources, tags, () => lib.mode, () => [libPick.source, libPick.organized]],
@@ -1148,10 +1154,6 @@ function onResize() {
               <span class="cnt">{{ g.items.length }}<template v-if="g.items.length !== g.total"> / {{ g.total }}</template></span>
               <span class="sub">{{ g.desc }}</span>
               <div class="sp" />
-              <button v-if="libCanToggle(g.k)" class="btn ghost sm lib-toggle" :title="libOpen[g.k] ? '收起' : '展开全部'" @click="toggleLibGroup(g.k)">
-                {{ libOpen[g.k] ? '收起' : '展开' }}
-                <Icon :name="libOpen[g.k] ? 'chevron-up' : 'chevron-down'" :size="14" />
-              </button>
             </div>
             <div v-if="g.opts.length > 1" class="lib-filters">
               <button
@@ -1165,7 +1167,7 @@ function onResize() {
                 <span v-if="o.color" class="dot" :style="{ background: o.color }" />{{ o.label }}<span class="n">{{ o.n }}</span>
               </button>
             </div>
-            <div v-if="g.items.length" class="lib-body" :class="{ open: libOpen[g.k] }" :ref="(el) => bindLibBody(g.k, el)" :style="libBodyStyle(g.k)">
+            <div v-if="g.items.length" class="lib-body" :ref="(el) => bindLibBody(g.k, el)" :style="libBodyStyle(g.k, g.total)">
               <div class="grid" :class="{ 'as-list': lib.mode === 'list' }">
               <div v-for="v in g.items" :key="v.id" class="vcard" :class="{ sel: sel.has(v.id) }" @click="openVideo(v)">
               <div class="vthumb" :style="v.thumb_url ? { backgroundImage: `url(${v.thumb_url})` } : {}">

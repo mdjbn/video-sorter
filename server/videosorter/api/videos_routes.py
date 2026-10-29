@@ -115,9 +115,12 @@ def list_videos(
     total = st.db.query_one("SELECT COUNT(*) AS n FROM videos v" + clause, tuple(args))["n"]
     counts = {r["status"]: r["n"] for r in st.db.query(
         "SELECT status, COUNT(*) AS n FROM videos GROUP BY status")}
-    counts["all"] = st.db.query_one("SELECT COUNT(*) AS n FROM videos")["n"]
+    # 所有对外展示的合计都排除 missing：文件已在盘上删掉/移走的记录不该再计数，
+    # 否则删完再扫描，库里的数字一动不动，看起来像「扫不出移除」
+    counts["all"] = st.db.query_one(
+        "SELECT COUNT(*) AS n FROM videos WHERE status<>'missing'")["n"]
     counts["untagged"] = st.db.query_one(
-        "SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NULL")["n"]
+        "SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NULL AND status<>'missing'")["n"]
     # 两组卡片：来自源文件夹的（还没整理）／来自标签对应文件夹的（已整理）
     counts["organized"] = st.db.query_one(
         "SELECT COUNT(*) AS n FROM videos WHERE status='organized'")["n"]
@@ -131,18 +134,25 @@ def stats(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
     counts = {r["status"]: r["n"] for r in st.db.query(
         "SELECT status, COUNT(*) AS n FROM videos GROUP BY status")}
-    total = st.db.query_one("SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS bytes FROM videos")
-    tagged = st.db.query_one("SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NOT NULL")["n"]
-    untagged = st.db.query_one("SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NULL")["n"]
+    # 同上：概览里的总数/已打标签/未打标签都只算还在盘上的文件
+    total = st.db.query_one(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS bytes FROM videos"
+        " WHERE status<>'missing'")
+    tagged = st.db.query_one(
+        "SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NOT NULL AND status<>'missing'")["n"]
+    untagged = st.db.query_one(
+        "SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NULL AND status<>'missing'")["n"]
     last_scan = st.db.get_setting("last_scan_at") or ""
     tags = [dict(r) for r in st.db.query(
-        "SELECT t.id, t.name, t.color, COUNT(v.id) AS count FROM tags t "
+        "SELECT t.id, t.name, t.color, "
+        "SUM(CASE WHEN v.status<>'missing' THEN 1 ELSE 0 END) AS count FROM tags t "
         "LEFT JOIN videos v ON v.tag_id = t.id GROUP BY t.id ORDER BY t.sort_order, t.id")]
     srcs = [dict(r) for r in st.db.query("SELECT * FROM sources ORDER BY id")]
     for s in srcs:
         scope, scope_params = under_dir("path", str(s["path"]))
         s["count"] = st.db.query_one(
-            f"SELECT COUNT(*) AS n FROM videos WHERE {scope}", scope_params)["n"]
+            f"SELECT COUNT(*) AS n FROM videos WHERE ({scope}) AND status<>'missing'",
+            scope_params)["n"]
     return {
         "total": total["n"], "bytes": total["bytes"], "tagged": tagged, "untagged": untagged,
         "organized": counts.get("organized", 0), "tagged_pending": counts.get("tagged", 0),

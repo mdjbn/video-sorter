@@ -201,12 +201,27 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
     return stats
 
 
+def _under_prefix(path: str, root: str) -> bool:
+    p = path.replace("\\", "/").rstrip("/")
+    r = root.replace("\\", "/").rstrip("/")
+    if not r:
+        return False
+    return p == r or p.startswith(r + "/")
+
+
 def _is_under(path: Path, root: Path) -> bool:
+    """path 是否在 root 目录下。
+
+    先按真实路径比较；符号链接、绑定挂载导致两边 resolve() 得到不同路径时，
+    再退回字符串前缀判断——否则文件删掉后会被判成「不在扫描范围」，
+    永远不会标 missing，表现出来就是「只能扫出新增，扫不出移除」。
+    """
     try:
         path.resolve().relative_to(root.resolve())
         return True
     except (ValueError, OSError):
-        return False
+        pass
+    return _under_prefix(str(path), str(root))
 
 
 def _upsert(db: Database, p: Path, item: dict[str, Any], thumb: str,

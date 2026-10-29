@@ -64,8 +64,10 @@ def list_sources(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]
         d = dict(r)
         d["exists"] = Path(d["path"]).exists()
         clause, params = under_dir("path", str(d["path"]))
+        # 只统计还在盘上的文件：扫描判定为 missing（已删除/移走）的记录不再计数，
+        # 否则删掉文件再扫描，卡片上的「N 个视频」也不会掉，看着像「扫不出移除」
         total = st.db.query_one(
-            f"SELECT COUNT(*) AS n FROM videos WHERE {clause}", params)
+            f"SELECT COUNT(*) AS n FROM videos WHERE ({clause}) AND status<>'missing'", params)
         d["count"] = int(total["n"]) if total else 0
         d["kind"] = d.get("kind") or ""
         d["editable"] = True
