@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -99,6 +100,9 @@ private fun AppRoot() {
                 },
             )
         } else {
+            // 切换服务器时必须重建整棵子树：否则视频列表/标签等状态会沿用上一个服务器的数据
+            // （表现为列表里还是旧服务器的视频，缩略图 404，直到杀掉进程重启）
+            key(current.base) {
             MainScreen(
                 api = current,
                 session = session,
@@ -114,6 +118,7 @@ private fun AppRoot() {
                     api = if (token.isNotBlank()) Api(url, token) else null
                 },
             )
+            }
         }
     }
 }

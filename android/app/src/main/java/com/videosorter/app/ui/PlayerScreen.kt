@@ -312,11 +312,27 @@ fun PlayerScreen(
         onDispose { player.removeListener(listener) }
     }
 
-    // 进度条拖动期间不要被 250ms 轮询覆盖（拖动时 position 是预览值）
+    // 手势只允许落在视频画面里（上下黑边不响应），这里持续跟踪画面矩形
+    var videoRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var surfaceW by remember { mutableFloatStateOf(1f) }
+    var surfaceH by remember { mutableFloatStateOf(1f) }
     LaunchedEffect(Unit) {
         while (true) {
             if (!scrubActive) position = player.currentPosition / 1000.0
             duration = (player.duration.takeIf { it > 0 } ?: 0L) / 1000.0
+            val vs = player.videoSize
+            if (vs.width > 0 && vs.height > 0) {
+                // PlayerView 默认 RESIZE_MODE_FIT：按比例缩放后居中
+                val scale = minOf(surfaceW / vs.width, surfaceH / vs.height)
+                val w = vs.width * scale
+                val h = vs.height * scale
+                videoRect = androidx.compose.ui.geometry.Rect(
+                    left = (surfaceW - w) / 2f,
+                    top = (surfaceH - h) / 2f,
+                    right = (surfaceW + w) / 2f,
+                    bottom = (surfaceH + h) / 2f,
+                )
+            }
             delay(250)
         }
     }
@@ -589,7 +605,11 @@ fun PlayerScreen(
         Box(
             Modifier
                 .fillMaxSize()
-                .onSizeChanged { gestureW = it.width.toFloat().coerceAtLeast(1f) }
+                .onSizeChanged {
+                    gestureW = it.width.toFloat().coerceAtLeast(1f)
+                    surfaceW = it.width.toFloat().coerceAtLeast(1f)
+                    surfaceH = it.height.toFloat().coerceAtLeast(1f)
+                }
                 .pointerInput(current?.id, lockedSpeed) {
                     val dragThreshold = 56.dp.toPx()
                     // 双击左右半屏快进/回退
@@ -620,6 +640,13 @@ fun PlayerScreen(
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // 命中进度条等控件时，那一层已经消费了按下事件 —— 这里直接让开，避免抢走拖动
                         if (down.isConsumed) return@awaitEachGesture
+                        // 只允许在视频画面矩形内起手：上下黑边（画面上下的空白区）不响应任何手势
+                        if (videoRect.height > 0f) {
+                            val p = down.position
+                            if (p.y < videoRect.top || p.y > videoRect.bottom ||
+                                p.x < videoRect.left || p.x > videoRect.right
+                            ) return@awaitEachGesture
+                        }
                         val startY = down.position.y
                         val startX = down.position.x
                         val longPressMs = viewConfiguration.longPressTimeoutMillis
