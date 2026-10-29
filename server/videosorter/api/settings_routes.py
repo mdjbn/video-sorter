@@ -26,6 +26,7 @@ class SettingsIn(BaseModel):
     transcode: bool | None = None
     transcode_encoder: str | None = None
     transcode_preset: str | None = None
+    transcode_jobs: int | None = None
     thumb_position: float | None = None
     scan_workers: int | None = None
     upload_dir: str | None = None
@@ -43,6 +44,12 @@ def get_settings(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]
 def put_settings(body: SettingsIn, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "transcode_jobs" in patch:
+        # 0 = 不限并发；负数/超大都夹到合理范围，免得配错把机器拖死
+        try:
+            patch["transcode_jobs"] = max(0, min(16, int(patch["transcode_jobs"])))
+        except (TypeError, ValueError):
+            patch.pop("transcode_jobs")
     if "host" in patch and patch["host"] not in {"0.0.0.0", "127.0.0.1", "localhost"}:
         patch.pop("host")
     values = st.cfg.update(patch)
@@ -99,7 +106,7 @@ EXPORT_VERSION = 1
 # 导出哪些配置项；端口/监听地址属于「这台机器怎么跑」，只放进 server 段做参考，导入时不套用
 EXPORT_SETTINGS = (
     "root_dir", "upload_dir", "theme", "transcode", "transcode_encoder", "transcode_preset",
-    "thumb_position", "scan_workers", "discovery", "discovery_port", "allow_lan",
+    "transcode_jobs", "thumb_position", "scan_workers", "discovery", "discovery_port", "allow_lan",
 )
 
 THEMES = {"light", "dark", "auto"}

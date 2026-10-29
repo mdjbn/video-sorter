@@ -22,6 +22,9 @@ DEFAULTS: dict[str, Any] = {
     "transcode": True,          # 允许按需 HLS 转码
     "transcode_encoder": "auto",  # auto=显卡优先（NVENC/QSV/AMF/VideoToolbox），也可指定 libx264
     "transcode_preset": "veryfast",
+    # 同时转码的任务数上限。一路 1080p libx264 就能吃满 4 个核（实测 NAS 上 311% CPU），
+    # 不限并发的话拖几下进度条就会同时跑好几个 ffmpeg，整机卡死、GPU 反而闲着。
+    "transcode_jobs": 2,
     "thumb_position": 0.0,      # 0 = 取视频第一帧作为封面
     "scan_workers": 3,
     "upload_dir": "",           # 手机上传落盘目录，空=整理根目录/手机上传（或第一个源目录/手机上传）

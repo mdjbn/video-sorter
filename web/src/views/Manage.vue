@@ -76,6 +76,7 @@ const setForm = reactive({
   transcode_gpu: true,
   transcode_encoder: 'auto',
   transcode_preset: 'veryfast',
+  transcode_jobs: 2,
   thumb_position: 0,
   scan_workers: 3,
   discovery: true,
@@ -122,6 +123,14 @@ const TRANSCODE_PRESETS = [
   { v: 'medium', label: '均衡' },
   { v: 'slow', label: '慢（体积小）' },
 ]
+// 同时转码任务数：一路 1080p CPU 编码就吃满四核，所以默认给 2；0 = 不限
+const TRANSCODE_JOBS = [
+  { v: 1, label: '1 路（最省资源）' },
+  { v: 2, label: '2 路（默认）' },
+  { v: 3, label: '3 路' },
+  { v: 4, label: '4 路' },
+  { v: 0, label: '不限（机器强再选）' },
+]
 const THEME_OPTIONS: { v: ThemeMode; label: string }[] = [
   { v: 'auto', label: '跟随系统' },
   { v: 'light', label: '浅色' },
@@ -140,6 +149,7 @@ async function loadSettings() {
     setForm.transcode_encoder = s.transcode_encoder || 'auto'
     setForm.transcode_gpu = setForm.transcode_encoder !== 'libx264'
     setForm.transcode_preset = s.transcode_preset || 'veryfast'
+    setForm.transcode_jobs = typeof s.transcode_jobs === 'number' ? s.transcode_jobs : 2
     setForm.thumb_position = Number(s.thumb_position ?? 0)
     setForm.scan_workers = Number(s.scan_workers ?? 3)
     setForm.discovery = s.discovery !== false
@@ -162,6 +172,7 @@ async function saveSettingsAll() {
       transcode: setForm.transcode,
       transcode_encoder: encoderFromGpu(),
       transcode_preset: setForm.transcode_preset,
+      transcode_jobs: setForm.transcode_jobs,
       thumb_position: Number(setForm.thumb_position) || 0,
       scan_workers: Math.max(1, Math.min(16, Number(setForm.scan_workers) || 3)),
       discovery: setForm.discovery,
@@ -1608,7 +1619,12 @@ function onResize() {
                     <option v-for="p in TRANSCODE_PRESETS" :key="p.v" :value="p.v">{{ p.label }}</option>
                   </select>
                 </div>
-                <div class="m-desc set-hint" style="font-size:11.5px">打开「使用 GPU 转码」时优先用显卡编码（CPU 占用低、可同时转更多路），没驱动或没权限会自动回落 CPU，不会转码失败；关掉则只用 CPU 编码，功耗低、体积更小。手机 App 能直解的格式（MKV / HEVC / AC3 等）不会转码，直接播原文件。</div>
+                <div class="form-row"><label>同时转码任务数</label>
+                  <select v-model.number="setForm.transcode_jobs" class="field">
+                    <option v-for="n in TRANSCODE_JOBS" :key="n.v" :value="n.v">{{ n.label }}</option>
+                  </select>
+                </div>
+                <div class="m-desc set-hint" style="font-size:11.5px">打开「使用 GPU 转码」时优先用显卡编码（CPU 占用低、可同时转更多路），没驱动或没权限会自动回落 CPU，不会转码失败；关掉则只用 CPU 编码，功耗低、体积更小。手机 App 能直解的格式（MKV / HEVC / AC3 等）不会转码，直接播原文件。同时转码任务数限住并发：一路 1080p CPU 编码就能吃满四核，机器弱或有核显时建议调高；选「不限」时要留意整机负载。</div>
               </div>
             </div>
             <div class="card">

@@ -114,7 +114,11 @@ def play(video_id: int, client: str = "web",
                 "duration": row["duration"] or 0, "warning": "浏览器可能无法播放该编码"}
     if not st.tools.available:
         return {"mode": "error", "message": "未找到 ffmpeg，无法转码；请安装 ffmpeg 或把 ffmpeg.exe 放进 tools/"}
-    job = st.hls.ensure(video_id, path, row["duration"] or 0, vcodec, acodec)
+    job = st.hls.ensure(video_id, path, row["duration"] or 0, vcodec, acodec,
+                        src_w=row["width"] or 0, src_h=row["height"] or 0)
+    # 这类源硬解会陷入 session 重建风暴（久不出分片），已经判死：直接告诉前端放不了
+    if job.status == "error" and getattr(job, "stalled", False):
+        return {"mode": "error", "message": job.error or "该视频格式无法播放"}
     return {
         "mode": "hls",
         "url": f"/api/videos/{video_id}/hls/s0/index.m3u8",
@@ -123,6 +127,7 @@ def play(video_id: int, client: str = "web",
         "percent": getattr(job, "percent", 0),
         "duration": row["duration"] or 0,
         "reason": transcode_reason(ext, vcodec, acodec),
+        "error": job.error if job.status == "error" else "",
         "seek": True,
     }
 
@@ -142,7 +147,8 @@ async def hls_file(video_id: int, part: str, name: str,
     if not path.exists():
         raise HTTPException(404, "文件不存在或已被移动")
     job = st.hls.ensure(video_id, path, row["duration"] or 0,
-                        row["vcodec"] or "", row["acodec"] or "", start=start)
+                        row["vcodec"] or "", row["acodec"] or "", start=start,
+                        src_w=row["width"] or 0, src_h=row["height"] or 0)
     target = job.dir / name
     if not target.exists():
         for _ in range(150):  # 最多等 30 秒

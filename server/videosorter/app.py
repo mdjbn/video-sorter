@@ -89,6 +89,11 @@ def create_app(cfg: Config | None = None, web_dir: Path | str | None = None) -> 
         try:
             yield
         finally:
+            # 先把转码的 ffmpeg 收干净：不做的话应用停用后它们会被 init 收养继续占满 CPU
+            try:
+                st.hls.stop_all()
+            except Exception as e:  # noqa: BLE001 - 退出路径上不能因为清理失败而卡住
+                print(f"[warn] 停止转码任务失败：{e}")
             if st.discovery is not None:
                 st.discovery.stop()
 

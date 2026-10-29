@@ -58,7 +58,11 @@ def test_auto_prefers_first_working_hardware(tmp_path: Path, monkeypatch) -> Non
 
 
 def test_hardware_probe_failure_falls_back(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
-    """探测全部失败（没驱动 / 没权限）→ CPU，且结果被缓存，不会每次重探。"""
+    """探测全部失败（没驱动 / 没权限）→ CPU；失败不缓存，下次转码重新探一次。
+
+    失败结果一旦被缓存，一次开机早期的偶发失败就会让整个进程寿命都用上 CPU
+    （真机踩过：有核显却一直显示 CPU）。所以这里显式断言「每次都会重探」。
+    """
     cfg = _cfg(tmp_path)
     calls: list[str] = []
 
@@ -70,17 +74,64 @@ def test_hardware_probe_failure_falls_back(tmp_path: Path, monkeypatch) -> None:
     assert pick_encoder(cfg, "/usr/bin/ffmpeg").name == CPU_ENCODER
     before = len(calls)
     assert pick_encoder(cfg, "/usr/bin/ffmpeg").name == CPU_ENCODER
-    assert len(calls) == before, "第二次应该命中缓存，不再跑探测"
+    assert len(calls) > before, "失败不该被缓存，第二次仍要重新探测"
 
 
-def test_broken_encoder_is_not_retried(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
-    """真实转码时硬件编码失败，本进程内直接改用 CPU。"""
+def test_hardware_probe_success_is_cached(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """探测成功要缓存：否则每次转码都要白跑一遍探测。"""
+    cfg = _cfg(tmp_path)
+    probes: list[str] = []
+
+    def fake_probe(ffmpeg: str, spec: media.EncoderSpec, timeout: int = 20) -> bool:  # noqa: ARG001
+        probes.append(spec.name)
+        return True
+
+    monkeypatch.setattr(media, "_probe_encoder", fake_probe)
+    assert pick_encoder(cfg, "/usr/bin/ffmpeg").name != CPU_ENCODER
+    before = len(probes)
+    assert pick_encoder(cfg, "/usr/bin/ffmpeg").name != CPU_ENCODER
+    assert len(probes) == before, "第二次应该命中缓存，不再跑探测"
+
+
+
+def test_broken_encoder_cools_down_then_recovers(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """真实转码失败后进入冷却期，冷却期内不再用它；冷却结束自动重试。
+
+    旧实现是「一次失败永久拉黑」，弱核显偶发失败后整台机器就只剩 CPU 编码
+    （实测 4 路转码里 2 路走 CPU、整机 CPU 96% 而 GPU 只 10%），所以改成限时冷却。
+    """
     cfg = _cfg(tmp_path)
     monkeypatch.setattr(media, "_probe_encoder", lambda *a, **k: True)
-    assert pick_encoder(cfg, "/usr/bin/ffmpeg").name != CPU_ENCODER
     first = pick_encoder(cfg, "/usr/bin/ffmpeg").name
-    mark_encoder_broken(first)
+    assert first != CPU_ENCODER
+
+    mark_encoder_broken(first, cooldown=60)
+    # 冷却期内：不再选它（换下一个候选，或回落 CPU）
+    assert pick_encoder(cfg, "/usr/bin/ffmpeg").name != first
+    assert media._encoder_cooling(first) is True
+
+    # 冷却到期：重新可用（先清掉冷却期内写进缓存的「次选」，模拟下次转码重新探测）
+    real_time = media.time.time          # 先抓住真函数：monkeypatch 换的正是它
+    monkeypatch.setattr(media.time, "time", lambda: real_time() + 61)
+    with media._ENC_LOCK:
+        media._ENC_CACHE.clear()
+    assert pick_encoder(cfg, "/usr/bin/ffmpeg").name == first
+    assert media._encoder_cooling(first) is False
+
+
+def test_encoder_cooldown_is_not_permanent(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """只指定一个硬件编码器时，冷却期内回落 CPU，冷却结束后回到硬件。"""
+    cfg = _cfg(tmp_path)
+    cfg.update({"transcode_encoder": "h264_qsv"})
+    monkeypatch.setattr(media, "_probe_encoder", lambda *a, **k: True)
+    assert pick_encoder(cfg, "/usr/bin/ffmpeg").name == "h264_qsv"
+
+    mark_encoder_broken("h264_qsv", cooldown=30)
     assert pick_encoder(cfg, "/usr/bin/ffmpeg").name == CPU_ENCODER
+
+    real_time = media.time.time
+    monkeypatch.setattr(media.time, "time", lambda: real_time() + 31)
+    assert pick_encoder(cfg, "/usr/bin/ffmpeg").name == "h264_qsv"
 
 
 def test_explicit_missing_encoder_falls_back(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
