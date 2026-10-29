@@ -127,7 +127,7 @@ class Api(baseUrl: String, var token: String? = null) {
         tags: Collection<Int> = emptyList(),
     ): VideoPage {
         val query = buildString {
-            append("/api/videos?limit=500&sort=added&order=asc")
+            append("/api/videos?limit=0&sort=added&order=asc")
             when {
                 filter == "tagged" -> append("&status=tagged")
                 filter == "idle" -> append("&status=idle")

@@ -237,6 +237,11 @@ async function runScan(payload: ScanPayload = {}) {
     setTimeout(() => { scan.percent = 0; scan.text = '' }, 6000)
   }
 }
+// 标签行内的「扫描」：只扫这个标签对应的文件夹
+function scanTag(id: number) {
+  if (scan.running) { toast('正在扫描，稍等一下'); return }
+  void runScan({ tag_ids: [id] })
+}
 const newSource = ref('')
 async function addSource() {
   const p = newSource.value.trim()
@@ -270,11 +275,107 @@ const sel = reactive(new Set<number>())
 // 视频库分两组展示：还在源文件夹里的 / 已按标签整理到标签文件夹的
 const sourceVideos = computed(() => videos.value.filter((v) => !v.organized))
 const organizedVideos = computed(() => videos.value.filter((v) => v.organized))
-const libGroups = computed(() => [
-  { k: 'source', title: '源文件夹', icon: 'folder', desc: '还没整理，文件仍在源文件夹里', items: sourceVideos.value },
-  { k: 'organized', title: '标签文件夹', icon: 'tag', desc: '已整理，文件已移动到标签对应的文件夹', items: organizedVideos.value },
-])
+type LibKey = 'source' | 'organized'
+// 分组内筛选：纯前端过滤，只影响视频库这两张卡片的展示，不影响播放列表
+const libPick = reactive<Record<LibKey, number | 'all'>>({ source: 'all', organized: 'all' })
+const libOpen = reactive<Record<LibKey, boolean>>({ source: false, organized: false })
+const libH = reactive<Record<LibKey, { full: number; collapsed: number; rowH: number }>>({
+  source: { full: 0, collapsed: 0, rowH: 0 },
+  organized: { full: 0, collapsed: 0, rowH: 0 },
+})
+const libBodies: Partial<Record<LibKey, HTMLElement | null>> = {}
+
+function normPath(p: string) { return (p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() }
+function srcLabel(s: Source) {
+  if (s.kind === 'upload') return '手机上传'
+  const seg = normPath(s.path).split('/').filter(Boolean)
+  return seg[seg.length - 1] || s.path
+}
+function inSource(v: Video, s: Source) {
+  const base = normPath(s.path)
+  if (!base) return false
+  const p = normPath(v.path)
+  return p === base || p.startsWith(base + '/')
+}
+const libGroups = computed(() => {
+  const base: { k: LibKey; title: string; icon: string; desc: string; items: Video[] }[] = [
+    { k: 'source', title: '源文件夹', icon: 'folder', desc: '还没整理，文件仍在源文件夹里', items: sourceVideos.value },
+    { k: 'organized', title: '标签文件夹', icon: 'tag', desc: '已整理，文件已移动到标签对应的文件夹', items: organizedVideos.value },
+  ]
+  return base.map((g) => {
+    const pick = libPick[g.k]
+    const opts: { k: number | 'all'; label: string; n: number; color?: string; title?: string }[] = [
+      { k: 'all', label: '全部', n: g.items.length },
+    ]
+    if (g.k === 'source') {
+      for (const s of sources.value) {
+        const n = g.items.filter((v) => inSource(v, s)).length
+        if (n) opts.push({ k: s.id, label: srcLabel(s), n, title: s.path })
+      }
+    } else {
+      for (const t of tags.value) {
+        const n = g.items.filter((v) => v.tag_id === t.id).length
+        if (n) opts.push({ k: t.id, label: t.name, n, color: t.color })
+      }
+    }
+    const items = pick === 'all'
+      ? g.items
+      : g.k === 'source'
+        ? g.items.filter((v) => {
+            const s = sources.value.find((x) => x.id === pick)
+            return s ? inSource(v, s) : false
+          })
+        : g.items.filter((v) => v.tag_id === pick)
+    return { ...g, total: g.items.length, items, opts }
+  })
+})
 const libLoading = ref(false)
+
+function pickLibFilter(k: LibKey, v: number | 'all') {
+  libPick[k] = v
+  nextTick(() => measureLib(k))
+}
+function toggleLibGroup(k: LibKey) {
+  libOpen[k] = !libOpen[k]
+  nextTick(() => measureLib(k))
+}
+function bindLibBody(k: LibKey, el: any) {
+  libBodies[k] = el as HTMLElement | null
+  measureLib(k)
+}
+// 收起时固定露两行卡片；展开时铺开全部，高度过渡做动画。
+// 高度按「行数 × 卡片高 + 间距」算，不用 scrollHeight（容器有固定高度时 scrollHeight 不会变小）
+function measureLib(k?: LibKey) {
+  for (const key of (k ? [k] : (['source', 'organized'] as LibKey[]))) {
+    const el = libBodies[key]
+    if (!el) continue
+    const cards = [...el.querySelectorAll<HTMLElement>('.vcard')]
+    if (!cards.length) {
+      libH[key].rowH = 0; libH[key].full = 0; libH[key].collapsed = 0
+      continue
+    }
+    const rowH = cards[0].offsetHeight
+    const rows = new Set(cards.map((c) => Math.round(c.getBoundingClientRect().top))).size
+    const full = rows * rowH + (rows - 1) * 13
+    libH[key].rowH = rowH
+    libH[key].full = full
+    libH[key].collapsed = Math.min(full, rowH * 2 + 13)
+  }
+}
+function libCanToggle(k: LibKey) {
+  const s = libH[k]
+  return s.full > s.collapsed + 1
+}
+function libBodyStyle(k: LibKey) {
+  const s = libH[k]
+  const h = libCanToggle(k) && !libOpen[k] ? s.collapsed : s.full
+  const style: Record<string, string> = {}
+  if (h) style.height = `${h}px`
+  if (s.rowH) style['--lib-card-h'] = `${s.rowH}px`
+  return style
+}
+watch([videos, sources, tags, () => lib.mode, () => [libPick.source, libPick.organized]],
+  () => nextTick(() => measureLib()))
 
 const libChips = computed<any[]>(() => {
   const base = [
@@ -306,7 +407,7 @@ async function loadLibrary() {
       status: lib.status,
       tags: lib.tags.size ? [...lib.tags].join(',') : undefined,
       q: lib.q.trim() || undefined,
-      sort: 'added', order: 'desc', limit: 600,
+      sort: 'added', order: 'desc', limit: 0,
     })
     videos.value = r.items
     counts.lib = ((r.counts as any)?.total) || r.items.length
@@ -843,6 +944,8 @@ onBeforeUnmount(() => {
 })
 function onResize() {
   if (window.innerWidth > 820) navOpen.value = false
+  // 列数变了卡片高度也变，收起高度要重算
+  nextTick(() => measureLib())
 }
 </script>
 
@@ -1042,10 +1145,28 @@ function onResize() {
             <div class="lib-group-head">
               <span class="ico"><Icon :name="g.icon" :size="14" /></span>
               <b>{{ g.title }}</b>
-              <span class="cnt">{{ g.items.length }}</span>
+              <span class="cnt">{{ g.items.length }}<template v-if="g.items.length !== g.total"> / {{ g.total }}</template></span>
               <span class="sub">{{ g.desc }}</span>
+              <div class="sp" />
+              <button v-if="libCanToggle(g.k)" class="btn ghost sm lib-toggle" :title="libOpen[g.k] ? '收起' : '展开全部'" @click="toggleLibGroup(g.k)">
+                {{ libOpen[g.k] ? '收起' : '展开' }}
+                <Icon :name="libOpen[g.k] ? 'chevron-up' : 'chevron-down'" :size="14" />
+              </button>
             </div>
-            <div v-if="g.items.length" class="grid" :class="{ 'as-list': lib.mode === 'list' }">
+            <div v-if="g.opts.length > 1" class="lib-filters">
+              <button
+                v-for="o in g.opts"
+                :key="String(o.k)"
+                class="chip sm"
+                :class="{ on: libPick[g.k] === o.k }"
+                :title="o.title || ''"
+                @click="pickLibFilter(g.k, o.k)"
+              >
+                <span v-if="o.color" class="dot" :style="{ background: o.color }" />{{ o.label }}<span class="n">{{ o.n }}</span>
+              </button>
+            </div>
+            <div v-if="g.items.length" class="lib-body" :class="{ open: libOpen[g.k] }" :ref="(el) => bindLibBody(g.k, el)" :style="libBodyStyle(g.k)">
+              <div class="grid" :class="{ 'as-list': lib.mode === 'list' }">
               <div v-for="v in g.items" :key="v.id" class="vcard" :class="{ sel: sel.has(v.id) }" @click="openVideo(v)">
               <div class="vthumb" :style="v.thumb_url ? { backgroundImage: `url(${v.thumb_url})` } : {}">
                 <span class="pick" @click.stop="toggleSel(v.id)"><Icon name="check" :size="12" /></span>
@@ -1067,8 +1188,9 @@ function onResize() {
                 </div>
               </div>
             </div>
+              </div>
             </div>
-            <div v-else class="lib-empty">这个分组里还没有视频</div>
+            <div v-else class="lib-empty">{{ g.total ? '这个筛选下没有视频' : '这个分组里还没有视频' }}</div>
           </div>
           <div v-if="!videos.length && !libLoading" class="empty">没有符合条件的视频</div>
           <div v-if="sel.size" class="bulk">
@@ -1119,6 +1241,7 @@ function onResize() {
                 <span v-if="tagState[t.id] === 'saving'">保存中…</span>
                 <span v-else-if="tagState[t.id] === 'err'" class="err">保存失败</span>
               </span>
+              <button class="icon-act" title="扫描这个标签的文件夹" :disabled="scan.running" @click="scanTag(t.id)"><Icon name="refresh" :size="15" /></button>
               <button class="icon-act dg" title="删除" @click="delTag.tag = t; delTag.show = true"><Icon name="trash" :size="15" /></button>
 
               <div v-if="colorPop.id === t.id" class="color-pop" @click.stop>

@@ -58,7 +58,7 @@ def list_videos(
     q: str = Query("", description="文件名关键字"),
     sort: str = Query("added"),
     order: str = Query("desc"),
-    limit: int = Query(200, ge=1, le=2000),
+    limit: int = Query(200, ge=0, description="返回条数；0 表示不限（一次返回全部）"),
     offset: int = Query(0, ge=0),
     user: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -101,10 +101,17 @@ def list_videos(
     }
     col = sorts.get(sort, "v.added_at")
     direction = "ASC" if order.lower() == "asc" else "DESC"
-    rows = st.db.query(
-        VIDEO_SQL + clause + f" ORDER BY {col} {direction} LIMIT ? OFFSET ?",
-        (*args, limit, offset),
-    )
+    if limit > 0:
+        rows = st.db.query(
+            VIDEO_SQL + clause + f" ORDER BY {col} {direction} LIMIT ? OFFSET ?",
+            (*args, limit, offset),
+        )
+    else:
+        # limit=0：不限条数（视频库/播放列表要求显示全部）
+        rows = st.db.query(
+            VIDEO_SQL + clause + f" ORDER BY {col} {direction}",
+            tuple(args),
+        )
     total = st.db.query_one("SELECT COUNT(*) AS n FROM videos v" + clause, tuple(args))["n"]
     counts = {r["status"]: r["n"] for r in st.db.query(
         "SELECT status, COUNT(*) AS n FROM videos GROUP BY status")}

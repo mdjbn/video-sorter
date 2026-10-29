@@ -69,7 +69,7 @@ async function loadVideos(keepId?: number) {
   const q: any = {}
   if (status.value !== 'all') q.status = status.value
   if (pickedTags.value.size) q.tags = [...pickedTags.value].join(',')
-  const res = await api.videos({ ...q, limit: 2000, sort: 'added', order: 'asc' })
+  const res = await api.videos({ ...q, limit: 0, sort: 'added', order: 'asc' })
   videos.value = res.items
   counts.value = res.counts
   loading.value = false
