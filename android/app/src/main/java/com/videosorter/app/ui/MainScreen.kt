@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +79,10 @@ fun MainScreen(
     var tagFilter by remember { mutableStateOf<Set<Int>>(emptySet()) }
     // 视频库搜索词放在这一层：切到别的 tab 再回来（ListScreen 被销毁重建）也不会丢
     var libQuery by rememberSaveable { mutableStateOf("") }
+    // 视频库的滚动位置同理：AnimatedContent 切 tab 会重建 ListScreen，state 提上来才留得住
+    val libListState = rememberLazyListState()
+    // 播放页是否处于横屏全屏：全屏时把底部标签栏一起藏掉，画面才真的铺满
+    var playerFullscreen by remember { mutableStateOf(false) }
 
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -213,6 +218,7 @@ fun MainScreen(
                     Box(Modifier.fillMaxSize().background(Color.Black))
                 } else PlayerScreen(
                     api = api,
+                    onFullscreenChange = { playerFullscreen = it },
                     videos = videos,
                     tags = tags,
                     counts = counts,
@@ -274,6 +280,7 @@ fun MainScreen(
                     onOpenTransfer = { transferOpen = true },
                     toast = ::toast,
                     sheets = sheets,
+                    listState = libListState,
                 )
 
                 2 -> OrganizeScreen(
@@ -330,7 +337,7 @@ fun MainScreen(
                     if (it != 3) settingsSub = false
                     tab = it
                 },
-                visible = !transferOpen && !sheets.visible && !settingsSub,
+                visible = !transferOpen && !sheets.visible && !settingsSub && !playerFullscreen,
             )
         }
 

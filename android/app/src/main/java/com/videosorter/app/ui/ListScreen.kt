@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -82,6 +83,8 @@ fun ListScreen(
     onOpenTransfer: () -> Unit,
     toast: (String) -> Unit,
     sheets: SheetState,
+    // 列表滚动状态由 MainScreen 持有：切到别的 tab 再回来位置不变（AnimatedContent 会重建本组件）
+    listState: LazyListState,
 ) {
     val t = tokens()
 
@@ -225,6 +228,7 @@ fun ListScreen(
             )
 
             else -> LazyColumn(
+                state = listState,
                 contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(9.dp),
                 modifier = Modifier.fillMaxSize(),

@@ -255,6 +255,13 @@ class Api(baseUrl: String, var token: String? = null) {
         sendJson<OkOut>("/api/tags/$id", "DELETE", "{}")
     }
 
+    /**
+     * 按拖动结果的顺序重排标签（后端只改 sort_order，返回重排后的完整标签表）。
+     * 注意 method 必须显式写 "PUT"：build() 少 PUT 分支时会静默变成 GET。
+     */
+    suspend fun reorderTags(ids: List<Int>): List<Tag> =
+        sendJson<TagList>("/api/tags/order", "PUT", """{"ids":[${ids.joinToString(",")}]}""").tags
+
     suspend fun changePassword(old: String, new: String): String =
         sendJson<MessageOut>("/api/auth/password", "POST",
             """{"old_password":${json.encodeToString(old)},"new_password":${json.encodeToString(new)}}""").message

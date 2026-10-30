@@ -1,5 +1,6 @@
 package com.videosorter.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -13,6 +14,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -44,9 +47,11 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.LabelOff
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.Icon
@@ -61,6 +66,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -125,11 +131,22 @@ fun PlayerScreen(
     sheets: SheetState,
     onOpenList: () -> Unit = {},
     onRefresh: () -> Unit = {},
+    onFullscreenChange: (Boolean) -> Unit = {},
 ) {
     val t = tokens()
     val ctx = LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val dark = t.dark
+    // 横屏全屏：只由这个按钮控制，不跟随手机旋转（列表/设置等其他页面永远竖屏）
+    var fullscreen by remember { mutableStateOf(false) }
+    FullscreenEffect(fullscreen)
+    LaunchedEffect(fullscreen) { onFullscreenChange(fullscreen) }
+    // 全屏时返回键先退出全屏，而不是直接退出 App / 跳回列表
+    BackHandler(enabled = fullscreen) { fullscreen = false }
+    // 离开播放页时把外层状态复位，否则切到列表页底部标签栏会是隐藏的
+    DisposableEffect(Unit) {
+        onDispose { onFullscreenChange(false) }
+    }
 
     // 媒体请求也要带 Bearer 令牌：/api/videos/{id}/raw 与 HLS 分片都要求鉴权，
     // 否则 ExoPlayer 会拿到 401 并报 ERROR_CODE_IO_BAD_HTTP_STATUS。
@@ -547,6 +564,26 @@ fun PlayerScreen(
         }
     }
 
+    // 全屏时控件默认收起来只留画面；暂停，或播放中轻点屏幕，就把控件浮出来。
+    // 注意不能用 AnimatedVisibility 包：它会打断修饰符原先所在的布局作用域，
+    // 里面写的 .align(Alignment.TopCenter) 会失效，整块跑到左上角去。
+    // 用 remember 持有的 State 作为唯一真相来源：手势层闭包里读到的 .value 永远是最新的，
+    // 界面也直接读同一个对象，两边不会分叉。
+    val fullscreenChromeRef = remember { mutableStateOf(false) }
+    val fullscreenChrome = fullscreenChromeRef.value
+    val chromeVisible = !fullscreen || fullscreenChrome || !playing
+    // 手势层的 pointerInput lambda 只在 key 变化时重建，闭包里的普通变量会一直是旧值。
+    // 这里用 remember 持有的 State 对象做「引用」，在 lambda 里读 .value 才能拿到最新状态。
+    val fullscreenRef = remember { mutableStateOf(fullscreen) }
+    val playingRef = remember { mutableStateOf(playing) }
+    fullscreenRef.value = fullscreen
+    playingRef.value = playing
+    val chromeAlpha by animateFloatAsState(
+        targetValue = if (chromeVisible) 1f else 0f,
+        animationSpec = tween(200),
+        label = "chrome-alpha",
+    )
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // 续播定位完成前先空一帧：否则会先露出第一个视频再滑上去（闪烁）
         if (count > 0 && !syncReady) {
@@ -666,7 +703,9 @@ fun PlayerScreen(
                     surfaceW = it.width.toFloat().coerceAtLeast(1f)
                     surfaceH = it.height.toFloat().coerceAtLeast(1f)
                 }
-                .pointerInput(current?.id, lockedSpeed) {
+                // fullscreen 必须进 key：否则手势闭包捕获的是旧的 fullscreen/chromeVisible，
+                // 全屏下轻点永远走成「暂停」而不是「唤出控件」
+                .pointerInput(current?.id, lockedSpeed, fullscreen) {
                     val dragThreshold = 56.dp.toPx()
                     // 双击左右半屏快进/回退
                     val doubleTapMs = viewConfiguration.doubleTapTimeoutMillis
@@ -760,7 +799,19 @@ fun PlayerScreen(
                                             singleTapJob?.cancel()
                                             singleTapJob = scope.launch {
                                                 delay(doubleTapMs.toLong())
-                                                togglePlay()
+                                                // 直接读源状态，避免闭包拿到过期的派生值
+                                                val fs = fullscreenRef.value
+                                                if (fs) {
+                                                    // 全屏：暂停时轻点先恢复播放并收起控件；播放中轻点则切换控件显隐
+                                                    if (!playingRef.value) {
+                                                        fullscreenChromeRef.value = false
+                                                        togglePlay()
+                                                    } else {
+                                                        fullscreenChromeRef.value = !fullscreenChromeRef.value
+                                                    }
+                                                } else {
+                                                    togglePlay()
+                                                }
                                             }
                                         }
                                     }
@@ -832,19 +883,25 @@ fun PlayerScreen(
         )
 
         // ---------- 顶部（玻璃） ----------
+        // 全屏时一起淡出：只留视频画面
+        // 全屏收起来时这一层不参与命中测试（用 heightIn 里的 0 高度做不到，这里靠
+        // wrapContentHeight + 只在可见时组合内容），手势层才能照常收事件。
         Row(
             Modifier
                 .align(Alignment.TopCenter)
-                .statusBarsPadding()
+                .then(if (fullscreen) Modifier else Modifier.statusBarsPadding())
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 10.dp),
+                .graphicsLayer { alpha = chromeAlpha }
+                .padding(start = 16.dp, end = 16.dp, top = if (fullscreen) 12.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (chromeVisible) {
             GlassChip(onClick = onOpenList) {
                 Text("待整理", color = t.ink(0.86f), fontSize = 11.5.sp)
                 // 用当前列表范围统计，筛选后与视频库保持一致
                 Text("${videos.count { !it.isOrganized }}", color = t.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text("/ ${videos.size}", color = t.ink(0.5f), fontSize = 11.sp)
+            }
             }
         }
 
@@ -926,13 +983,37 @@ fun PlayerScreen(
 
         // ---------- 底部信息 ----------
         // 试做版：完全去掉底部渐隐，画面一刀不糊
+        // 全屏时整块隐藏（淡出），只留画面；退出全屏再淡回来
+        // 全屏时控件浮在视频上方，垫一层下深上浅的渐变，保证文字和胶囊看得清
+        if (fullscreen && chromeVisible) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .graphicsLayer { alpha = chromeAlpha }
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.92f))
+                        )
+                    )
+            )
+        }
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(start = 18.dp, end = 18.dp, top = 30.dp, bottom = 92.dp),
+                .graphicsLayer { alpha = chromeAlpha }
+                // 竖屏底部要避开 tab 栏（92dp）；全屏时贴屏幕底边即可（系统栏已隐藏）
+                .padding(
+                    start = 18.dp,
+                    end = 18.dp,
+                    top = 30.dp,
+                    bottom = if (fullscreen) 14.dp else 92.dp,
+                ),
         ) {
+            if (chromeVisible) {
             current?.let { v ->
                 // 浅色主题也统一用白字（和深色主题一致），再压一层深色阴影，
                 // 这样画面偏亮时也能看清
@@ -995,6 +1076,21 @@ fun PlayerScreen(
                         contentDescription = if (tagsOpen) "收起标签栏" else "展开标签栏",
                     )
                     Spacer(Modifier.width(6.dp))
+                    // 全屏按钮：放在「更多」左边，进出全屏用缩放 + 淡入淡出
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn(tween(200)) + scaleIn(tween(220), initialScale = 0.86f),
+                        exit = fadeOut(tween(160)) + scaleOut(tween(160), targetScale = 0.86f),
+                    ) {
+                        GlassIconButton(
+                            icon = if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                            onClick = { fullscreen = !fullscreen },
+                            size = 30,
+                            iconSize = 16,
+                            contentDescription = if (fullscreen) "退出全屏" else "横屏全屏播放",
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
                     // 「更多」放在信息区右侧（原在右上角，按设计反馈下移）
                     GlassIconButton(
                         icon = Icons.Rounded.MoreHoriz,
@@ -1028,7 +1124,11 @@ fun PlayerScreen(
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(if (on) c else t.glass)
                                 .border(1.dp, if (on) Color.Transparent else t.glassBorder, RoundedCornerShape(14.dp))
-                                .clickable { onTag(v.id, if (on) null else tag.id) }
+                                // 不要点击水波纹：标签点下去立刻亮起就算反馈了，涟漪反而像卡了一下
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) { onTag(v.id, if (on) null else tag.id) }
                                 .padding(horizontal = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -1163,7 +1263,11 @@ fun PlayerScreen(
                     Text("/ ${fmtDuration(duration.takeIf { it > 0 } ?: v.duration)}", color = t.ink(0.42f), fontSize = 10.sp)
                 }
             }
+            }
         }
+
+        // ---------- 全屏按钮：放在「更多」左边 ----------
+        // 始终浮在画面右下角（全屏时也留着，否则退不出去）；进出全屏用缩放 + 淡入淡出做动画
     }
 }
 

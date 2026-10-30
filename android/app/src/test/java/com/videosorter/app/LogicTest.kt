@@ -9,6 +9,7 @@ import com.videosorter.app.data.Video
 import com.videosorter.app.data.parseReply
 import com.videosorter.app.data.VideoPage
 import com.videosorter.app.ui.CACHE_MB_OPTIONS
+import com.videosorter.app.ui.DragReorder
 import com.videosorter.app.ui.MAX_SHOWN
 import com.videosorter.app.ui.OrganizeFailState
 import com.videosorter.app.ui.cacheBytesText
@@ -316,4 +317,74 @@ class LogicTest {
         st.expanded = false
         assertFalse(st.expanded)
     }
+    // ---------------- 标签拖动排序（DragReorder） ----------------
+
+    /** 三行、每行高 100：中心分别在 50 / 150 / 250。 */
+    private fun threeRows() = listOf(
+        DragReorder.RowY(0, 0f, 100f),
+        DragReorder.RowY(1, 100f, 200f),
+        DragReorder.RowY(2, 200f, 300f),
+    )
+
+    /**
+     * 落点语义：返回的是「最终下标」，坐标系还是 from 那一行仍在位的当前列表。
+     * 三行高 100，中心 50 / 150 / 250。
+     */
+    @Test
+    fun dragStaysPutWhileAboveTheNextRowCenter() {
+        // 第 0 行中心 50，往下拖到 140：还没越过第 1 行的中心 150 → 不动
+        val target = DragReorder.targetIndex(140f, threeRows(), from = 0, count = 3)
+        assertEquals(0, target)
+        assertEquals(listOf(0, 1, 2), DragReorder.move(listOf(0, 1, 2), 0, target))
+    }
+
+    @Test
+    fun dragMovesDownPastNeighbourCenter() {
+        // 越过第 1 行中心 150 → 换到 1
+        val t1 = DragReorder.targetIndex(160f, threeRows(), from = 0, count = 3)
+        assertEquals(1, t1)
+        assertEquals(listOf(1, 0, 2), DragReorder.move(listOf(0, 1, 2), 0, t1))
+        // 越过第 2 行中心 250 → 换到 2（末尾）
+        val t2 = DragReorder.targetIndex(260f, threeRows(), from = 0, count = 3)
+        assertEquals(2, t2)
+        assertEquals(listOf(1, 2, 0), DragReorder.move(listOf(0, 1, 2), 0, t2))
+    }
+
+    @Test
+    fun dragMovesUpPastNeighbourCenter() {
+        // 第 2 行中心 250，往上拖到 140：第一个「中心 > 140」的行是第 1 行（150）→ 插到它前面 = 1
+        val t1 = DragReorder.targetIndex(140f, threeRows(), from = 2, count = 3)
+        assertEquals(1, t1)
+        assertEquals(listOf(0, 2, 1), DragReorder.move(listOf(0, 1, 2), 2, t1))
+        // 再往上拖到 40：没有任何行中心在 40 下方 → 落到最上面 0
+        val t0 = DragReorder.targetIndex(40f, threeRows(), from = 2, count = 3)
+        assertEquals(0, t0)
+        assertEquals(listOf(2, 0, 1), DragReorder.move(listOf(0, 1, 2), 2, t0))
+    }
+
+    @Test
+    fun dragTargetIsClampedToBounds() {
+        // 拖到屏幕上方之外 / 下方之外都要收在 0..count-1
+        assertEquals(0, DragReorder.targetIndex(-500f, threeRows(), from = 1, count = 3))
+        assertEquals(2, DragReorder.targetIndex(5000f, threeRows(), from = 1, count = 3))
+    }
+
+    @Test
+    fun moveKeepsOrderAndHandlesEdge() {
+        assertEquals(listOf("b", "a", "c"), DragReorder.move(listOf("a", "b", "c"), 0, 1))
+        assertEquals(listOf("b", "c", "a"), DragReorder.move(listOf("a", "b", "c"), 0, 2))
+        assertEquals(listOf("c", "a", "b"), DragReorder.move(listOf("a", "b", "c"), 2, 0))
+        // 原地不动 / 越界下标都不改内容
+        assertEquals(listOf("a", "b", "c"), DragReorder.move(listOf("a", "b", "c"), 1, 1))
+        assertEquals(listOf("a", "b", "c"), DragReorder.move(listOf("a", "b", "c"), 9, 0))
+    }
+
+    @Test
+    fun moveProducesTheSameIdsAsTargetIndex() {
+        // 拖一次完整链路：算落点 + 应用移动，确认顺序真的换了
+        val ids = listOf(10, 20, 30)
+        val target = DragReorder.targetIndex(260f, threeRows(), from = 0, count = ids.size)
+        assertEquals(listOf(20, 30, 10), DragReorder.move(ids, 0, target))
+    }
+
 }

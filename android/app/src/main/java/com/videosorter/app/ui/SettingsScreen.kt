@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -72,6 +74,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -763,65 +766,90 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.Add, "新建标签", tint = t.ink(0.75f), modifier = Modifier.size(17.dp)) }
     }) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
-            GroupCard {
-                tags.forEachIndexed { i, tag ->
-                    if (i > 0) RowDivider()
-                    Row(
-                        Modifier.fillMaxWidth().clickable { openEdit(tag) }.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(hexColor(tag.color)))
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(tag.name, color = t.ink(0.9f), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                "目标：${tag.dirPath?.takeIf { it.isNotEmpty() } ?: "按规则自动（源目录/标签名）"}",
-                                color = t.muted2,
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Text("${tag.count} 个", color = t.muted2, fontSize = 10.5.sp)
-                        Spacer(Modifier.width(6.dp))
-                        // 每个标签自己的扫描按钮：只扫这个标签对应的文件夹
-                        Box(
-                            Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(t.ink(0.05f))
-                                .clickable {
-                                    if (scanning) onToast("正在扫描，稍等一下") else scanOne(tag)
-                                },
-                            contentAlignment = Alignment.Center,
+        // 长按拖动排序：本地先排好给人看，松手才发请求；失败就退回原顺序并提示
+        var shown by remember { mutableStateOf(tags) }
+        var saving by remember { mutableStateOf(false) }
+        val sort = remember { DragSortState() }
+        val listState = rememberLazyListState()
+        // tags 每次刷新都是新对象，得跟着同步一次（拖动中不改，免得打架）
+        LaunchedEffect(tags) { if (!sort.dragging) shown = tags }
+
+        fun orderChanged(): Boolean = shown.map { it.id } != tags.map { it.id }
+
+        fun drop() {
+            sort.end()
+            if (!orderChanged() || saving) return
+            val ids = shown.map { it.id }
+            saving = true
+            scope.launch {
+                try {
+                    shown = api.reorderTags(ids)
+                    onToast("标签顺序已保存")
+                    onRefresh()
+                } catch (e: Throwable) {
+                    shown = tags
+                    onToast("保存标签顺序失败：${e.message ?: ""}")
+                } finally {
+                    saving = false
+                }
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(18.dp),
+        ) {
+            item(key = "tags-card") {
+                GroupCard {
+                    shown.forEachIndexed { i, tag ->
+                        if (i > 0) RowDivider()
+                        DragSortItem(
+                            index = i,
+                            count = shown.size,
+                            dragging = sort.dragIndex == i,
+                            startDrag = { if (!saving) sort.start(i) },
+                            dragBy = { dy ->
+                                sort.dragBy(dy)
+                                val from = sort.dragIndex
+                                if (from >= 0) {
+                                    // 手指把这一行拖过邻居一半就换位，边拖边排
+                                    val rows = listState.visibleRowYs()
+                                    val me = rows.firstOrNull { it.index == from }
+                                    if (me != null) {
+                                        val target = DragReorder.targetIndex(
+                                            draggedCenter = me.center + sort.dragOffset,
+                                            rows = rows, from = from, count = shown.size,
+                                        )
+                                        if (target != from) {
+                                            shown = DragReorder.move(shown, from, target)
+                                            sort.start(target)
+                                        }
+                                    }
+                                }
+                            },
+                            endDrag = { drop() },
+                            onClick = { if (sort.dragIndex < 0) openEdit(tag) },
                         ) {
-                            if (scanTagId == tag.id) {
-                                CircularProgressIndicator(
-                                    Modifier.size(13.dp),
-                                    strokeWidth = 1.6.dp,
-                                    color = t.accent,
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Rounded.Refresh,
-                                    contentDescription = "扫描「${tag.name}」的文件夹",
-                                    tint = t.ink(0.55f),
-                                    modifier = Modifier.size(15.dp),
-                                )
-                            }
+                            TagRow(
+                                tag = tag,
+                                dim = sort.dragIndex == i,
+                                scanning = scanning,
+                                scanTagId = scanTagId,
+                                accent = t.accent,
+                                onScan = { if (scanning) onToast("正在扫描，稍等一下") else scanOne(tag) },
+                            )
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
-                color = t.muted2, fontSize = 10.5.sp, lineHeight = 15.sp,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
-            Spacer(Modifier.height(24.dp))
+            item(key = "tags-tip") {
+                Text(
+                    "长按标签行可以上下拖动排序；「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
+                    color = t.muted2, fontSize = 10.5.sp, lineHeight = 15.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
         }
     }
 
@@ -909,6 +937,62 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             dismissButton = {},
             containerColor = t.panel,
         )
+    }
+}
+
+/** 标签管理里的一行：色点 + 名称 + 目标目录 + 个数 + 单个标签的扫描按钮。 */
+@Composable
+private fun TagRow(
+    tag: Tag,
+    dim: Boolean,
+    scanning: Boolean,
+    scanTagId: Int?,
+    accent: androidx.compose.ui.graphics.Color,
+    onScan: () -> Unit,
+) {
+    val t = tokens()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .alpha(if (dim) 0.85f else 1f)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(hexColor(tag.color)))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(tag.name, color = t.ink(0.9f), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "目标：${tag.dirPath?.takeIf { it.isNotEmpty() } ?: "按规则自动（源目录/标签名）"}",
+                color = t.muted2,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text("${tag.count} 个", color = t.muted2, fontSize = 10.5.sp)
+        Spacer(Modifier.width(6.dp))
+        // 每个标签自己的扫描按钮：只扫这个标签对应的文件夹
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(t.ink(0.05f))
+                .clickable(onClick = onScan),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (scanTagId == tag.id) {
+                CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.6.dp, color = accent)
+            } else {
+                Icon(
+                    Icons.Rounded.Refresh,
+                    contentDescription = "扫描「${tag.name}」的文件夹",
+                    tint = t.ink(0.55f),
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
     }
 }
 
