@@ -9,6 +9,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,7 +43,6 @@ import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Label
@@ -50,6 +51,8 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Storage
@@ -776,153 +779,62 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         // 按住握把拖动排序：本地先排好给人看，松手才发请求；失败就退回原顺序并提示
         var shown by remember { mutableStateOf(tags) }
         var saving by remember { mutableStateOf(false) }
-        val sort = remember { DragSortState() }
         val listState = rememberLazyListState()
-        // 所有标签卡片都在 LazyColumn 里，LazyListState.visibleRowYs() 量不到卡片内部，
-        // 所以这里让每张卡自己上报位置，拖动时按这份实测数据算落点。
-        // 按 tag.id 记账，不用下标当身份：顺序一换，下标就指向别的卡片了，
-        // 上一轮残留的旧坐标会让第二次之后的拖动落到错的槽位（"第一次正常、后面偶发出错"）。
-        val rowTops = remember { mutableStateMapOf<Int, Float>() }
-        val rowBottoms = remember { mutableStateMapOf<Int, Float>() }
-        fun putRow(id: Int, top: Float, bottom: Float) {
-            rowTops[id] = top
-            rowBottoms[id] = bottom
-        }
-        /** 当前 [shown] 顺序下每行实测的区间，下标即列表下标。 */
-        fun measuredRows(): List<DragReorder.RowY> =
-            shown.indices.mapNotNull { i ->
-                val id = shown[i].id
-                val top = rowTops[id] ?: return@mapNotNull null
-                val bottom = rowBottoms[id] ?: return@mapNotNull null
-                if (bottom > top) DragReorder.RowY(i, top, bottom) else null
-            }
-        /** 某张卡实测的顶边 / 高度（按 id 查，顺序变了也不会张冠李戴）。 */
-        fun rowTopOf(i: Int): Float? = shown.getOrNull(i)?.let { rowTops[it.id] }
-        fun rowHeightOf(i: Int): Float? {
-            val id = shown.getOrNull(i)?.id ?: return null
-            val top = rowTops[id] ?: return null
-            val bottom = rowBottoms[id] ?: return null
-            return if (bottom > top) bottom - top else null
-        }
-        // tags 每次刷新都是新对象，得跟着同步一次（拖动中不改，免得打架）
-        LaunchedEffect(tags) {
-            if (!sort.dragging) shown = tags
-        }
-        // 注意：这里**不能**清空 rowTops/rowBottoms。清掉之后，已经组合好的卡片布局没变，
-        // onGloballyPositioned 不会重新触发，表就永远是空的 → 下一次按下时 handleStart
-        // 取不到位置，整次拖动直接失效（用户报的「第一次能拖、后面拖不动」）。
-        // 顺序一变，用 id 记账的旧值会被新一轮 onGloballyPositioned 覆盖；即使没覆盖，
-        // 也只是那一次用了过期坐标，比彻底拖不动好得多。
+        // tags 每次刷新都是新对象，得跟着同步一次
+        LaunchedEffect(tags) { shown = tags }
         // 进页面自己拉一次：顺序可能在网页端或别的设备上改过，
         // 只靠 MainScreen.reload() 的话这里会一直显示旧顺序
         LaunchedEffect(Unit) {
             try {
-                val fresh = api.tags()
-                if (!sort.dragging) shown = fresh
+                shown = api.tags()
             } catch (_: Throwable) {
                 // 拉不到就先用传进来的那份，不打扰用户
             }
         }
 
-        // 拖动过程中「谁在让位」：只记一个落点下标，不动 shown。
-        // 数据一旦在中途重排，LazyColumn 会立刻把卡片挪到新槽位，手指下的那张就会跳一下，
-        // 相邻卡片也要等下一帧才让开（看起来像叠在一起）。所以拖动期间只算浮动位置，
-        // 松手才把数据搬过去。
-        var dropIndex by remember { mutableStateOf(-1) }
-        val dragLift by animateDpAsState(if (sort.dragging) 3.dp else 0.dp, label = "drag-lift")
-
-        fun handleStart(index: Int) {
-            if (saving || sort.dragging) return
-            val top = rowTopOf(index) ?: 0f
-            val height = rowHeightOf(index) ?: 1f
-            // 实测还没到（比如刚进页面就按住）就先不启动，等测量回来
-            if (rowTopOf(index) == null) return
-            dropIndex = index
-            sort.start(index, top, height.coerceAtLeast(1f))
-        }
-
-        // 手指位移：先累计，再按「基准位置 + 累计位移」算落点。
-        // 换位时只改下标、不清位移，卡片才不会跳（之前清位移就是乱跳的根源）。
-        fun dragStep(dy: Float, index: Int) {
-            if (!sort.dragging) handleStart(index)
-            sort.dragBy(dy)
-            val from = sort.dragIndex
-            val rows = measuredRows()
-            if (from < 0 || rows.isEmpty()) return
-            // 卡片当前实际 y 由基准 + 手指位移推出来，不去读换位后可能还没重新测到的旧值
-            val top = sort.slotTop + sort.travel
-            val target = DragReorder.targetIndex(
-                draggedTop = top,
-                rows = rows, from = from, count = shown.size,
-                slotHeight = sort.slotHeight,
-            )
-            dropIndex = target
-        }
-
-        /**
-         * 其他卡片为了让开被拖卡片要挪多远。
-         *
-         * 拖动期间不动 [shown]（重排会让 LazyColumn 立刻搬迁，手指下那张会跳），
-         * 所以让位只能逐张算：往下拖时，被越过的卡片整体上移一格；往上拖时整体下移一格。
-         */
-        // 卡片间距 6dp，换算成像素供让位计算
-        val density = androidx.compose.ui.platform.LocalDensity.current
-        val gap = with(density) { 6.dp.toPx() }
-
-        fun rowHeight(i: Int): Float = rowHeightOf(i) ?: sort.slotHeight
-
-        /**
-         * 让位卡片该挪多远。
-         *
-         * [rowTops] 量的是「让位之前」的位置，直接拿来用会让靠后的卡片越让越晚（先被压住半格
-         * 才挪）。所以这里顺着自己这一侧一路推：
-         * 往下拖时，紧挨着被拖卡片（或上一张已让位的卡片）下方接上去；
-         * 往上拖时，紧挨着它（或下一张已让位的卡片）上方叠上去。
-         */
-        fun shiftFor(index: Int): Float {
-            val from = sort.dragIndex
-            val to = dropIndex
-            if (!sort.dragging || from < 0 || to < 0 || index == from) return 0f
-            val base = rowTopOf(index) ?: 0f
-            val moved = when {
-                // 往下拖：从被拖卡片空出来的位置开始，依次往下接
-                to > from && index in (from + 1)..to -> {
-                    var top = sort.slotTop
-                    for (k in (from + 1) until index) top += rowHeight(k) + gap
-                    top + sort.slotHeight + gap
-                }
-                // 往上拖：卡片依次往下退一格，退的都是自己这一格的高度
-                to < from && index in to until from -> base + rowHeight(index) + gap
-                else -> base
-            }
-            return moved - base
-        }
-
         fun orderChanged(): Boolean = shown.map { it.id } != tags.map { it.id }
 
-        fun drop() {
-            val from = sort.dragIndex
-            val to = dropIndex
-            sort.end()
-            dropIndex = -1
-            if (from >= 0 && to >= 0 && to != from && to < shown.size) {
-                shown = DragReorder.move(shown, from, to)
-            }
+        /** 把 [list] 从 [from] 挪到 [to]（就地换位，顺序立刻可见）。 */
+        fun moveTo(from: Int, to: Int) {
+            if (from < 0 || to < 0 || from >= shown.size || to >= shown.size || from == to) return
+            shown = DragReorder.move(shown, from, to)
+        }
+
+        /**
+         * 点一下按钮就把顺序存到后端。
+         *
+         * 之前用手势拖动，偶发失效很难调；按钮没有手势竞争问题，而且按下即生效、立刻可见。
+         * 保存失败要把 [shown] 退回 [tags]，否则界面显示的顺序和服务器不一致。
+         */
+        fun commit(fallback: List<Tag>) {
             if (!orderChanged() || saving) return
             val ids = shown.map { it.id }
             saving = true
             scope.launch {
                 try {
                     shown = api.reorderTags(ids)
-                    onToast("标签顺序已保存")
                     onRefresh()
                 } catch (e: Throwable) {
-                    shown = tags
+                    shown = fallback
                     onToast("保存标签顺序失败：${e.message ?: ""}")
                 } finally {
                     saving = false
                 }
             }
+        }
+
+        fun moveUp(index: Int) {
+            if (saving || index <= 0 || index >= shown.size) return
+            val before = shown
+            moveTo(index, index - 1)
+            commit(before)
+        }
+
+        fun moveDown(index: Int) {
+            if (saving || index < 0 || index >= shown.size - 1) return
+            val before = shown
+            moveTo(index, index + 1)
+            commit(before)
         }
 
         LazyColumn(
@@ -932,54 +844,32 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             contentPadding = PaddingValues(top = 14.dp, bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // 每个标签自己一张小卡片：拖动排序时整张卡一起走，卡片之间留 8dp 间隙
+            // 每个标签自己一张小卡片，卡片之间留间隙
             itemsIndexed(shown, key = { _, tag -> tag.id }) { i, tag ->
-                DragSortItem(
-                    index = i,
-                    count = shown.size,
-                    dragging = sort.dragIndex == i,
-                    longPressAnywhere = false,
-                    startDrag = { handleStart(i) },
-                    dragBy = { dy -> dragStep(dy, i) },
-                    endDrag = { drop() },
-                    onClick = { if (sort.dragIndex < 0) openEdit(tag) },
-                    onMeasured = { top, bottom -> putRow(tag.id, top, bottom) },
-                    // 被拖的那张卡：位移由 DragSortItem 挂在内层，外层保持静止，
-                    // 行测量才不会被自己拖走的位移污染。别的卡片拖动期间原地不动（不让位），
-                    // 松手重排时它们才换过去——这样中途就不会有卡片互相压着。
-                    offsetY = if (sort.dragIndex == i) sort.travel else shiftFor(i),
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 4.dp),
                 ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 4.dp)
-                            .graphicsLayer {
-                                // 按住时微微放大 + 投影，像从列表里被拎起来
-                                scaleX = if (sort.dragIndex == i) 1.02f else 1f
-                                scaleY = if (sort.dragIndex == i) 1.02f else 1f
-                                shadowElevation = if (sort.dragIndex == i) 12.dp.toPx() else 0f
-                            },
-                    ) {
-                        GroupCard {
-                            TagRow(
-                                tag = tag,
-                                dim = sort.dragIndex == i,
-                                scanning = scanning,
-                                scanTagId = scanTagId,
-                                accent = t.accent,
-                                dragging = sort.dragIndex == i,
-                                onScan = { if (scanning) onToast("正在扫描，稍等一下") else scanOne(tag) },
-                                onHandleStart = { handleStart(i) },
-                                onHandleDrag = { dy -> dragStep(dy, i) },
-                                onHandleEnd = { drop() },
-                            )
-                        }
+                    GroupCard {
+                        TagRow(
+                            tag = tag,
+                            scanning = scanning,
+                            scanTagId = scanTagId,
+                            accent = t.accent,
+                            canMoveUp = i > 0 && !saving,
+                            canMoveDown = i < shown.size - 1 && !saving,
+                            onScan = { if (scanning) onToast("正在扫描，稍等一下") else scanOne(tag) },
+                            onClick = { openEdit(tag) },
+                            onMoveUp = { moveUp(i) },
+                            onMoveDown = { moveDown(i) },
+                        )
                     }
                 }
             }
             item(key = "tags-tip") {
                 Text(
-                    "按住每行右侧的握把上下拖动即可调整标签顺序；「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
+                    "用每行右侧的上下箭头调整标签顺序，点一下立刻保存；「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
                     color = t.muted2, fontSize = 10.5.sp, lineHeight = 15.sp,
                     modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 10.dp),
                 )
@@ -1074,37 +964,69 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
     }
 }
 
-/** 标签管理里的一行：色点 + 名称 + 目标目录 + 个数 + 单个标签的扫描按钮。 */
+/** 标签排序用的「上移 / 下移」小按钮：禁用时变淡，点击有主题色反馈。 */
+@Composable
+private fun MoveButton(
+    up: Boolean,
+    enabled: Boolean,
+    accent: androidx.compose.ui.graphics.Color,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val t = tokens()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val tint = when {
+        !enabled -> t.ink(0.18f)
+        pressed -> accent
+        else -> t.ink(0.55f)
+    }
+    val bg = when {
+        !enabled -> t.ink(0.02f)
+        pressed -> accent.copy(alpha = 0.18f)
+        else -> t.ink(0.05f)
+    }
+    Box(
+        Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            if (up) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+/** 标签管理里的一行：色点 + 名称 + 目标目录 + 个数 + 单个标签的扫描按钮 + 上下移按钮。 */
 @Composable
 private fun TagRow(
     tag: Tag,
-    dim: Boolean,
     scanning: Boolean,
     scanTagId: Int?,
     accent: androidx.compose.ui.graphics.Color,
-    dragging: Boolean,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     onScan: () -> Unit,
-    onHandleStart: () -> Unit,
-    onHandleDrag: (Float) -> Unit,
-    onHandleEnd: () -> Unit,
-    onMeasured: ((Float, Float) -> Unit)? = null,
+    onClick: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
 ) {
     val t = tokens()
     Row(
         Modifier
             .fillMaxWidth()
-            .then(
-                // 行区间由外层 DragSortItem 上报（它保持静止），这里只是兼容旧调用
-                if (onMeasured == null) {
-                    Modifier
-                } else {
-                    Modifier.onGloballyPositioned { coords ->
-                        val y = coords.positionInRoot().y
-                        onMeasured(y, y + coords.size.height)
-                    }
-                },
-            )
-            .alpha(if (dim) 0.85f else 1f)
+            .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1144,27 +1066,23 @@ private fun TagRow(
             }
         }
         Spacer(Modifier.width(4.dp))
-        // 拖动握把：按住就能上下拖（不用先长按），和网页端一致
-        DragHandle(
-            onStart = onHandleStart,
-            onDragBy = onHandleDrag,
-            onEnd = onHandleEnd,
-        ) {
-            Box(
-                Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (dragging) accent.copy(alpha = 0.16f) else t.ink(0.04f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Rounded.DragHandle,
-                    contentDescription = "按住拖动「${tag.name}」排序",
-                    tint = if (dragging) accent else t.ink(0.5f),
-                    modifier = Modifier.size(17.dp),
-                )
-            }
-        }
+        // 上移 / 下移：点一下立刻换位并保存。
+        // 之前是长按握把拖动，手势在可滚动列表里有竞争、偶发失效，改用按钮后没有这个问题。
+        MoveButton(
+            up = true,
+            enabled = canMoveUp,
+            accent = accent,
+            label = "把「${tag.name}」上移",
+            onClick = onMoveUp,
+        )
+        Spacer(Modifier.width(4.dp))
+        MoveButton(
+            up = false,
+            enabled = canMoveDown,
+            accent = accent,
+            label = "把「${tag.name}」下移",
+            onClick = onMoveDown,
+        )
     }
 }
 
