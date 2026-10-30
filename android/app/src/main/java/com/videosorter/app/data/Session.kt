@@ -74,6 +74,11 @@ class Session(context: Context) {
         get() = prefs.getBoolean("keep_login", true)
         set(v) = prefs.edit { putBoolean("keep_login", v) }
 
+    /** 本机播放缓存上限（MB）：MediaCache 在 init 时按它建 SimpleCache，默认 512 MB */
+    var mediaCacheMb: Int
+        get() = prefs.getInt("media_cache_mb", 512)
+        set(v) = prefs.edit { putInt("media_cache_mb", v.coerceIn(CACHE_MB_MIN, CACHE_MB_MAX)) }
+
     fun password(base: String = current): String =
         if (!savePassword) "" else prefs.getString("pass:" + normalize(base), "") ?: ""
 
@@ -118,6 +123,10 @@ class Session(context: Context) {
     }
 
     companion object {
+        /** 播放缓存上限的合法区间（MB）：设置页只给几档，这里兜底防止脏值把 SimpleCache 搞崩 */
+        const val CACHE_MB_MIN = 64
+        const val CACHE_MB_MAX = 8192
+
         /** 补全协议、去掉尾部斜杠、补默认端口 */
         fun normalize(raw: String): String {
             var s = raw.trim()

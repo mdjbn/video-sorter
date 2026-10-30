@@ -227,6 +227,33 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
     for r in rows:
         db.execute("UPDATE sources SET last_scan_at=? WHERE id=?", (stamp, r["id"]))
     db.set_setting("last_scan_at", stamp)
+    return warn_unwritable(tasks, task_id, stats)
+
+
+def unwritable_note(unwritable: list[dict[str, Any]]) -> str:
+    """把不可写目录拼成一句给人看的话（扫描结果与整理提示共用）。"""
+    if not unwritable:
+        return ""
+    first = unwritable[0]
+    more = f" 等 {len(unwritable)} 个目录" if len(unwritable) > 1 else "目录"
+    return (f"扫描完成，但{more}服务用户没有写权限（{first['path']}：{first['reason']}），"
+            "其中的视频无法整理，请调整目录权限后重试")
+
+
+def warn_unwritable(tasks: TaskRegistry, task_id: str, stats: dict[str, Any]) -> dict[str, Any]:
+    """扫描本身只需要读权限，所以不可写不算失败；只在结果和消息里提示一下。
+
+    预检结果在任务启动前就写进了 extra（tasks.spawn(..., unwritable=[...])），
+    这里在扫描结束时把它补进 result 并给出 warning 文案，前端轮询就能拿到。
+    """
+    with tasks.lock:
+        t = tasks.tasks.get(task_id) or {}
+        unwritable = list(t.get("unwritable") or [])
+    stats["unwritable"] = unwritable
+    if unwritable:
+        note = unwritable_note(unwritable)
+        tasks.update(task_id, warning=note)
+        # 消息类字段会被后续 step() 覆盖，所以只加字段、不覆盖当前 message；收尾由 spawn 处理
     return stats
 
 

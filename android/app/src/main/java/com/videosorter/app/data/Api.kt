@@ -80,6 +80,10 @@ class Api(baseUrl: String, var token: String? = null) {
     private suspend inline fun <reified T> getJson(path: String): T =
         json.decodeFromString(exec(build(path, "GET")))
 
+    /** 单测用：和 [getJson] 走同一个 Json 配置，验证服务端 JSON → 模型 的契约 */
+    internal fun <T> decodeBody(raw: String, deserializer: kotlinx.serialization.DeserializationStrategy<T>): T =
+        json.decodeFromString(deserializer, raw)
+
     private suspend inline fun <reified T> sendJson(path: String, method: String, body: String): T =
         json.decodeFromString(exec(build(path, method, body)))
 

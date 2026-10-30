@@ -48,11 +48,13 @@ def test_execute_plan_reports_friendly_busy_message(env, monkeypatch) -> None:
     r = c.post("/api/organize/execute", json={"tag_ids": [tag["id"]]}, headers=h)
     assert r.status_code == 200
     body = _wait_task(c, h, r.json()["task_id"])
-    assert body["status"] == "done"
+    # 一个都没移动成功 = 整批失败，任务标 error（否则网页 Player.vue 只会静默显示失败日志）
+    assert body["status"] == "error"
     result = body.get("result") or {}
     assert result.get("moved") == 0
     assert result.get("failed"), "应当有失败记录"
     assert "占用" in result["failed"][0]["error"]
+    assert "全部整理失败" in body["message"]
 
 
 def test_busy_file_is_retried_then_succeeds(env, monkeypatch) -> None:

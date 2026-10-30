@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
@@ -83,6 +84,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.videosorter.app.BuildConfig
 import com.videosorter.app.data.Api
+import com.videosorter.app.data.MediaCache
 import com.videosorter.app.data.CacheInfo
 import com.videosorter.app.data.Counts
 import com.videosorter.app.data.Session
@@ -1126,8 +1128,23 @@ private fun shortStamp(iso: String?): String {
 private fun CachePage(api: Api, onToast: (String) -> Unit, onBack: () -> Unit) {
     val t = tokens()
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     var info by remember { mutableStateOf<CacheInfo?>(null) }
     var busy by remember { mutableStateOf(false) }
+
+    // 本机播放缓存：上限存 Session 偏好，MediaCache 下次 init（进播放页 / 重启 App）才按新值重建
+    var usedBytes by remember { mutableStateOf(MediaCache.sizeBytes()) }
+    var activeMb by remember { mutableIntStateOf(MediaCache.activeMb()) }
+    var savedMb by remember { mutableIntStateOf(MediaCache.savedMb(ctx)) }
+    var pickLimit by remember { mutableStateOf(false) }
+
+    // 进页面时如果缓存实例已被丢弃（改过上限还没进播放页），顺手按新上限建回来
+    LaunchedEffect(Unit) {
+        runCatching { MediaCache.buildIfNeeded(ctx) }
+        usedBytes = MediaCache.sizeBytes()
+        activeMb = MediaCache.activeMb()
+        savedMb = MediaCache.savedMb(ctx)
+    }
 
     fun load() {
         scope.launch { info = runCatching { api.cache() }.getOrNull() }
@@ -1153,6 +1170,38 @@ private fun CachePage(api: Api, onToast: (String) -> Unit, onBack: () -> Unit) {
 
     SubScaffold("缓存与储存", onBack) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+            // ---- 本机播放缓存（手机自己的磁盘，和服务端缓存是两回事）----
+            Text(
+                "本机播放缓存",
+                color = t.muted2,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+            )
+            GroupCard {
+                SettingRow(
+                    Icons.Rounded.PlayCircle,
+                    "已用 / 上限",
+                    "已用 ${cacheBytesText(usedBytes)} / 上限 ${cacheMbText(activeMb)}",
+                    chevron = false,
+                )
+                RowDivider()
+                SettingRow(
+                    Icons.Rounded.Storage,
+                    "缓存上限",
+                    if (savedMb != activeMb) {
+                        "${cacheMbText(savedMb)} · 重新进入播放页后生效（当前 ${cacheMbText(activeMb)}）"
+                    } else {
+                        "${cacheMbText(activeMb)} · 越滑越顺，但会占手机空间"
+                    },
+                ) { pickLimit = true }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "服务端缓存",
+                color = t.muted2,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+            )
             GroupCard {
                 SettingRow(
                     Icons.Rounded.Storage,
@@ -1194,6 +1243,52 @@ private fun CachePage(api: Api, onToast: (String) -> Unit, onBack: () -> Unit) {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    // 选缓存上限：写进本机偏好，同时把旧的缓存实例丢掉；等下次进播放页按新上限重建
+    if (pickLimit) {
+        AlertDialog(
+            onDismissRequest = { pickLimit = false },
+            title = { Text("缓存上限", color = t.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column {
+                    Text("播放过的视频会存在手机上，越滑越顺；上限越大占的空间越多。", color = t.muted, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    CACHE_MB_OPTIONS.forEach { mb ->
+                        val on = mb == savedMb
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (on) t.ink(0.07f) else Color.Transparent)
+                                .clickable {
+                                    MediaCache.setLimitMb(ctx, mb)
+                                    savedMb = MediaCache.savedMb(ctx)
+                                    activeMb = MediaCache.activeMb()
+                                    usedBytes = MediaCache.sizeBytes()
+                                    pickLimit = false
+                                    onToast("已保存，重新进入播放页后生效")
+                                }
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                cacheMbText(mb) + if (mb == 512) "（默认）" else "",
+                                color = if (on) t.text else t.ink(0.78f),
+                                fontSize = 12.5.sp,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (on) Icon(Icons.Rounded.Check, contentDescription = null, tint = t.text, modifier = Modifier.size(15.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { pickLimit = false }) { Text("取消", color = t.muted) }
+            },
+            containerColor = t.panel,
+        )
     }
 }
 

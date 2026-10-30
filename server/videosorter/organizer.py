@@ -174,6 +174,156 @@ def _move_with_retry(src: Path, dst: Path, attempts: int = 3, delay: float = 0.3
     raise last  # pragma: no cover — 上面一定已经 return 或 raise
 
 
+# ---------- 可写性预检 ----------
+def normalize_dir(path: str | Path) -> str:
+    """把目录路径归一化成一个可比较的字符串键（解析 ~、绝对化、去掉尾部分隔符）。"""
+    p = Path(path).expanduser()
+    try:
+        p = p.absolute()
+    except OSError:  # pragma: no cover — absolute() 基本不会抛
+        pass
+    s = os.path.normpath(str(p))
+    return s.rstrip("\\/") or s
+
+
+def is_under(path: str | Path, root: str | Path) -> bool:
+    """path 是否就是 root 或落在 root 之下（按路径分隔符边界比较）。"""
+    p = normalize_dir(path).replace("\\", "/")
+    r = normalize_dir(root).replace("\\", "/")
+    if not r:
+        return False
+    return p == r or p.startswith(r.rstrip("/") + "/")
+
+
+def _writable_reason(p: str, allow_missing: bool = False) -> tuple[bool, str]:
+    """返回 (是否可写, 不可写原因)。只用 os.access，不在用户目录里创建探针文件。
+
+    标签目录是整理时才按需创建的（默认「源目录/标签名」，整理前根本不存在），
+    所以对标签目录传 allow_missing=True：目录还不存在时，看它最靠近的、**已经存在**的祖先目录
+    能不能写 —— 能写就说明整理时 mkdir 得出来，算可写，不报。否则只要用户还没整理过，
+    界面上就会满屏误报「目录不存在」。祖先目录不可写才是真问题（整理时一定会 Permission denied）。
+    """
+    try:
+        if not os.path.exists(p):
+            # 只有「源目录/上传目录」这种必须事先存在的路径才报「目录不存在」
+            if not allow_missing:
+                return False, "目录不存在"
+            parent = os.path.dirname(p.rstrip("/\\")) or p
+            for _ in range(16):  # 一路往上找第一个存在的祖先目录（标签目录一般就在源目录下一层）
+                if os.path.isdir(parent):
+                    ok, why = _writable_reason(parent)
+                    return ok, why if not ok else ""
+                nxt = os.path.dirname(parent.rstrip("/\\"))
+                if not nxt or nxt == parent:
+                    return False, "目录不存在"
+                parent = nxt
+            return False, "目录不存在"
+        if not os.path.isdir(p):
+            return False, "不是一个目录"
+    except OSError as e:  # pragma: no cover — exists/isdir 很少抛
+        return False, f"无法访问：{e}"
+    try:
+        if os.access(p, os.W_OK, effective_ids=True):
+            return True, ""
+        if os.access(p, os.W_OK):
+            return True, ""
+    except (OSError, NotImplementedError):  # pragma: no cover — 不支持 effective_ids 的平台
+        pass
+    return False, "服务用户没有写权限"
+
+
+def check_roots_writable(db: Database, cfg: Config,
+                         plan_items: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """扫描/整理前预检：所有启用源目录 + 每个标签的目标目录是否可写。
+
+    返回 [{"path","kind":"source"|"tag","reason"}]，按路径排序、同一路径只报一次。
+    只读判断（os.access），不创建任何探针文件。
+
+    传了 plan_items（整理计划）时只按计划项自己算出来的目标目录判定，不再拿标签的
+    全局默认目录去猜 —— 计划项的 dir 就是 execute_plan 真正要写的地方，这样「剔掉哪几项」
+    和「报哪个目录不可写」永远一致。
+    """
+    cand: dict[str, dict[str, Any]] = {}
+    try:
+        rows = db.query("SELECT path, COALESCE(kind,'') AS kind FROM sources WHERE enabled=1 ORDER BY id")
+    except Exception:  # noqa: BLE001 — 预检失败不该挡住主流程
+        rows = []
+    for r in rows:
+        candidates_add(cand, r["path"], "source")
+    if plan_items is not None:
+        for it in plan_items:
+            candidates_add(cand, it.get("dir") or "", "tag")
+    else:
+        try:
+            tag_rows = db.query("SELECT * FROM tags ORDER BY sort_order, id")
+        except Exception:  # noqa: BLE001
+            tag_rows = []
+        for t in tag_rows:
+            d = resolve_tag_dir(db, cfg, dict(t))
+            if d is not None:
+                candidates_add(cand, str(d), "tag")
+
+    out: list[dict[str, Any]] = []
+    # 源目录优先：同一个路径既是源又是标签目标时，按源判定（源目录不存在才是真问题）
+    for key in sorted(cand, key=lambda k: (cand[k]["kind"] != "source", k)):
+        kind = cand[key]["kind"]
+        ok, reason = _writable_reason(key, allow_missing=(kind == "tag"))
+        if not ok:
+            out.append({"path": key, "kind": kind, "reason": reason})
+    out.sort(key=lambda x: x["path"])
+    return out
+
+
+def candidates_add(cand: dict[str, dict[str, Any]], path: str, kind: str) -> None:
+    raw = (path or "").strip()
+    if not raw:
+        return
+    key = normalize_dir(raw)
+    if not os.path.isabs(key):
+        return  # 相对路径（没配 root_dir 时的兜底）不做预检，否则会误报
+    cand.setdefault(key, {"kind": kind})
+
+
+def _reason_owner(unwritable: list[dict[str, Any]], text: str) -> dict[str, Any] | None:
+    """失败原因里常带完整路径（如 Permission denied: '/data/videos/x.mp4'），
+    文件所在目录若是被预检报出来的不可写目录，就认为是它的锅。"""
+    for u in unwritable:
+        if u.get("path") and u["path"] in text:
+            return u
+    return None
+
+
+def resolve_plan_unwritable(items: list[dict[str, Any]],
+                            unwritable: list[dict[str, Any]]) -> dict[str, Any]:
+    """把「目标目录落在不可写路径下」的计划项剔掉。
+
+    返回 {"items": 保留的计划项, "dropped": [{"video_id","name","dir","path","reason"}],
+          "paths": [涉及的不可写目录, 稳定排序]}。
+    """
+    keep: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    used: dict[str, dict[str, Any]] = {}
+    for it in items:
+        hit = next((u for u in unwritable
+                    if is_under(it.get("dir") or it.get("to") or "", u["path"])), None)
+        if hit is None:
+            keep.append(it)
+            continue
+        used[hit["path"]] = hit
+        dropped.append({"video_id": it.get("video_id"), "name": it.get("name"),
+                        "dir": it.get("dir"), "path": hit["path"], "reason": hit["reason"]})
+    return {"items": keep, "dropped": dropped, "paths": sorted(used)}
+
+
+def skip_summary(dropped: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按目录汇总被跳过的原因，前端可以直接显示。"""
+    by: dict[str, dict[str, Any]] = {}
+    for d in dropped:
+        g = by.setdefault(d["path"], {"path": d["path"], "reason": d["reason"], "count": 0})
+        g["count"] += 1
+    return [by[k] for k in sorted(by)]
+
+
 def move_file(src: Path, dst: Path) -> str:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
@@ -196,10 +346,35 @@ def move_file(src: Path, dst: Path) -> str:
             tmp.unlink(missing_ok=True)
 
 
+def summarize_outcome(moved: int, failed: list[dict[str, Any]]) -> tuple[str, str]:
+    """整理结论 → (message, task_status)。
+
+    · 一个都没移动、且有失败 → error（网页 Player.vue 的 `status === 'error'` 靠它提示）；
+    · 部分成功 → 仍是 done，消息里写清已移动/失败条数；
+    · 全部成功 → done；
+    · 0 移动 0 失败（用户取消）→ done，保持原来的静默。
+    """
+    if moved == 0 and failed:
+        reasons: list[str] = []
+        for f in failed:
+            r = str(f.get("error") or "").strip()
+            if r and r not in reasons:
+                reasons.append(r)
+        head = reasons[0] if reasons else "未知原因"
+        more = f"（以及另外 {len(reasons) - 1} 种原因）" if len(reasons) > 1 else ""
+        return f"{len(failed)} 个视频全部整理失败：{head}{more}", "error"
+    if failed:
+        return f"已移动 {moved} 个，失败 {len(failed)} 个", "done"
+    if moved == 0:
+        return "没有可整理的视频", "done"
+    return f"已整理 {moved} 个视频", "done"
+
+
 def execute_plan(db: Database, cfg: Config, tasks: TaskRegistry, task_id: str,
                  tag_ids: list[int] | None = None,
                  video_ids: list[int] | None = None,
-                 items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                 items: list[dict[str, Any]] | None = None,
+                 unwritable: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     plan = {"items": items, "total": len(items or [])} if items else build_plan(db, cfg, tag_ids, video_ids)
     items = plan["items"]
     tasks.update(task_id, total=len(items), message="开始整理…")
@@ -235,13 +410,19 @@ def execute_plan(db: Database, cfg: Config, tasks: TaskRegistry, task_id: str,
             tasks.step(task_id, f"已移动 {real_dst.name}")
         except Exception as e:  # noqa: BLE001 — 单个文件失败不应中断整批
             reason = explain_error(e)
-            failed.append({"video_id": it["video_id"], "name": it["name"], "error": reason})
+            entry: dict[str, Any] = {"video_id": it["video_id"], "name": it["name"], "error": reason}
+            # 失败的是「目标目录不可写」时补一条明说，网页才能提示去改权限
+            owner = _reason_owner(unwritable or [], reason) or _reason_owner(unwritable or [], str(it.get("to") or ""))
+            if owner and owner["kind"] == "tag":
+                entry["hint"] = f"目标目录不可写：{owner['path']}"
+            failed.append(entry)
             tasks.step(task_id, f"失败 {it['name']}：{reason}")
 
     if not moved and not failed:
         db.execute("DELETE FROM organize_batches WHERE id=?", (batch_id,))
+    message, task_status = summarize_outcome(len(moved), failed)
     return {"batch_id": batch_id, "moved": len(moved), "failed": failed,
-            "items": moved}
+            "items": moved, "message": message, "task_status": task_status}
 
 
 # ---------- 撤销 ----------

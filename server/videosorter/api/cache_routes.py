@@ -39,15 +39,46 @@ def _serialize(st) -> dict[str, Any]:
         "thumbs": thumbs,
         "hls": hls,
         "total_bytes": thumbs["bytes"] + hls["bytes"],
+        # 转码缓存自动清理的策略与当前占用：网页/安卓的缓存页拿它画进度条、算还能删多少
+        "hls_used_bytes": hls["bytes"],
+        "hls_limit_mb": _limit_mb(st),
+        "hls_max_age_hours": _max_age_hours(st),
         "data_dir": str(st.cfg.data_dir),
         "thumb_dir": str(st.cfg.thumb_dir),
         "hls_dir": str(st.cfg.hls_dir),
     }
 
 
+def _limit_mb(st) -> int:
+    try:
+        return max(0, int(st.cfg.get("hls_cache_limit_mb", 4096) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _max_age_hours(st) -> int:
+    try:
+        return max(0, int(st.cfg.get("hls_cache_max_age_hours", 168) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 @router.get("")
 def cache_info(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return _serialize(get_state())
+
+
+@router.post("/sweep")
+def sweep_cache(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """按上限/保留期清一次转码缓存（缓存页「立即清理超额缓存」用）。
+
+    只清 `data/hls` 下的转码分片，不动缩略图；正在转码的视频自动跳过。
+    返回 sweep_hls 的统计 + 清理后的缓存概况。
+    """
+    st = get_state()
+    from ..cache import sweep_hls
+    result = sweep_hls(st.cfg, st.hls)
+    return {"ok": True, **result, **_serialize(st)}
 
 
 @router.post("/clear")

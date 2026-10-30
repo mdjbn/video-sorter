@@ -412,3 +412,69 @@
   color: rgb(var(--accent)); background: rgba(var(--accent), .14);
   border: 1px solid rgba(var(--accent), .28);
 }
+
+/* ---- 目录不可写提示条（视频库页顶部） ---- */
+.unw-bar {
+  display: flex; align-items: flex-start; gap: 9px; margin: 0 0 12px;
+  padding: 10px 12px; border-radius: 11px;
+  background: color-mix(in srgb, var(--warn, #f4a259) 14%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--warn, #f4a259) 40%, transparent);
+}
+.unw-bar .uw-i { flex: none; margin-top: 1px; color: var(--warn); }
+.unw-bar .uw-main { flex: 1; min-width: 0; }
+.unw-bar .uw-t { font-size: 12.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.unw-bar .uw-list { margin-top: 8px; display: grid; gap: 5px; }
+.unw-bar .uw-row { display: flex; align-items: baseline; gap: 7px; font-size: 11.5px; line-height: 1.55; }
+.unw-bar .uw-k {
+  flex: none; padding: 0 5px; border-radius: 5px; font-size: 10px;
+  color: var(--warn); background: color-mix(in srgb, var(--warn, #f4a259) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn, #f4a259) 32%, transparent);
+}
+.unw-bar .uw-p {
+  flex: 0 1 auto; max-width: 58%; color: var(--text);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.unw-bar .uw-r { flex: 1; min-width: 0; color: var(--muted-2); overflow-wrap: anywhere; }
+.unw-bar .btn { flex: none; }
+.unw-bar .uw-x {
+  flex: none; width: 22px; height: 22px; border: 0; border-radius: 6px; cursor: pointer;
+  display: grid; place-items: center; background: transparent; color: var(--muted);
+}
+.unw-bar .uw-x:hover { background: rgba(var(--ink), .08); color: var(--text); }
+
+/* ---- 整理页执行卡片里的结果明细 ---- */
+.org-out {
+  margin-top: 11px; border-radius: 10px; overflow: hidden;
+  background: var(--input-bg); border: 1px solid var(--line);
+}
+.org-out.bad { border-color: color-mix(in srgb, var(--danger, #ff6b6b) 40%, transparent); }
+.org-out .oo-head { display: flex; align-items: center; gap: 7px; padding: 8px 9px; cursor: pointer; }
+.org-out .oo-head svg { flex: none; color: var(--muted); }
+.org-out.bad .oo-head svg:first-child { color: var(--danger); }
+.org-out:not(.bad) .oo-head svg:first-child { color: var(--accent); }
+.org-out .oo-t {
+  flex: 1; min-width: 0; font-size: 11.5px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.org-out .oo-c { flex: none; font-size: 10.5px; color: var(--muted-2); }
+.org-out .oo-body { padding: 0 9px 8px; display: grid; gap: 3px; max-height: 220px; overflow: auto; }
+.org-out .oo-row { display: flex; align-items: baseline; gap: 7px; font-size: 11px; line-height: 1.55; }
+.org-out .oo-n {
+  flex: 0 1 auto; max-width: 52%; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.org-out .oo-e { flex: 1; min-width: 0; color: var(--muted); font-size: 10.5px; overflow-wrap: anywhere; }
+.org-out .oo-row.skip .oo-n { flex: none; color: var(--warn); }
+
+/* ---- 设置页：转码缓存用量 ---- */
+.cache-usage { margin-bottom: 13px; }
+.cache-usage .cu-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+.cache-usage .cu-lbl { font-size: 12.5px; color: var(--muted); }
+.cache-usage .cu-val { font-size: 12.5px; color: var(--text); font-variant-numeric: tabular-nums; }
+.cache-usage .cu-val.over { color: var(--danger); }
+.cache-usage .cu-track { height: 7px; border-radius: 999px; background: rgba(var(--ink), .08); overflow: hidden; }
+.cache-usage .cu-track i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width .3s ease; }
+.cache-usage .cu-track i.over { background: var(--danger); }
+.cache-usage .cu-track i.off { background: var(--muted-2); }
+.cache-usage .cu-sub { margin-top: 7px; font-size: 11.5px; line-height: 1.6; color: var(--muted-2); }

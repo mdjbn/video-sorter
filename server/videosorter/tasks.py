@@ -74,9 +74,17 @@ class TaskRegistry:
             if total:
                 t["percent"] = round(min(1.0, t["done"] / total) * 100, 1)
 
-    def finish(self, tid: str, result: Any = None, message: str = "") -> None:
-        self.update(tid, status="done", result=result, finished_at=_now(),
-                    percent=100.0, message=message or "完成", done=self.tasks.get(tid, {}).get("total", 0))
+    def finish(self, tid: str, result: Any = None, message: str = "",
+               status: str = "done") -> None:
+        """收尾。status 默认 done；整理全部失败这类「跑完了但没成功」的情况由调用方指定 error
+        （spawn 的默认行为不变：谁也没指定就是 done）。"""
+        with self.lock:
+            total = self.tasks.get(tid, {}).get("total", 0)
+            extra: dict[str, Any] = {}
+            if status == "error":
+                extra["error"] = message or "任务失败"
+            self.update(tid, status=status, result=result, finished_at=_now(),
+                        percent=100.0, message=message or "完成", done=total, **extra)
 
     def fail(self, tid: str, error: str) -> None:
         self.update(tid, status="error", error=error, finished_at=_now(), message=error)
@@ -99,7 +107,11 @@ class TaskRegistry:
             return bool(t and t.get("cancelled"))
 
     def spawn(self, kind: str, fn: Callable[[str], Any], **extra: Any) -> str:
-        """建任务并在后台线程跑 fn(task_id)，异常自动记为 error。"""
+        """建任务并在后台线程跑 fn(task_id)，异常自动记为 error。
+
+        fn 的返回值若是带 `"task_status": "error" | "cancelled"` 的 dict，收尾时就用那个状态
+        （缺省仍是 done），并把里面的 `"message"` 当任务消息——整理全部失败就是这样报给前端的。
+        """
         tid = self.create(kind, **extra)
 
         def runner() -> None:
@@ -108,7 +120,11 @@ class TaskRegistry:
                 with self.lock:
                     t = self.tasks.get(tid)
                     if t and t["status"] == "running":
-                        self.finish(tid, result=result)
+                        status, message = "done", ""
+                        if isinstance(result, dict):
+                            status = str(result.get("task_status") or "done")
+                            message = str(result.get("message") or "")
+                        self.finish(tid, result=result, message=message, status=status)
             except Exception as e:  # noqa: BLE001 — 后台线程必须兜住所有异常
                 traceback.print_exc()
                 self.fail(tid, f"{type(e).__name__}: {e}")

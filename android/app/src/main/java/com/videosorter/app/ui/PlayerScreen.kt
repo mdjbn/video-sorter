@@ -134,8 +134,11 @@ fun PlayerScreen(
     // 媒体请求也要带 Bearer 令牌：/api/videos/{id}/raw 与 HLS 分片都要求鉴权，
     // 否则 ExoPlayer 会拿到 401 并报 ERROR_CODE_IO_BAD_HTTP_STATUS。
     val player = remember(api.token) {
+        // 设置页改过「播放缓存上限」后旧缓存已被丢弃，进播放页时按新上限重建才是安全时机
+        //（正在用着的 SimpleCache 不能 release，ExoPlayer 会直接抛 IllegalStateException）
+        com.videosorter.app.data.MediaCache.buildIfNeeded(ctx)
         // 走带磁盘缓存的 DataSource：预加载写进来的数据，真正播放时直接命中缓存
-        val cacheFactory = com.videosorter.app.data.MediaCache.sourceFactory(api.headers())
+        val cacheFactory = com.videosorter.app.data.MediaCache.sourceFactory(api.headers(), ctx)
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setBufferDurationsMs(2_000, 30_000, 250, 600)
             .setPrioritizeTimeOverSizeThresholds(true)

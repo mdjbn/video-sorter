@@ -64,6 +64,20 @@ export type Stats = {
   sources: Source[]
 }
 
+/** 目录对「服务用户」不可写：kind 区分是源目录/标签目录/整理根目录 */
+export type Unwritable = {
+  path: string
+  kind: 'source' | 'tag' | 'root' | string
+  reason: string
+}
+
+/** 某个文件/目录整理失败或跳过的原因 */
+export type FailedFile = {
+  video_id?: number
+  name: string
+  error: string
+}
+
 export type Task = {
   id: string
   kind: string
@@ -76,6 +90,8 @@ export type Task = {
   error: string
   started_at: string
   finished_at: string | null
+  /** 扫描类任务：不可写的目录（整理会失败，提前提示） */
+  unwritable?: Unwritable[]
 }
 
 export type PlanItem = {
@@ -93,13 +109,76 @@ export type PlanItem = {
   cross_device: boolean
 }
 
+/** 按目录汇总的跳过原因：preview 的 blocked、execute 的 skipped_reasons 都是这个形状 */
+export type SkipSummary = { path: string; reason: string; count: number }
+
 export type Plan = {
   items: PlanItem[]
   total: number
   total_bytes: number
   skipped: number
   groups: { tag_id: number; tag_name: string; tag_color: string; dir: string; count: number; bytes: number }[]
+  /** 源目录 / 标签目标目录对服务用户不可写（不可写目录下的视频整理会失败） */
+  unwritable?: Unwritable[]
+  /** 因目标目录不可写而整理不了的目录汇总 */
+  blocked?: SkipSummary[]
+  /** 被挡住的视频数 */
+  blocked_count?: number
 }
+
+/** 整理执行的结果（POST /api/organize/execute 立即返回的部分） */
+export type ExecuteResult = {
+  task_id: string
+  planned: number
+  bytes: number
+  /** 目标目录不可写而被跳过的视频数 */
+  skipped?: number
+  /** 被跳过的目录与原因（按目录汇总） */
+  skipped_reasons?: SkipSummary[]
+  /** 本次预检发现的不可写目录 */
+  unwritable?: Unwritable[]
+  /** 被跳过的计划项明细 */
+  excluded?: { video_id?: number; name: string; dir?: string; path?: string; reason: string }[]
+}
+
+/** 整理任务的 result：moved 个数 + 失败明细 */
+export type OrganizeResult = {
+  batch_id?: string
+  moved?: number
+  failed?: FailedFile[]
+  /** 后端在 0 成功 / 有失败时把它置成 error，任务 status 随之变成 error */
+  task_status?: 'done' | 'error'
+  /** 收尾消息：「已移动 X 个，失败 Y 个」/「N 个视频全部整理失败：<原因>」 */
+  message?: string
+}
+
+export type CacheBucket = { count: number; bytes: number }
+
+export type CacheInfo = {
+  thumbs: CacheBucket
+  hls: CacheBucket
+  total_bytes: number
+  data_dir: string
+  thumb_dir: string
+  hls_dir: string
+  /** 转码缓存已用字节（= hls.bytes，单独给出便于画进度条） */
+  hls_used_bytes?: number
+  /** 转码缓存上限（MB），0 = 不自动清理 */
+  hls_limit_mb?: number
+  /** 转码缓存最长保留（小时），0 = 不按时间清理 */
+  hls_max_age_hours?: number
+}
+
+/** POST /api/cache/sweep：清理统计 + 清理后的缓存概况 */
+export type CacheSweepResult = CacheInfo & {
+  ok?: boolean
+  freed_bytes: number
+  removed_dirs: number
+  kept_dirs: number
+  limit_mb: number
+  age_hours: number
+}
+
 
 export type HistoryItem = Video & { position: number; watched_at: string }
 
@@ -217,7 +296,7 @@ export const api = {
 
   // 扫描/任务
   scan: (body: { source_ids?: number[]; tag_ids?: number[]; full?: boolean } = {}) =>
-    post<{ task_id: string }>('/scan', body),
+    post<{ task_id: string; unwritable?: Unwritable[] }>('/scan', body),
   task: (id: string) => get<Task>(`/tasks/${id}`),
   cancelTask: (id: string) => post<{ ok: boolean }>(`/tasks/${id}/cancel`),
 
@@ -269,9 +348,16 @@ export const api = {
   // 整理
   preview: (body: { tag_ids?: number[]; video_ids?: number[] } = {}) => post<Plan>('/organize/preview', body),
   execute: (body: { tag_ids?: number[]; video_ids?: number[] } = {}) =>
-    post<{ task_id: string; planned: number; bytes: number }>('/organize/execute', body),
+    post<ExecuteResult>('/organize/execute', body),
   records: (limit = 50) => get<{ items: { id: string; created_at: string; undone: number; note: string; files: number; dirs: string[] }[] }>(`/organize/records?limit=${limit}`),
   undo: (batchId: string) => post<{ restored: number; failed: { name: string; error: string }[] }>(`/organize/undo/${batchId}`),
+
+  // 缓存
+  cache: () => get<CacheInfo>('/cache'),
+  clearCache: (target: 'all' | 'hls' | 'thumbs' = 'all') =>
+    post<{ ok: boolean; freed_bytes: number } & CacheInfo>('/cache/clear', { target }),
+  /** 立即清理超额/过期的转码缓存 */
+  sweepCache: () => post<CacheSweepResult>('/cache/sweep'),
 
   // 上传
   upload: (file: File, dir: string, tagId?: number | null) => {

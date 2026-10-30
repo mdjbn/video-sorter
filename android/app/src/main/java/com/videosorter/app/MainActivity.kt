@@ -36,8 +36,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         installImageLoader()
-        // 播放缓存（预加载写入、播放读取）
+        // 播放缓存（预加载写入、播放读取）：上限取自「设置 → 缓存与储存 → 本机播放缓存上限」，
+        // 改完之后下次进播放页（或下次启动 App）才按新上限重建
         com.videosorter.app.data.MediaCache.init(applicationContext)
+        com.videosorter.app.data.Preloader.attach(applicationContext)
         setContent { AppRoot() }
     }
 

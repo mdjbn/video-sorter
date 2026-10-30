@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Undo
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.videosorter.app.data.Api
+import com.videosorter.app.data.ApiException
 import com.videosorter.app.data.BatchRec
 import com.videosorter.app.data.PlanItem
 import kotlinx.coroutines.delay
@@ -73,6 +75,8 @@ fun OrganizeScreen(
     var running by remember { mutableStateOf(false) }
     var pct by remember { mutableFloatStateOf(0f) }
     var records by remember { mutableStateOf<List<BatchRec>>(emptyList()) }
+    // 「上次整理失败 N 个」区块：只存在本页内存里，点「知道了」或离开页面就清掉
+    val failState = rememberOrganizeFailState()
 
     val groups = remember(items) {
         items.filter { it.tagId != null }.groupBy { it.tagId!! }.map { (tagId, list) ->
@@ -112,23 +116,52 @@ fun OrganizeScreen(
         running = true
         pct = 0f
         try {
-            val out = api.execute(chosen.mapNotNull { it.tagId }.distinct())
+            // 目标目录不可写时后端在 execute 就 400（detail 带「不可写：/路径」），
+            // 这时还没建任务，直接把它当成「全部失败」展示，不要再弹一句没头没尾的错误
+            val out = try {
+                api.execute(chosen.mapNotNull { it.tagId }.distinct())
+            } catch (e: ApiException) {
+                if (e.code == 400 && isUnwritableError(e.message)) {
+                    val target = unwritableTarget(e.message)
+                    failState.rememberSkipped(chosen.size)
+                    onToast("${chosen.size} 个被跳过：目标目录不可写" + if (target.isNotEmpty()) "（$target）" else "")
+                    return
+                }
+                throw e
+            }
+            // 目标目录不可写被跳过的，先记下来，任务结束后一并说清楚
+            if (out.skipped > 0) failState.rememberSkipped(out.skipped)
             while (true) {
                 val task = api.task(out.taskId)
                 pct = (task.percent.coerceIn(0.0, 100.0) / 100.0).toFloat()
                 if (task.status != "running") {
-                    if (task.status == "done") {
-                        onToast("已整理 ${chosen.size} 个视频")
+                    val summary = summarizeOrganize(
+                        status = task.status,
+                        moved = task.moved,
+                        failed = task.failedCount,
+                        fails = task.failedItems,
+                        error = if (task.error.isNotBlank()) task.error else task.message,
+                        skipped = out.skipped,
+                    )
+                    onToast(summary.text)
+                    // 有失败（或全失败）就把明细留在页面上：toast 放不下「文件名 · 原因」
+                    if (summary.partial || !summary.ok) failState.update(summary)
+                    // 部分成功也要刷新列表：失败的那些还在待整理里
+                    if (summary.moved > 0) {
                         onOrganized()
                         touched = false
                         loadPlan()
-                    } else {
-                        onToast(task.message.ifEmpty { "整理失败" })
+                    } else if (summary.failed > 0) {
+                        loadPlan()
                     }
                     break
                 }
                 delay(400)
             }
+        } catch (e: ApiException) {
+            // 后端把原因写在 detail 里（如「没有需要整理的视频（需要先打标签）」）
+            failState.updateFromError(e.message)
+            onToast(e.message ?: "整理失败")
         } catch (e: Exception) {
             onToast(e.message ?: "整理失败")
         } finally {
@@ -160,6 +193,11 @@ fun OrganizeScreen(
                         SmallStat("待整理", "${items.size}", Modifier.weight(1f))
                         SmallStat("文件夹", "${groups.size}", Modifier.weight(1f))
                         SmallStat("总大小", sizeText(items.sumOf { it.size }), Modifier.weight(1f))
+                    }
+                }
+                if (failState.visible()) {
+                    item(key = "organize-failed") {
+                        FailBlock(state = failState, onDismiss = { failState.clear() })
                     }
                 }
                 when {
@@ -431,4 +469,78 @@ private fun SmallStat(label: String, value: String, modifier: Modifier = Modifie
 private fun tailPath(dir: String): String {
     val parts = dir.trimEnd('/').split('/').filter { it.isNotEmpty() }
     return if (parts.size <= 2) dir else "…/" + parts.takeLast(2).joinToString("/")
+}
+/**
+ * 「上次整理失败 N 个」区块：列出最多 8 条「文件名 · 原因」+「以及另外 N 条」，
+ * 右上角可折叠，「知道了」把整块清掉（状态只在本页 remember 里，不落盘）。
+ */
+@Composable
+private fun FailBlock(state: OrganizeFailState, onDismiss: () -> Unit) {
+    val t = tokens()
+    val s = state.summary ?: return
+    val head = when {
+        s.skipped > 0 && s.failed == 0 -> "${s.skipped} 个被跳过：目标目录不可写"
+        s.skipped > 0 -> "${failListText(s.failed)} · ${s.skipped} 个被跳过：目标目录不可写"
+        else -> failListText(s.failed)
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(t.danger.copy(alpha = 0.10f))
+            .border(1.dp, t.danger.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = t.danger, modifier = Modifier.size(15.dp))
+            Text(head, color = t.danger, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(7.dp))
+                    .clickable { state.expanded = !state.expanded }
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(if (state.expanded) "收起" else "展开", color = t.muted, fontSize = 10.5.sp)
+            }
+        }
+        if (state.expanded) {
+            if (s.fails.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                s.fails.take(MAX_SHOWN).forEach { f ->
+                    Text(
+                        if (f.name.isNotEmpty()) "${f.name} · ${f.reason}" else f.reason,
+                        color = t.ink(0.78f),
+                        fontSize = 10.5.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+                val more = s.more + (s.fails.size - MAX_SHOWN).coerceAtLeast(0)
+                if (more > 0) {
+                    Text("以及另外 $more 条", color = t.muted2, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
+                }
+            } else {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "常见原因：目标目录不可写、磁盘已满、源文件已被移动。可到「设置 → 源文件夹」检查目录权限。",
+                    color = t.muted2,
+                    fontSize = 10.5.sp,
+                )
+            }
+            Spacer(Modifier.height(9.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(t.ink(0.06f))
+                        .border(1.dp, t.line2, RoundedCornerShape(8.dp))
+                        .clickable { onDismiss() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text("知道了", color = t.ink(0.8f), fontSize = 11.sp)
+                }
+            }
+        }
+    }
 }

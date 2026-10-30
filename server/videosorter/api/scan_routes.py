@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from .. import organizer
 from ..scanner import scan_sources
 from ..state import get_state
 from .deps import require_user
@@ -26,10 +27,13 @@ def start_scan(body: ScanIn, user: dict[str, Any] = Depends(require_user)) -> di
     if not st.tools.available:
         raise HTTPException(status_code=400, detail="未找到 ffmpeg/ffprobe，无法扫描")
     label = "扫描标签文件夹" if (body.tag_ids and not body.source_ids) else "扫描源文件夹"
+    # 只读扫描本身不需要写权限，所以不可写不拦扫描；但结果要带回去，让用户提前知道
+    # 「扫完也整理不了」。预检结果写进任务 extra，前端轮询 /api/tasks/{id} 就能拿到。
+    unwritable = organizer.check_roots_writable(st.db, st.cfg)
     tid = st.tasks.spawn("scan", lambda t: scan_sources(st.db, st.cfg, st.tools, st.tasks, t,
                                                        body.source_ids, body.full, body.tag_ids),
-                         label=label)
-    return {"ok": True, "task_id": tid}
+                         label=label, unwritable=unwritable)
+    return {"ok": True, "task_id": tid, "unwritable": unwritable}
 
 
 @router.get("/tasks/{task_id}")

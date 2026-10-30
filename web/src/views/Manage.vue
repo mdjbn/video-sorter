@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import DirPicker from '../components/DirPicker.vue'
-import { api, fmtDur, fmtSize, fmtTime, waitTask, type HistoryItem, type PlanItem, type Source, type Stats, type Tag, type Video } from '../api'
+import { api, fmtDur, fmtSize, fmtTime, waitTask, type CacheInfo, type FailedFile, type OrganizeResult, type SkipSummary, type HistoryItem, type Plan, type PlanItem, type Source, type Stats, type Tag, type Unwritable, type Video } from '../api'
 import { isFnosHost, pickDirFromHost } from '../fnos'
 import { toast } from '../toast'
 import { nextThemeMode, setThemeMode, themeMode, THEME_LABEL, type ThemeMode } from '../theme'
@@ -83,6 +83,10 @@ const setForm = reactive({
   discovery_port: 38080,
   port: 8080,
   host: '0.0.0.0',
+  // 转码缓存（HLS 分片）自动清理：上限 MB，0 = 不自动清理
+  hls_cache_limit_mb: 4096,
+  // 缓存最长保留小时数，0 = 不按时间清理
+  hls_cache_max_age_hours: 168,
 })
 const setLoading = ref(false)
 const setSaving = ref(false)
@@ -137,6 +141,68 @@ const THEME_OPTIONS: { v: ThemeMode; label: string }[] = [
   { v: 'dark', label: '深色' },
 ]
 
+/* ---------------- 转码缓存上限 ---------------- */
+// 0 = 不自动清理。默认 4 GB / 7 天，和转码分片一集几百 MB 的量级对得上。
+const HLS_LIMITS = [
+  { v: 0, label: '不自动清理' },
+  { v: 1024, label: '1 GB' },
+  { v: 2048, label: '2 GB' },
+  { v: 4096, label: '4 GB（默认）' },
+  { v: 8192, label: '8 GB' },
+  { v: 16384, label: '16 GB' },
+]
+const HLS_MAX_AGE = [
+  { v: 0, label: '不按时间清理' },
+  { v: 72, label: '3 天' },
+  { v: 168, label: '7 天（默认）' },
+  { v: 720, label: '30 天' },
+]
+const cacheInfo = ref<CacheInfo | null>(null)
+const cacheLoading = ref(false)
+const sweeping = ref(false)
+
+async function loadCache() {
+  cacheLoading.value = true
+  try {
+    cacheInfo.value = await api.cache()
+  } catch {
+    cacheInfo.value = null
+  } finally {
+    cacheLoading.value = false
+  }
+}
+const hlsUsedBytes = computed(() => cacheInfo.value?.hls?.bytes || 0)
+const hlsLimitBytes = computed(() => (setForm.hls_cache_limit_mb || 0) * 1024 * 1024)
+const cacheUsageText = computed(() => {
+  const used = `已用 ${fmtSize(hlsUsedBytes.value)}`
+  if (!setForm.hls_cache_limit_mb) return `${used} / 上限 不限制`
+  return `${used} / 上限 ${setForm.hls_cache_limit_mb >= 1024 ? (setForm.hls_cache_limit_mb / 1024) + ' GB' : setForm.hls_cache_limit_mb + ' MB'}`
+})
+// 超出上限的占比，用来给用量条上色（>100% 说明还没触发清理或正在清理）
+const cachePct = computed(() => {
+  const lim = hlsLimitBytes.value
+  if (!lim) return 0
+  return Math.min(100, Math.round((hlsUsedBytes.value / lim) * 100))
+})
+const cacheOver = computed(() => !!hlsLimitBytes.value && hlsUsedBytes.value > hlsLimitBytes.value)
+
+async function sweepCache() {
+  if (sweeping.value) return
+  sweeping.value = true
+  try {
+    const r = await api.sweepCache()
+    const freed = fmtSize(r.freed_bytes || 0)
+    toast(r.freed_bytes
+      ? `已清理 ${r.removed_dirs} 个转码缓存，释放 ${freed}`
+      : `没有需要清理的缓存（保留 ${r.kept_dirs} 个）`)
+    await loadCache()
+  } catch (e: any) {
+    toast(e?.message || '清理缓存失败', true)
+  } finally {
+    sweeping.value = false
+  }
+}
+
 async function loadSettings() {
   setLoading.value = true
   try {
@@ -156,6 +222,11 @@ async function loadSettings() {
     setForm.discovery_port = Number(s.discovery_port ?? 38080)
     setForm.port = Number(s.port ?? 8080)
     setForm.host = s.host || '0.0.0.0'
+    // 缓存上限：老版本没有这两个键，按默认 4 GB / 7 天显示
+    const limMb = Number(s.hls_cache_limit_mb ?? cacheInfo.value?.hls_limit_mb ?? 4096)
+    const ageH = Number(s.hls_cache_max_age_hours ?? cacheInfo.value?.hls_max_age_hours ?? 168)
+    setForm.hls_cache_limit_mb = Number.isFinite(limMb) ? limMb : 4096
+    setForm.hls_cache_max_age_hours = Number.isFinite(ageH) ? ageH : 168
   } catch (e: any) {
     toast(e?.message || '读取设置失败', true)
   } finally {
@@ -177,11 +248,13 @@ async function saveSettingsAll() {
       scan_workers: Math.max(1, Math.min(16, Number(setForm.scan_workers) || 3)),
       discovery: setForm.discovery,
       discovery_port: Math.max(1, Math.min(65535, Number(setForm.discovery_port) || 38080)),
+      hls_cache_limit_mb: Math.max(0, Number(setForm.hls_cache_limit_mb) || 0),
+      hls_cache_max_age_hours: Math.max(0, Number(setForm.hls_cache_max_age_hours) || 0),
     })
     setRestart.value = !!r.restart_required
     setThemeMode(setForm.theme as ThemeMode)
     toast('设置已保存')
-    await Promise.all([loadSettings(), loadSources(), loadInfo()])
+    await Promise.all([loadSettings(), loadSources(), loadInfo(), loadCache()])
   } catch (e: any) {
     toast(e?.message || '保存失败', true)
   } finally {
@@ -247,7 +320,7 @@ function go(v: View) {
   if (v === 'library') loadLibrary()
   if (v === 'organize') loadPlan()
   if (v === 'history') loadHistory()
-  if (v === 'settings') { loadSettings(); loadInfo() }
+  if (v === 'settings') { loadSettings(); loadInfo(); loadCache() }
   if (v === 'account') loadSessions()
   if (v === 'about') loadInfo()
 }
@@ -255,6 +328,39 @@ function go(v: View) {
 /* ---------------- 扫描 ---------------- */
 const scan = reactive({ running: false, percent: 0, text: '' })
 type ScanPayload = { source_ids?: number[]; tag_ids?: number[] }
+
+/* ---------------- 目录不可写（整理会失败）的提前提示 ---------------- */
+// 两处来源：扫描任务对象上的 unwritable、整理预览里的 unwritable，合并去重
+const unwritable = ref<Unwritable[]>([])
+const unwDismissed = ref(false)   // 「知道了」：本次会话内不再显示（只活在内存里）
+const unwOpen = ref(false)        // 「详情」展开
+const unwHint = computed(() => {
+  const list = unwritable.value
+  if (!list.length) return ''
+  const head = list.slice(0, 2).map((u) => u.path).join('、')
+  const more = list.length > 2 ? ` 等 ${list.length} 个` : ''
+  return `有 ${list.length} 个目录对服务用户不可写，整理会失败：${head}${more}`
+})
+const showUnw = computed(() => unwritable.value.length > 0 && !unwDismissed.value)
+
+function mergeUnwritable(list: Unwritable[] | undefined | null) {
+  if (!Array.isArray(list) || !list.length) return
+  const seen = new Set(unwritable.value.map((u) => `${u.kind}|${u.path}`))
+  const next = [...unwritable.value]
+  for (const u of list) {
+    if (!u || !u.path) continue
+    const k = `${u.kind}|${u.path}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    next.push({ path: u.path, kind: u.kind || 'source', reason: u.reason || '' })
+  }
+  unwritable.value = next
+}
+function dismissUnw() {
+  unwDismissed.value = true
+  unwOpen.value = false
+}
+
 async function runScan(payload: ScanPayload = {}) {
   if (scan.running) {
     toast('正在扫描，稍等一下')
@@ -262,11 +368,19 @@ async function runScan(payload: ScanPayload = {}) {
   }
   scan.running = true; scan.percent = 0; scan.text = '准备扫描…'
   try {
-    const { task_id } = await api.scan(payload)
+    const { task_id, unwritable: scanUnw } = await api.scan(payload)
+    mergeUnwritable(scanUnw)
+    let sawUnwritable = false
     const task = await waitTask(task_id, (t) => {
       scan.percent = t.percent || 0
       scan.text = t.message || `扫描中 ${t.done}/${t.total}`
+      // 扫描任务对象上也可能带 unwritable，出现就并进提示条
+      if (t.unwritable?.length) {
+        sawUnwritable = true
+        mergeUnwritable(t.unwritable)
+      }
     })
+    if (!sawUnwritable) mergeUnwritable((task as any).unwritable)
     const r: any = task.result || {}
     const added = Number(r.added ?? 0)
     const removed = Number(r.missing ?? 0)
@@ -869,11 +983,22 @@ function onDirPicked(path: string) {
 }
 
 /* ---------------- 整理 ---------------- */
-const plan = ref<{ items: PlanItem[]; total: number; total_bytes: number; skipped: number } | null>(null)
+const plan = ref<Plan | null>(null)
+// 预览里被「目标目录不可写」挡住的视频数，整理页侧栏提示用
+const planBlocked = ref(0)
 const planLoading = ref(false)
 const selTags = reactive(new Set<number>())
 const orgInit = ref(false)
-const orgRun = reactive({ running: false, percent: 0, text: '' })
+const orgRun = reactive({
+  running: false, percent: 0, text: '',
+  // 上次整理的结果明细
+  moved: 0,
+  failed: [] as FailedFile[],
+  skipped: 0,
+  skipReasons: [] as SkipSummary[],
+  errText: '',
+  detailOpen: true,
+})
 
 const planGroups = computed(() => {
   const items = plan.value?.items || []
@@ -892,6 +1017,9 @@ async function loadPlan() {
   planLoading.value = true
   try {
     plan.value = await api.preview()
+    // 预览里带了「目标目录不可写」就直接并进顶部提示条（整理会失败）
+    mergeUnwritable(plan.value?.unwritable)
+    if (plan.value?.blocked_count) planBlocked.value = plan.value.blocked_count
     if (!orgInit.value) {
       selTags.clear()
       for (const g of planGroups.value) selTags.add(g.tag_id)
@@ -912,22 +1040,50 @@ async function runOrganize() {
   if (!selTags.size || orgRun.running) return
   orgRun.running = true; orgRun.percent = 0; orgRun.text = '准备移动…'
   try {
-    const r: any = await api.execute({ tag_ids: [...selTags] })
+    const r = await api.execute({ tag_ids: [...selTags] })
+    // 执行前预检就发现目标目录不可写：先并进顶部提示条（含被跳过的视频数）
+    mergeUnwritable(r.unwritable)
     const task = await waitTask(r.task_id, (t) => {
       orgRun.percent = t.percent || 0
       orgRun.text = t.message || '正在移动…'
     })
-    const res: any = task.result || {}
-    orgRun.text = `完成：移动 ${res.moved ?? 0} 个，失败 ${res.failed?.length ?? 0} 个`
-    toast(`整理完成，移动 ${res.moved ?? 0} 个视频`)
+    const res = (task.result || {}) as OrganizeResult
+    const failed: FailedFile[] = Array.isArray(res.failed) ? res.failed : []
+    // 被跳过的视频数：执行响应里的 skipped 最准（planned 已扣掉跳过项），结果里没有这个字段
+    const skippedNum = Number(r.skipped ?? 0) || 0
+    orgRun.failed = failed
+    orgRun.skipReasons = Array.isArray(r.skipped_reasons) ? r.skipped_reasons : []
+    orgRun.skipped = skippedNum
+    orgRun.moved = Number(res.moved ?? r.planned ?? 0)
+    // 全部失败时后端把任务 status 置成 error，error 里就是「N 个视频全部整理失败：<原因>」
+    orgRun.errText = task.status === 'error' ? (task.error || res.message || '整理失败') : ''
+
+    if (task.status === 'error') {
+      orgRun.text = orgRun.errText
+      orgRun.detailOpen = true
+      toast(orgRun.errText, true)
+    } else {
+      orgRun.text = res.message || `完成：移动 ${orgRun.moved} 个，失败 ${failed.length} 个`
+      let msg = res.message || (failed.length
+        ? `已移动 ${orgRun.moved} 个，失败 ${failed.length} 个`
+        : `整理完成，移动 ${orgRun.moved} 个视频`)
+      if (skippedNum > 0) msg += `，跳过 ${skippedNum} 个（目标目录不可写）`
+      if (failed.length || skippedNum > 0) orgRun.detailOpen = true
+      toast(msg, failed.length > 0 || skippedNum > 0)
+    }
     orgInit.value = false
     markLibStale()
     await Promise.all([loadPlan(), loadStats(), loadRecords(), loadTags()])
     if (view.value === 'library') await loadLibrary(true)
-  } catch (e: any) { toast(e?.message || '整理失败', true) }
+  } catch (e: any) {
+    const msg = e?.message || '整理失败'
+    orgRun.errText = msg
+    orgRun.detailOpen = true
+    toast(msg, true)
+  }
   finally {
     orgRun.running = false
-    setTimeout(() => { orgRun.percent = 0; orgRun.text = '' }, 6000)
+    setTimeout(() => { orgRun.percent = 0 }, 6000)
   }
 }
 async function undo(batchId: string) {
@@ -1018,6 +1174,7 @@ const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeM
 
 /* ---------------- 更新日志（关于页只显示最近 5 条） ---------------- */
 const LOGS: { v: string; text: string }[] = [
+  { v: '1.3.6', text: '整理失败会明确报错了：整批都没搬成功时不再假装「已完成」，而是标成失败并写清原因（例如「2 个视频全部整理失败：源文件已不存在」），网页和 App 里都能展开看到每个文件失败的原因；整理前先检查目标文件夹能不能写，不能写的目录会提前在视频库顶部和整理页用黄色提示条列出来（写明是哪个目录、为什么不可写），执行时直接跳过这些视频并在结果里说明，不再搬到一半才报错；转码缓存（NAS 上切出来的 HLS 分片）现在有上限也会过期了，默认超过 4 GB 或 7 天没看过就自动清理，设置页新增「缓存」卡片可以改上限、改过期时间，也能一键立即清理；安卓 App 的播放缓存上限从固定 512 MB 改成可选（256 MB / 512 MB / 1 GB / 2 GB / 4 GB），在「设置 → 缓存与储存 → 本机播放缓存」里改，缓存放不下时自动淘汰最久没看的。' },
   { v: '1.3.5', text: '手机 App 优先直连原文件：MKV / TS 容器与 HEVC、AC3、EAC3、FLAC 在手机上能硬解的格式不再走 NAS 转码，直接播原文件（不占 CPU、起播更快），万一某个机型的解码器解不了会自动退回转码；设置页「转码」卡片新增「使用 GPU 转码」开关：打开时有显卡就自动用显卡编码、没驱动或没权限自动回落 CPU，关掉则只用 CPU 编码（功耗低）；新增「设置」页：整理根目录、上传目录、缩略图位置、扫描线程数、转码、局域网发现都可以在网页里改；新增「备份设置 / 导入设置」，把配置、源文件夹、标签一起导出成一个 JSON 文件，换机器或重装后一键还原（导入只补不会删）；关于页的更新日志只显示最近 5 条，完整历史去 GitHub Releases 看；所有填目录的输入框后面多了「选择」按钮，可直接点选文件夹（fnOS 里调系统目录选择器，其它环境用内置目录浏览）。转码默认改用显卡：有 NVIDIA / Intel 核显 / AMD 显卡 / Apple 芯片时优先硬件编码，CPU 时间大幅下降（实测 1080p 快 4～5 倍）、可同时转更多路；没驱动或没权限时自动回落 CPU，不会转码失败；设置页新增「转码编码器」选项（自动 / 指定硬件 / 只用 CPU）并显示当前实际使用的编码器；即使只用 CPU 编码，解码也尽量交给显卡。' },
   { v: '1.3.4', text: 'Windows 桌面端修复「英文等非中文系统启动即崩」（控制台编码打印中文报错导致服务端起不来）；发版自动产出 Windows 安装包（.exe / .msi）；新增 Docker 镜像，同时发布到 Docker Hub 与 GHCR（amd64 / arm64）；安卓安装包改用固定证书签名，以后升级可直接覆盖安装、不用卸载重装（这一版仍需卸载旧包一次）。' },
   { v: '1.3.3', text: '网页端 HLS 播放也会续播了（需要转码的视频不再每次从头播）；整理时文件被占用（如正在播放）会先自动重试两次，仍不行就提示「文件正被占用，请关闭播放器后重试」；全新安装后新增第一个源目录，上传目录会自动跟到「<源目录>/手机上传」；会话列表会标出「当前设备」。' },
@@ -1197,6 +1354,22 @@ function onResize() {
             <button class="btn ghost" :disabled="scan.running" @click="runScan()">
               <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描' }}
             </button>
+          </div>
+          <!-- 目标目录不可写：提前提示，避免整理时才知道失败 -->
+          <div v-if="showUnw" class="unw-bar">
+            <Icon name="warn" :size="15" class="uw-i" />
+            <div class="uw-main">
+              <div class="uw-t">{{ unwHint }}</div>
+              <div v-if="unwOpen" class="uw-list">
+                <div v-for="(u, i) in unwritable" :key="u.kind + u.path + i" class="uw-row">
+                  <span class="uw-k">{{ u.kind === 'tag' ? '标签目录' : u.kind === 'source' ? '源目录' : u.kind === 'root' ? '整理根目录' : '目录' }}</span>
+                  <span class="uw-p" :title="u.path">{{ u.path }}</span>
+                  <span class="uw-r">{{ u.reason || '服务用户没有写权限' }}</span>
+                </div>
+              </div>
+            </div>
+            <button class="btn ghost sm" @click="unwOpen = !unwOpen">{{ unwOpen ? '收起' : '详情' }}</button>
+            <button class="uw-x" title="知道了" @click="dismissUnw"><Icon name="close" :size="13" /></button>
           </div>
           <div class="lib-head">
             <label class="search"><Icon name="search" :size="15" /><input v-model="lib.q" placeholder="搜索文件名" spellcheck="false" /></label>
@@ -1430,6 +1603,7 @@ function onResize() {
                   <div class="kv"><span class="k">已选视频</span><span class="v">{{ selItems.length }} 个</span></div>
                   <div class="kv"><span class="k">目标文件夹</span><span class="v">{{ planDirs }} 个</span></div>
                   <div class="kv"><span class="k">总大小</span><span class="v">{{ fmtSize(selBytes) }}</span></div>
+                  <div v-if="planBlocked" class="kv"><span class="k">整理不了</span><span class="v" style="color:var(--warn)">{{ planBlocked }} 个（目标目录不可写）</span></div>
                   <div style="display:flex;gap:8px;margin-top:12px">
                     <button class="btn ghost sm" @click="selectAll(true)">全选</button>
                     <button class="btn ghost sm" @click="selectAll(false)">全不选</button>
@@ -1440,6 +1614,25 @@ function onResize() {
                   <div v-if="orgRun.running || orgRun.percent > 0" class="scanbar">
                     <div class="track"><i :style="{ width: orgRun.percent + '%' }" /></div>
                     <span style="font-size:11.5px;color:var(--muted-2);min-width:110px">{{ orgRun.text }}</span>
+                  </div>
+                  <!-- 上次整理的结果：失败原因 / 跳过明细 -->
+                  <div v-if="orgRun.errText || orgRun.failed.length || orgRun.skipReasons.length || orgRun.moved" class="org-out" :class="{ bad: !!orgRun.errText || orgRun.failed.length > 0 || orgRun.skipReasons.length > 0 }">
+                    <div class="oo-head" @click="orgRun.detailOpen = !orgRun.detailOpen">
+                      <Icon :name="orgRun.errText || orgRun.failed.length ? 'warn' : 'check'" :size="14" />
+                      <span class="oo-t">{{ orgRun.errText || `上次整理：移动 ${orgRun.moved} 个` }}</span>
+                      <span class="oo-c">{{ orgRun.moved }} 成功 / {{ orgRun.failed.length }} 失败<template v-if="orgRun.skipped"> / {{ orgRun.skipped }} 跳过</template></span>
+                      <Icon :name="orgRun.detailOpen ? 'chevron-up' : 'chevron-down'" :size="13" />
+                    </div>
+                    <div v-if="orgRun.detailOpen" class="oo-body">
+                      <div v-for="(f, i) in orgRun.failed" :key="'f' + i" class="oo-row">
+                        <span class="oo-n" :title="f.name">{{ f.name }}</span>
+                        <span class="oo-e">{{ f.error }}</span>
+                      </div>
+                      <div v-for="(p, i) in orgRun.skipReasons" :key="'s' + i" class="oo-row skip">
+                        <span class="oo-n">跳过 {{ p.count }} 个</span>
+                        <span class="oo-e">{{ p.path }} —— {{ p.reason || '不可写' }}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1628,6 +1821,37 @@ function onResize() {
               </div>
             </div>
             <div class="card">
+              <div class="card-head"><h2>缓存</h2></div>
+              <div class="card-body">
+                <div class="cache-usage">
+                  <div class="cu-top">
+                    <span class="cu-lbl">转码缓存</span>
+                    <span class="cu-val" :class="{ over: cacheOver }">{{ cacheUsageText }}</span>
+                  </div>
+                  <div class="cu-track">
+                    <i :class="{ over: cacheOver, off: !setForm.hls_cache_limit_mb }" :style="{ width: (setForm.hls_cache_limit_mb ? Math.max(cachePct, cacheOver ? 100 : 2) : 0) + '%' }" />
+                  </div>
+                  <div class="cu-sub">转码出来的 HLS 分片会一直占着数据盘，超过上限时按最久没看的先清。</div>
+                </div>
+                <div class="form-row"><label>缓存上限</label>
+                  <select v-model.number="setForm.hls_cache_limit_mb" class="field">
+                    <option v-for="o in HLS_LIMITS" :key="o.v" :value="o.v">{{ o.label }}</option>
+                  </select>
+                </div>
+                <div class="form-row"><label>多久没看就清理</label>
+                  <select v-model.number="setForm.hls_cache_max_age_hours" class="field" :disabled="!setForm.hls_cache_limit_mb">
+                    <option v-for="o in HLS_MAX_AGE" :key="o.v" :value="o.v">{{ o.label }}</option>
+                  </select>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:10px">
+                  <button class="btn ghost sm" :disabled="sweeping || cacheLoading" @click="sweepCache">
+                    <Icon name="refresh" :size="14" />{{ sweeping ? '清理中…' : '立即清理超额缓存' }}
+                  </button>
+                </div>
+                <div class="m-desc set-hint" style="font-size:11.5px">上限选「不自动清理」时缓存会一直增长，需要自己定期点「立即清理」或到概览页清理缓存。清理只删转码产生的分片，原视频和封面不受影响；正在看的视频不会被删。</div>
+              </div>
+            </div>
+            <div class="card">
               <div class="card-head"><h2>局域网发现</h2></div>
               <div class="card-body">
                 <label class="chk-row"><input v-model="setForm.discovery" type="checkbox" /><span>广播服务器地址，手机 App 能自动发现</span></label>
@@ -1675,7 +1899,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.5' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.6' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>

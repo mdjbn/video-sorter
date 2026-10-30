@@ -27,6 +27,8 @@ class SettingsIn(BaseModel):
     transcode_encoder: str | None = None
     transcode_preset: str | None = None
     transcode_jobs: int | None = None
+    hls_cache_limit_mb: int | None = None
+    hls_cache_max_age_hours: int | None = None
     thumb_position: float | None = None
     scan_workers: int | None = None
     upload_dir: str | None = None
@@ -52,6 +54,13 @@ def put_settings(body: SettingsIn, user: dict[str, Any] = Depends(require_user))
             patch.pop("transcode_jobs")
     if "host" in patch and patch["host"] not in {"0.0.0.0", "127.0.0.1", "localhost"}:
         patch.pop("host")
+    # 转码缓存自动清理：0 = 关掉对应的那一维度，别让手滑写成负数或天文数字
+    for key, hi in (("hls_cache_limit_mb", 1048576), ("hls_cache_max_age_hours", 8760)):
+        if key in patch:
+            try:
+                patch[key] = max(0, min(hi, int(patch[key])))
+            except (TypeError, ValueError):
+                patch.pop(key)
     values = st.cfg.update(patch)
     if "transcode_encoder" in patch:
         # 换了编码器要把探测缓存清掉，否则新选择不会生效
@@ -106,7 +115,8 @@ EXPORT_VERSION = 1
 # 导出哪些配置项；端口/监听地址属于「这台机器怎么跑」，只放进 server 段做参考，导入时不套用
 EXPORT_SETTINGS = (
     "root_dir", "upload_dir", "theme", "transcode", "transcode_encoder", "transcode_preset",
-    "transcode_jobs", "thumb_position", "scan_workers", "discovery", "discovery_port", "allow_lan",
+    "transcode_jobs", "hls_cache_limit_mb", "hls_cache_max_age_hours",
+    "thumb_position", "scan_workers", "discovery", "discovery_port", "allow_lan",
 )
 
 THEMES = {"light", "dark", "auto"}

@@ -86,6 +86,16 @@ def create_app(cfg: Config | None = None, web_dir: Path | str | None = None) -> 
             )
         if st.discovery is not None:
             st.discovery.start()
+        # 转码缓存自动清理：启动后延迟跑第一次（避开启动时的封面迁移/目录登记抢 IO），
+        # 之后每小时一轮；HlsSweeper.stop() 用 Event 唤醒，退出时立刻返回、不会卡住进程
+        try:
+            from .cache import SWEEP_INTERVAL, SWEEP_START_DELAY, HlsSweeper
+            st.sweeper = HlsSweeper(cfg, st.hls,
+                                    start_delay=SWEEP_START_DELAY,
+                                    interval=SWEEP_INTERVAL)
+            st.sweeper.start()
+        except Exception as e:  # noqa: BLE001 - 清理线程起不来不该影响服务
+            print(f"[warn] 转码缓存自动清理启动失败：{e}")
         try:
             yield
         finally:
@@ -94,6 +104,13 @@ def create_app(cfg: Config | None = None, web_dir: Path | str | None = None) -> 
                 st.hls.stop_all()
             except Exception as e:  # noqa: BLE001 - 退出路径上不能因为清理失败而卡住
                 print(f"[warn] 停止转码任务失败：{e}")
+            sweeper = getattr(st, "sweeper", None)
+            if sweeper is not None:
+                try:
+                    sweeper.stop()
+                except Exception as e:  # noqa: BLE001
+                    print(f"[warn] 停止缓存清理线程失败：{e}")
+                st.sweeper = None
             if st.discovery is not None:
                 st.discovery.stop()
 

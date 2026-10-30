@@ -1,7 +1,17 @@
 package com.videosorter.app.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonPrimitive
 
 @Serializable
 data class LoginIn(val username: String, val password: String, val remember: Boolean = true)
@@ -90,7 +100,60 @@ data class Plan(
 )
 
 @Serializable
-data class ExecOut(@SerialName("task_id") val taskId: String = "", val planned: Int = 0)
+data class ExecOut(
+    @SerialName("task_id") val taskId: String = "",
+    val planned: Int = 0,
+    /** 目标目录不可写等原因被跳过的数量（后端 execute 新增字段，老版本没有 → 0） */
+    val skipped: Int = 0,
+    val bytes: Long = 0,
+)
+
+/**
+ * 整理任务结果里的「单个视频失败」条目：后端是
+ * `{"video_id": 3, "name": "海边.mp4", "error": "PermissionError: …"}`。
+ */
+@Serializable
+data class FailedItem(
+    @SerialName("video_id") val videoId: Int = 0,
+    val name: String = "",
+    val error: String = "",
+)
+
+/**
+ * `result.failed` 在新后端是 `[{video_id,name,error}, …]`，在老后端只是失败条数 `2`。
+ * 这里两种都接住：读数组得到明细，读数字则逐条补成占位条目（名字留空，只计数）。
+ */
+object FailedListSerializer : KSerializer<List<FailedItem>> {
+    private val listSerializer = kotlinx.serialization.builtins.ListSerializer(FailedItem.serializer())
+
+    override val descriptor = PrimitiveSerialDescriptor("FailedList", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): List<FailedItem> {
+        val input = decoder as? JsonDecoder
+            ?: return listSerializer.deserialize(decoder)
+        return when (val el = input.decodeJsonElement()) {
+            is JsonArray -> input.json.decodeFromJsonElement(listSerializer, el)
+            is JsonPrimitive -> {
+                val n = el.content.toIntOrNull() ?: 0
+                List(n.coerceIn(0, 500)) { FailedItem(error = "原因未知") }
+            }
+            else -> throw SerializationException("result.failed 既不是数组也不是数字：$el")
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: List<FailedItem>) {
+        listSerializer.serialize(encoder, value)
+    }
+}
+
+@Serializable
+data class TaskResult(
+    @SerialName("batch_id") val batchId: String = "",
+    val moved: Int = 0,
+    @Serializable(with = FailedListSerializer::class)
+    val failed: List<FailedItem> = emptyList(),
+    val items: List<FailedItem> = emptyList(),
+)
 
 @Serializable
 data class Task(
@@ -100,7 +163,23 @@ data class Task(
     val message: String = "",
     val done: Int = 0,
     val total: Int = 0,
-)
+    /** status == "error" 时的失败原因（后端 tasks.fail() 写进来的） */
+    val error: String = "",
+    /** 后端任务结果 result：{batch_id, moved, failed:[…], items:[…]} */
+    val result: TaskResult? = null,
+) {
+    /** 整理成功移动的数量（没有 result 时退回任务进度） */
+    val moved: Int
+        get() = result?.moved ?: if (status == "done") done else 0
+
+    /** 失败条数：新后端给明细数组，老后端只给一个数字 */
+    val failedCount: Int
+        get() = maxOf(result?.failed?.size ?: 0, result?.items?.count { it.error.isNotEmpty() } ?: 0)
+
+    /** 失败原因列表（新后端才有 name/error 明细） */
+    val failedItems: List<FailedItem>
+        get() = (result?.failed ?: emptyList()).ifEmpty { result?.items.orEmpty().filter { it.error.isNotEmpty() } }
+}
 
 @Serializable
 data class PlayInfo(val mode: String = "error", val url: String? = null, val message: String? = null)

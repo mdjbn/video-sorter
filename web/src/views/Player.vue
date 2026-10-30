@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, nextTick, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import {
   api, ApiError, basename, fmtDur, fmtSize, fmtTime, waitTask,
-  type Plan, type PlanItem, type Tag, type Video,
+  type FailedFile, type OrganizeResult, type Plan, type PlanItem, type SkipSummary, type Tag, type Unwritable, type Video,
 } from '../api'
 import { toast } from '../toast'
 import { nextThemeMode, setThemeMode, themeIcon, themeMode, THEME_LABEL } from '../theme'
@@ -599,6 +599,69 @@ const orgRunning = ref(false)
 const orgPercent = ref(0)
 const orgMsg = ref('')
 
+// 本次整理的失败明细：一直留到用户关掉整理面板（切回「播放列表」页签即清空）
+const orgFailed = ref<FailedFile[]>([])
+const orgSkipReasons = ref<SkipSummary[]>([])
+const orgOutcome = reactive({
+  error: '',        // 整批失败时的文案（task.error）
+  moved: 0,
+  failed: 0,
+  skipped: 0,       // 目标目录不可写而被跳过的数量（执行时返回的 skipped）
+})
+const orgDetailOpen = ref(false)
+const orgHasResult = computed(
+  () => !!orgOutcome.error || orgOutcome.failed > 0 || orgOutcome.skipped > 0 || orgSkipReasons.value.length > 0,
+)
+// 失败列表最多显示 8 条，余下的折成「以及另外 N 条」
+const ORG_FAIL_SHOWN = 8
+const orgFailedShown = computed(() => orgFailed.value.slice(0, ORG_FAIL_SHOWN))
+const orgFailedMore = computed(() => Math.max(0, orgFailed.value.length - ORG_FAIL_SHOWN))
+
+function clearOrgResult() {
+  orgFailed.value = []
+  orgSkipReasons.value = []
+  orgOutcome.error = ''
+  orgOutcome.moved = 0
+  orgOutcome.failed = 0
+  orgOutcome.skipped = 0
+  orgDetailOpen.value = false
+}
+
+// 切到别的页签就等于关掉整理面板：失败明细一起清掉
+watch(pane, (v) => {
+  if (v !== 'org') clearOrgResult()
+})
+
+// 目标目录不可写：预览带出来的 unwritable + 执行响应里新发现的，合并去重
+const orgUnwritableExtra = ref<Unwritable[]>([])
+const orgUnwritable = computed<Unwritable[]>(() => {
+  const out: Unwritable[] = []
+  const seen = new Set<string>()
+  for (const u of [...(plan.value?.unwritable || []), ...orgUnwritableExtra.value]) {
+    if (!u || !u.path) continue
+    const k = `${u.kind}|${u.path}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(u)
+  }
+  return out
+})
+const orgUnwritableHint = computed(() => {
+  const list = orgUnwritable.value
+  if (!list.length) return ''
+  const head = list[0].path
+  return list.length > 1
+    ? `目标目录不可写：${head} 等 ${list.length} 个目录 —— 服务用户没有写权限，整理会失败，请先在 NAS 上调整目录权限`
+    : `目标目录不可写：${head} —— 服务用户没有写权限，整理会失败，请先在 NAS 上调整目录权限`
+})
+
+function kindLabel(kind: string) {
+  if (kind === 'source') return '源目录'
+  if (kind === 'tag') return '标签目录'
+  if (kind === 'root') return '整理根目录'
+  return '目录'
+}
+
 const orgGroups = computed(() => {
   const p = plan.value
   if (!p) return []
@@ -648,20 +711,49 @@ async function runOrganize() {
   orgRunning.value = true
   orgPercent.value = 0
   orgMsg.value = '正在整理…'
+  clearOrgResult()
   try {
     const res = await api.execute({ tag_ids: [...selTags.value] })
+    // 执行前的写权限预检：不可写目录下的视频会被直接剔掉，提前把目录摆进提示条
+    if (res.unwritable?.length) {
+      orgUnwritableExtra.value = res.unwritable
+    }
     const task = await waitTask(res.task_id, (t) => {
       orgPercent.value = t.percent || 0
       orgMsg.value = t.message || `已处理 ${t.done}/${t.total}`
     })
-    if (task.status === 'error') throw new Error(task.error || '整理失败')
-    const moved = task.result?.moved ?? 0
-    const failed = task.result?.failed ?? []
-    toast(failed.length ? `已移动 ${moved} 个，失败 ${failed.length} 个` : `已整理 ${moved} 个视频`, failed.length > 0)
+    const r = (task.result || {}) as OrganizeResult
+    const failed: FailedFile[] = Array.isArray(r.failed) ? r.failed : []
+    const moved = Number(r.moved ?? 0)
+    // 被跳过的视频数只来自执行响应（planned 已扣掉跳过项），任务结果里没有这个字段
+    const skippedNum = Number(res.skipped ?? 0) || 0
+    // skipped_reasons 是后端按目录汇总的 [{path,reason,count}]
+    const reasons = (Array.isArray(res.skipped_reasons) ? res.skipped_reasons : [])
+      .filter((x): x is SkipSummary => !!x && typeof x.path === 'string')
+    orgOutcome.moved = moved
+    orgOutcome.failed = failed.length
+    orgOutcome.skipped = skippedNum
+    orgFailed.value = failed
+    orgSkipReasons.value = reasons
+
+    if (task.status === 'error') {
+      // 整批失败：把后端的错误文案原样摆给用户（「N 个视频全部整理失败：<原因>」），并展开失败明细
+      orgOutcome.error = task.error || r.message || '整理失败'
+      orgDetailOpen.value = true
+      toast(orgOutcome.error, true)
+    } else {
+      let msg = r.message || (failed.length ? `已移动 ${moved} 个，失败 ${failed.length} 个` : `已整理 ${moved} 个视频`)
+      if (skippedNum > 0) msg += `，跳过 ${skippedNum} 个（目标目录不可写）`
+      if (failed.length || skippedNum > 0) orgDetailOpen.value = true
+      toast(msg, failed.length > 0 || skippedNum > 0)
+    }
     orgTouched.value = false
     await Promise.all([loadVideos(current.value?.id), loadPlan(), refreshTags()])
   } catch (e) {
-    toast(e instanceof Error ? e.message : '整理失败', true)
+    const msg = e instanceof Error ? e.message : '整理失败'
+    orgOutcome.error = msg
+    orgDetailOpen.value = true
+    toast(msg, true)
   } finally {
     orgRunning.value = false
     orgPercent.value = 0
@@ -1206,6 +1298,20 @@ defineExpose({ selectVideo })
 
       <!-- 整理 -->
       <div v-show="pane === 'org'" class="pane org">
+        <!-- 目标目录不可写：整理前就告诉用户，免得点了「开始整理」才发现一个都动不了 -->
+        <div v-if="orgUnwritable.length" class="org-warn">
+          <div class="ow-head">
+            <Icon name="warn" :size="13" />
+            <span>{{ orgUnwritableHint }}</span>
+          </div>
+          <div class="ow-list">
+            <div v-for="u in orgUnwritable" :key="u.path" class="ow-row">
+              <span class="ow-k">{{ kindLabel(u.kind) }}</span>
+              <span class="ow-p" :title="u.path">{{ u.path }}</span>
+              <span class="ow-r" :title="u.reason">{{ u.reason }}</span>
+            </div>
+          </div>
+        </div>
         <div class="org-sum">
           可整理 <b>{{ plan?.total ?? 0 }}</b> 个 · {{ orgGroups.length }} 个文件夹
         </div>
@@ -1213,6 +1319,28 @@ defineExpose({ selectVideo })
           勾选标签，下面会列出这些标签下还没整理的视频；点「开始整理」把文件移动到各自的目的文件夹（可在管理页修改每个标签的路径）。
         </div>
         <div class="org-list">
+          <!-- 上次整理的失败 / 跳过明细：一直留到关掉整理面板 -->
+          <div v-if="orgHasResult" class="org-result" :class="{ bad: !!orgOutcome.error }">
+            <div class="or-head" @click="orgDetailOpen = !orgDetailOpen">
+              <Icon :name="orgOutcome.error ? 'warn' : 'info'" :size="13" />
+              <span class="or-t" :title="orgOutcome.error || ''">{{ orgOutcome.error || '上次整理的结果' }}</span>
+              <span class="or-c">{{ orgOutcome.moved }} 成功 / {{ orgOutcome.failed }} 失败<template v-if="orgOutcome.skipped"> / {{ orgOutcome.skipped }} 跳过</template></span>
+              <button class="or-x" title="收起详情" @click.stop="orgDetailOpen = !orgDetailOpen">
+                <Icon :name="orgDetailOpen ? 'chevron-up' : 'chevron-down'" :size="12" />
+              </button>
+            </div>
+            <div v-if="orgDetailOpen" class="or-body">
+              <div v-for="(f, i) in orgFailedShown" :key="i" class="or-row">
+                <span class="or-n" :title="f.name">{{ f.name }}</span>
+                <span class="or-e" :title="f.error">{{ f.error }}</span>
+              </div>
+              <div v-if="orgFailedMore" class="or-more">以及另外 {{ orgFailedMore }} 条</div>
+              <div v-for="(r, i) in orgSkipReasons" :key="'s' + i" class="or-row skip">
+                <span class="or-n">跳过 {{ r.count }} 个</span>
+                <span class="or-e" :title="`${r.path} —— ${r.reason}`">{{ r.path }} —— {{ r.reason }}</span>
+              </div>
+            </div>
+          </div>
           <label v-for="g in orgGroups" :key="g.tag_id" class="org-row" @click.prevent="toggleTagGroup(g.tag_id)">
             <span class="cbx" :class="{ on: selTags.has(g.tag_id) }"><Icon v-if="selTags.has(g.tag_id)" name="check" :size="10" /></span>
             <span class="dot" :style="{ background: g.tag_color }" />

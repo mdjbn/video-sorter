@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .auth import AuthService
 from .config import Config
@@ -22,6 +23,9 @@ class AppState:
     hls: HlsManager
     discovery: DiscoveryService | None = None
     web_dir: Path | None = None
+    # 转码缓存自动清理的守护线程（app.py 的 lifespan 里启动/停止）；单独放一个可选字段，
+    # 免得动到上面的构造顺序和已有的位置参数调用方
+    sweeper: Any = None
 
     @classmethod
     def create(cls, cfg: Config, web_dir: Path | None = None) -> "AppState":

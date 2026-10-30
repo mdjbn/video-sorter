@@ -23,12 +23,21 @@ object Preloader {
     /** 每个视频预取的字节数 */
     private const val PRELOAD_BYTES = 6L * 1024 * 1024
 
+    /** 应用 Context：缓存被改上限丢弃后，预加载能自己按新上限重建 */
+    @Volatile
+    private var appCtx: android.content.Context? = null
+
+    fun attach(ctx: android.content.Context) {
+        appCtx = ctx.applicationContext ?: ctx
+    }
+
     @Volatile
     private var job: Job? = null
 
     fun warm(scope: CoroutineScope, api: Api, videos: List<Video>, from: Int, count: Int = 2) {
         job?.cancel()
         if (videos.isEmpty()) return
+        appCtx?.let { runCatching { MediaCache.buildIfNeeded(it) } }
         val end = minOf(videos.size, from + count)
         if (from >= end) return
         job = scope.launch(Dispatchers.IO) {
@@ -56,7 +65,7 @@ object Preloader {
                 } ?: continue
                 val target: String = path ?: continue
                 val uri = if (target.startsWith("http")) Uri.parse(target) else Uri.parse(api.base + target)
-                val ds = runCatching { MediaCache.sourceFactory(api.headers()).createDataSource() }.getOrNull() ?: continue
+                val ds = runCatching { MediaCache.sourceFactory(api.headers(), appCtx).createDataSource() }.getOrNull() ?: continue
                 try {
                     val spec = DataSpec.Builder()
                         .setUri(uri)

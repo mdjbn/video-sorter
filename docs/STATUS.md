@@ -19,20 +19,21 @@ chmod +x run.sh
 
 | 模块 | 项目 | 状态 | 证据 |
 | --- | --- | --- | --- |
-| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **47 passed** |
+| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **125 passed** |
 | 后端 | Range 播放 + 按需 HLS 转码 | ✅ 本机通过 | pytest 内 mkv→HLS 用例（`index.m3u8` + `seg00000.ts`）|
 | 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
 | 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **21/21 PASS**（CI：`.github/workflows/e2e.yml`）|
+| 网页端 | 整理失败明细 / 不可写提示条 / 缓存设置（1.3.6） | ✅ 本机通过 | 18941 实例 + puppeteer 逐场景截图，见 `docs/screenshots/v136*.png`、`v136b-*.png` |
 | fnOS | 打成 `.fpk` 应用包 | ✅ 本机通过 | `bash packaging/fnos/build.sh` → `dist/fnos/videosorter.fpk`（3.5 MB）|
 | fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |
 | fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **21/21 PASS**（含真实文件移动与撤销）|
 | fnOS | 应用中心里真安装 | ⚠️ 未验证 | 需要 NAS 管理员在应用中心手动安装（本机无 root）|
 | 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleRelease`（固定证书签名）→ `app-<abi>-release.apk`；CI 也会出 APK artifact|
-| 安卓 | 单元测试（normalize/主题/解析/发现） | ✅ 本机通过 | `testDebugUnitTest` → **8/8** |
+| 安卓 | 单元测试（normalize/主题/解析/发现/整理摘要/缓存上限） | ✅ 本机通过 | `testDebugUnitTest` → **23/23** |
 | 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
 | 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
-| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.4` → Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|
+| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.5` 跑通全链路；`v1.3.6` 本地构建三件产物并真机覆盖安装验证（Release 附件以 CI 为准）|
 
 ## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
 
@@ -86,6 +87,21 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 
 **安卓端已知限制**：用固定正式证书签 `assembleRelease`（未开混淆）；`@zseven-w/dsh-android` 插件在本机会话里仍认不出 adb（其 `AdbToolchain` 在插件启动时就缓存了解析结果，需重启宿主服务），调试全程用原始 `adb` 命令。
 
+### 安卓真机实测（2026-10-30，1.3.6）
+
+设备同上（`M2104K10AC` / Android 13），服务端换成自建 18941 实例（数据 `/tmp/vs-and-data`）。
+覆盖安装 `adb install -r videosorter-1.3.6-arm64-v8a.apk` → `versionCode=10306 / versionName=1.3.6`，
+`firstInstallTime` 保持 2026-10-29 不变，证明固定证书的覆盖升级链路正常。
+
+| 场景 | 结果 |
+| --- | --- |
+| 设置 → 缓存与储存 → 本机播放缓存 | 新增卡片，显示「已用 X MB / 上限 Y」；「缓存上限」弹窗五档 256MB/512MB/1GB/2GB/4GB |
+| 改缓存上限 → 2 GB | toast「已保存，重新进入播放页后生效」，卡片显示「2 GB · 越滑越顺，但会占手机空间」；`run-as … cat shared_prefs/vs_session.xml` → `media_cache_mb="2048"`；进播放页再回来两处都稳定 2 GB |
+| 整理 → 目标目录不可写 | 红块「1 个被跳过：目标目录不可写」+ 常见原因说明 + 「知道了」 |
+| 整理 → 整批失败 | 红块「上次整理失败」+ 后端 detail 原文 |
+| 整理 → 部分成功 | 「整理 2 个 → 旅行 / 美食」+「撤销」；红块「1 个被跳过」；待整理剩 1 个 |
+| 启动 / 播放 / 连通性 | 1.3.6 App 连 1.3.6 后端正常播放，关于页显示 v1.3.6 |
+
 ## 四、接下来还需要什么
 
 1. ✅ 仓库已开源：<https://github.com/mdjbn/video-sorter>，`v1.0.0` 已发布全部安装包。
@@ -107,9 +123,9 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 
 | 工作流 | 触发 | 内容 | 最近状态 |
 |---|---|---|---|
-| `backend.yml` | push main / PR | `pytest`（23 项） | ✅ |
+| `backend.yml` | push main / PR | `pytest`（125 项） | ✅ |
 | `web.yml` | push main | `vue-tsc` + `vite build` | ✅ |
-| `e2e.yml` | push main / PR | 起服务 + Puppeteer 真实浏览器 18 项断言 | ✅ |
+| `e2e.yml` | push main / PR | 起服务 + Puppeteer 真实浏览器 21 项断言 | ✅ |
 | `android.yml` | push main（android/**）/ 手动 | 单测 + `assembleRelease`（签名校验）→ APK artifact | ✅ |
 | `windows.yml` | 手动 / 由 Release 调用 | PyInstaller sidecar + Tauri 打包 → NSIS/MSI | ✅ |
 | `fnos.yml` | 手动 / 由 Release 调用 | `fnpack build` → `.fpk` | ✅ |

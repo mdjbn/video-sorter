@@ -348,6 +348,57 @@
 .org-actions .sel b { color: var(--text); }
 .org-actions .btn { margin-left: auto; }
 
+/* 目标目录不可写：贴顶的黄色提示条（整理面板顶部） */
+.org-warn {
+  margin: 0 10px 10px; padding: 9px 10px; border-radius: 10px;
+  background: rgba(244, 162, 89, 0.13);
+  border: 1px solid rgba(244, 162, 89, 0.42);
+  color: var(--text);
+}
+.org-warn .ow-head { display: flex; align-items: flex-start; gap: 6px; font-size: 11.5px; line-height: 1.65; }
+.org-warn .ow-head svg { color: var(--warn); flex: none; margin-top: 2px; }
+.org-warn .ow-list { margin-top: 7px; display: grid; gap: 4px; }
+.org-warn .ow-row { display: flex; align-items: baseline; gap: 6px; font-size: 11px; line-height: 1.5; }
+.org-warn .ow-k {
+  flex: none; padding: 0 5px; border-radius: 5px; font-size: 9.5px;
+  color: var(--warn); background: rgba(244, 162, 89, 0.16);
+  border: 1px solid rgba(244, 162, 89, 0.3);
+}
+.org-warn .ow-p {
+  flex: 1; min-width: 0; color: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left;
+}
+.org-warn .ow-r { flex: none; max-width: 42%; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 上次整理结果：失败原因 / 跳过明细，可展开 */
+.org-result {
+  margin: 2px 6px 10px; border-radius: 10px; overflow: hidden;
+  background: var(--input-bg); border: 1px solid var(--line);
+}
+.org-result.bad { border-color: rgba(255, 107, 107, 0.4); background: var(--danger-dim); }
+.org-result .or-head { display: flex; align-items: center; gap: 7px; padding: 8px 9px; cursor: pointer; }
+.org-result .or-head svg { flex: none; color: var(--muted); }
+.org-result.bad .or-head svg { color: var(--danger); }
+.org-result .or-t {
+  flex: 1; min-width: 0; font-size: 11.5px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.org-result .or-c { flex: none; font-size: 10.5px; color: var(--muted-2); }
+.org-result .or-x { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); }
+.org-result .or-x:hover { background: rgba(var(--ink), 0.08); color: var(--text); }
+.org-result .or-body { padding: 0 9px 8px; display: grid; gap: 3px; }
+.org-result .or-row { display: flex; align-items: baseline; gap: 7px; font-size: 11px; line-height: 1.55; }
+.org-result .or-n {
+  flex: 0 1 auto; max-width: 52%; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.org-result .or-e {
+  flex: 1; min-width: 0; color: var(--muted); font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+.org-result .or-row.skip .or-n { flex: none; color: var(--warn); }
+.org-result .or-more { font-size: 10.5px; color: var(--muted-2); padding-top: 2px; }
+
 /* 响应式：平板收窄侧栏，手机改为上下布局 */
 @media (max-width: 1020px) {
   .side { width: 300px; }

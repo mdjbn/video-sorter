@@ -525,6 +525,9 @@ class HlsJob:
         self.touched = time.time()
         # 当前正在跑的 ffmpeg 子进程；服务退出时靠它把进程树清干净，否则会留下孤儿进程
         self.proc: subprocess.Popen | None = None
+        # 所属的 HlsManager（HlsManager.job_for 里回填）：转码完成后顺带清理缓存时，
+        # 用它查出「还有哪些视频正在转码」从而跳过，不让清理删掉正在写的分片
+        self.manager: HlsManager | None = None
         # 这次转码是不是因为「迟迟不出分片」被掐掉的：用来区分「放不了」和「转码失败」
         self.stalled = False
         sub = "" if self.start <= 0 else f"/s{int(self.start)}"
@@ -546,6 +549,24 @@ class HlsJob:
     @property
     def finished(self) -> bool:
         return (self.dir / ".done").exists()
+
+    def _sweep_after_done(self) -> None:
+        """一次转码刚跑完，顺手按上限/保留期清一次缓存。
+
+        ffmpeg 是按需拉起来的，看完一部片子正好是「缓存又长了一点」的时机，
+        等每小时那一轮要拖很久。放到 daemon 线程里做，别让播放器等清理：
+        sweep_hls 自己会跳过活跃任务，异常也全吞掉，这里只兜底一层。
+        """
+        def _run() -> None:
+            try:
+                from .cache import sweep_hls
+                res = sweep_hls(self.cfg, getattr(self, "manager", None))
+                if res.get("removed_dirs"):
+                    print(f"[cache] 转码完成后清理：删了 {res['removed_dirs']} 个目录，"
+                          f"释放 {res['freed_bytes']} 字节", flush=True)
+            except Exception:  # noqa: BLE001 - 清理失败绝不影响播放
+                pass
+        threading.Thread(target=_run, name="vs-hls-sweep-once", daemon=True).start()
 
     def _progress(self, pct: float, msg: str = "") -> None:
         if self.on_progress:
@@ -583,6 +604,7 @@ class HlsJob:
                     self.encoder = last_enc
                     (self.dir / ".done").write_text(str(time.time()), encoding="utf-8")
                     self._progress(1.0, "转码完成")
+                    self._sweep_after_done()
                     return
             # 卡死（久不出分片）就别再拿 CPU 重试了：这类源软解同样慢到不可用，
             # 重试只会把 NAS 再烧几分钟。用户要的是「直接告诉他放不了」。
@@ -607,6 +629,7 @@ class HlsJob:
                     self.encoder = last_enc
                     (self.dir / ".done").write_text(str(time.time()), encoding="utf-8")
                     self._progress(1.0, "转码完成（已回落 CPU）")
+                    self._sweep_after_done()
                     return
             if self.cancel.is_set():
                 # 被更新的起点取代：不算失败，也别喊「转码失败」
@@ -875,6 +898,8 @@ class HlsManager:
             if job is None or job.src != src:
                 job = HlsJob(self.tools, self.cfg, video_id, src, duration, vcodec, acodec,
                              start=key[1], src_w=src_w, src_h=src_h)
+                # 转码完成后的顺带清理要知道「谁还在跑」，否则可能把正在写的那一路删掉
+                job.manager = self
                 self.jobs[key] = job
                 # 同一个视频换了起点：把其它「拖动出来」的转码任务停掉（一次拖动只留最新那一路）。
                 # s0（整片那一路）分两种情况：
@@ -945,6 +970,15 @@ class HlsManager:
             proc = job.proc
             if proc is not None:
                 HlsJob._kill_proc(proc)
+
+    def active_video_ids(self) -> set[int]:
+        """正在转码的视频 id 集合（s0 与拖动产生的 sN 那一路都算）。
+
+        转码缓存清理（`cache.sweep_hls`）靠它跳过「正在被写」的目录：
+        jobs 的键是 `(video_id, start)` 双键，所以按第一项取集合。
+        """
+        with self.lock:
+            return {int(k[0]) for k in self.jobs if isinstance(k, tuple) and k}
 
     def clear_all(self) -> None:
         """清空所有转码产物与任务状态（「清除缓存」用）。"""
