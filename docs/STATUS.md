@@ -24,16 +24,17 @@ chmod +x run.sh
 | 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
 | 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **21/21 PASS**（CI：`.github/workflows/e2e.yml`）|
 | 网页端 | 整理失败明细 / 不可写提示条 / 缓存设置（1.3.6） | ✅ 本机通过 | 18941 实例 + puppeteer 逐场景截图，见 `docs/screenshots/v136*.png`、`v136b-*.png` |
+| 安卓 | 四条体验改进（1.3.7：滚动位置 / 去水波 / 排序按钮 / 横屏全屏） | ✅ 真机通过 | 见下方「安卓真机实测（1.3.7）」，截图 `v136c-*.png`、`v136g-*.png`、`v137-*.png` |
 | fnOS | 打成 `.fpk` 应用包 | ✅ 本机通过 | `bash packaging/fnos/build.sh` → `dist/fnos/videosorter.fpk`（3.5 MB）|
 | fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |
 | fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **21/21 PASS**（含真实文件移动与撤销）|
 | fnOS | 应用中心里真安装 | ⚠️ 未验证 | 需要 NAS 管理员在应用中心手动安装（本机无 root）|
 | 安卓 | 编译 APK | ✅ 本机通过（JDK21+Gradle8.11+SDK35） | `assembleRelease`（固定证书签名）→ `app-<abi>-release.apk`；CI 也会出 APK artifact|
-| 安卓 | 单元测试（normalize/主题/解析/发现/整理摘要/缓存上限） | ✅ 本机通过 | `testDebugUnitTest` → **23/23** |
+| 安卓 | 单元测试（normalize/主题/解析/发现/整理摘要/缓存上限） | ✅ 本机通过 | `testDebugUnitTest` → **25/25** |
 | 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
 | 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
-| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.6` 五个 job 全绿，Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|
+| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.6`、`v1.3.7` 五个 job 全绿，Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|
 
 ## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
 
@@ -101,6 +102,23 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 | 整理 → 整批失败 | 红块「上次整理失败」+ 后端 detail 原文 |
 | 整理 → 部分成功 | 「整理 2 个 → 旅行 / 美食」+「撤销」；红块「1 个被跳过」；待整理剩 1 个 |
 | 启动 / 播放 / 连通性 | 1.3.6 App 连 1.3.6 后端正常播放，关于页显示 v1.3.6 |
+
+### 安卓真机实测（2026-10-31，1.3.7）
+
+覆盖安装 `adb install -r videosorter-1.3.7-arm64-v8a.apk` → `versionCode=10307 / versionName=1.3.7`，
+`firstInstallTime` 仍为 2026-10-29，固定证书覆盖升级链路正常。
+
+| 场景 | 结果 |
+| --- | --- |
+| 视频库滚动位置 | 造 12 个测试视频（共 17 个）滚到底 → 切播放页 → 切回，位置完整保留 |
+| 播放页点标签 | 抓点击瞬间（`input tap … &` + `sleep 0.09` + `screencap`），标签纯色填充、无灰斑水波 |
+| 标签排序按钮 | 每张卡右侧 `扫描 \| ↑ \| ↓`；连点 12 次 **12/12 生效**；release 包再连点 8 次 **8/8 生效**；1.3.7 release 包连点 6 次 **6/6 生效**；首行 ↑ / 末行 ↓ 禁用无反应；点卡片正文仍打开「编辑标签」 |
+| 播放页全屏 | 点右下角按钮 → 屏幕从 1080×2400 变 2400×1080，状态栏/导航栏/底栏/标题/标签/进度条全部淡出，只留视频 + 退出按钮；点退出或按返回键回到竖屏且 UI 复原 |
+| 全屏手势 | 全屏下上下滑切视频、轻点唤出/收起控件、双击快进都正常；横屏控件有渐变垫底，可读 |
+| 全屏暂停 | 暂停时自动显示标题、标签胶囊、进度条与右侧按钮组（播放中轻点也能唤出） |
+
+排序按钮走过一段弯路：先做「长按/握把拖动」，连续三版都没能稳定（根因是手势要和 `LazyColumn` 抢事件），
+最后按用户要求改成按钮。完整复盘见 `docs/HANDOFF.md` §8.24–§8.27。
 
 ### 平台差异：只读目录预检用例在 Windows 跳过（2026-10-30）
 
