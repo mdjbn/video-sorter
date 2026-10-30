@@ -66,7 +66,12 @@ def _prepare(env, h, count: int = 3):
 
 
 def _ro_subdir(base: Path) -> Path:
-    """在 base 下建一个 0o555 的子目录，用完恢复 0o755 好让 tmp_path 能清理。"""
+    """在 base 下建一个「只读」子目录，用完恢复可写好让 tmp_path 能清理。
+
+    注意 Windows：chmod 只能切只读位，`os.access(W_OK)` 照样返回 True（而且 chmod
+    本身常常是空操作），所以这一整组用例在 Windows 上会全挂——本文件的用例都挂
+    `@pytest.mark.skipif(os.name == "nt")`，Windows 只跑那两条不打 chmod 的回归用例。
+    """
     d = base / "readonly"
     d.mkdir()
     os.chmod(d, 0o555)
@@ -75,6 +80,8 @@ def _ro_subdir(base: Path) -> Path:
 
 # ---------- check_roots_writable 本身 ----------
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_readonly_source_dir_is_reported(env, tmp_path) -> None:
     """源目录本身不可写 → 报出来（kind=source，说明原因）。"""
     st = _state()
@@ -117,6 +124,8 @@ def test_missing_source_dir_is_reported(env, tmp_path) -> None:
     assert not ghost.exists(), "预检不能在用户目录里创建任何东西"
 
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_missing_tag_dir_under_unwritable_parent_is_reported(env, tmp_path) -> None:
     """标签目录还没建、但它的父目录不可写 → 报出来（整理时一定 mkdir 不出来）。"""
     c, h = env["client"], _login(env["client"])
@@ -136,6 +145,8 @@ def test_missing_tag_dir_under_unwritable_parent_is_reported(env, tmp_path) -> N
         os.chmod(ro, 0o755)
 
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_duplicate_paths_are_reported_once(env, tmp_path) -> None:
     """同一个目录既是源目录又是两个标签的目标目录时只报一次，且输出按路径排序。"""
     c, h = env["client"], _login(env["client"])
@@ -171,6 +182,8 @@ def test_no_probe_files_created(env, tmp_path) -> None:
 
 # ---------- /api/scan：不可写不拦扫描，但结果里带上 ----------
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_scan_still_runs_and_reports_unwritable(env, tmp_path) -> None:
     c, h = env["client"], _login(env["client"])
     ro = _ro_subdir(tmp_path)
@@ -201,6 +214,8 @@ def test_scan_has_no_warning_when_all_writable(env) -> None:
 
 # ---------- /api/organize/preview：unwritable / blocked ----------
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_preview_returns_unwritable(env, tmp_path) -> None:
     c, h = env["client"], _login(env["client"])
     tag, _videos, tag_dir = _prepare(env, h, count=1)
@@ -233,6 +248,8 @@ def test_preview_returns_unwritable(env, tmp_path) -> None:
 
 # ---------- /api/organize/execute ----------
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_execute_400_when_every_target_is_unwritable(env, tmp_path) -> None:
     """计划里的目标目录全都不可写 → 400，文案要点明是哪个目录、让用户去改权限。"""
     c, h = env["client"], _login(env["client"])
@@ -254,6 +271,8 @@ def test_execute_400_when_every_target_is_unwritable(env, tmp_path) -> None:
         os.chmod(ro, 0o755)
 
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_execute_skips_unwritable_tag_and_runs_the_rest(env, tmp_path) -> None:
     """两个标签，一个目标目录不可写：只跳过那一个，另一个照常整理，响应里带 skipped 信息。"""
     c, h = env["client"], _login(env["client"])
@@ -315,6 +334,8 @@ def test_execute_normal_path_unchanged(env) -> None:
 
 # ---------- execute_plan 里不可写失败要带 hint ----------
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_execute_plan_marks_hint_for_unwritable_target(env, tmp_path) -> None:
     """绕过路由直接跑 execute_plan：预检结果已给出、真搬时才失败，失败项要带 hint。"""
     c, h = env["client"], _login(env["client"])
@@ -368,6 +389,8 @@ def test_writable_reason_survives_missing_effective_ids(tmp_path) -> None:
         organizer.os.access = original
 
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_writable_reason_reports_readonly_after_fallback(tmp_path) -> None:
     """退回普通 os.access 后仍然要能识别真正的只读目录（别把上面那条修成永远 True）。"""
     d = tmp_path / "ro"
