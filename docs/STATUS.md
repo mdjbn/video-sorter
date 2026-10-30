@@ -34,7 +34,7 @@ chmod +x run.sh
 | 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
 | 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
-| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.6`、`v1.3.7` 五个 job 全绿，Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|
+| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.6`、`v1.3.7` 五个 job 全绿，Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|\n| 发布 | Windows 打包的 ffmpeg 下载 | ✅ 加多源回退 | gyan.dev 偶发 503 会卡死整个 job，`windows.yml` 现在按 gyan.dev → GyanD/codexffmpeg → BtbN 顺序重试，每个源 3 次并校验体积 |
 
 ## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
 
