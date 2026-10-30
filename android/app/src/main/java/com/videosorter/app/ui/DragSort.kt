@@ -89,13 +89,9 @@ fun LazyListState.visibleRowYs(): List<DragReorder.RowY> =
     }
 
 /**
- * 可长按拖动排序的列表容器。
+ * 可长按拖动排序的列表行容器（给「整行长按就能拖」的场景用）。
  *
- * 用法：把 [Modifier.dragHandle] 挂到每一行上（通常是整行），长按后上下拖动就能换位置；
- * 松手时回调 [onDrop]，由页面去调接口保存、失败则回滚。
- *
- * 视觉上只做一件事：被拖的那行抬起来（zIndex 提高 + 半透明），其余的等数据变了自然重排——
- * 数据每次都会真的重新排列，所以松手后不会「弹回去」。
+ * 行位置上报仍然由它转发（[onMeasured]），但页面自己做卡片位移，所以这里只管手势与层级。
  */
 @Composable
 fun DragSortItem(
@@ -184,27 +180,53 @@ fun DragHandle(
     }
 }
 
-/** 拖动排序的共享状态：记录被拖的行、手指相对行顶的偏移、以及拖动中累计的位移。 */
+/**
+ * 拖动排序的共享状态。
+ *
+ * 关键点：手指移动的量 [travel] **一次拖动内永不归零**，被拖那张卡在原列表里的位置也
+ * [slotTop] 一次记死。于是「卡片当前该画在哪」永远是 [slotTop] + [travel]，
+ * 不会因为中途换位而漂移——之前用「换位后 reset 偏移」导致标签乱跳，就是这里改掉的。
+ */
 class DragSortState {
+    /** 被拖那张卡当前的下标（会随换位变化，只用来决定「谁在最后画」）。 */
     var dragIndex by mutableStateOf(-1)
         private set
-    var dragOffset by mutableStateOf(0f)
+
+    /** 这次拖动手指累计走了多远（纵轴），从头到尾只增不减。 */
+    var travel by mutableStateOf(0f)
         private set
 
-    fun start(index: Int) {
+    /** 开始拖时这张卡在原列表里的顶部 y 与高度（未换位坐标系的基准）。 */
+    var slotTop by mutableStateOf(0f)
+        private set
+    var slotHeight by mutableStateOf(0f)
+        private set
+
+    /** 被抓起来那张卡在页面上的 y：基准位置 + 手指位移。 */
+    val cardTop: Float get() = slotTop + travel
+
+    fun start(index: Int, top: Float, height: Float) {
         dragIndex = index
-        dragOffset = 0f
+        travel = 0f
+        slotTop = top
+        slotHeight = height
     }
 
     fun dragBy(dy: Float) {
         if (dragIndex < 0) return
-        dragOffset += dy
+        travel += dy
+    }
+
+    /** 换位后只改下标，不动 [travel]，卡片因此不会跳。 */
+    fun setIndex(index: Int) {
+        if (dragIndex < 0) return
+        dragIndex = index
     }
 
     fun end(): Int {
         val i = dragIndex
         dragIndex = -1
-        dragOffset = 0f
+        travel = 0f
         return i
     }
 

@@ -808,20 +808,30 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             }
         }
 
-        // 一次拖动位移：先挪，再看是否该换位
-        fun dragStep(dy: Float) {
+        fun handleStart(index: Int) {
+            if (saving || sort.dragging) return
+            val top = if (index in rowTops.indices) rowTops[index] else 0f
+            val bottom = if (index in rowBottoms.indices) rowBottoms[index] else top
+            sort.start(index, top, (bottom - top).coerceAtLeast(1f))
+        }
+
+        // 手指位移：先累计，再按「基准位置 + 累计位移」算落点。
+        // 换位时只改下标、不清位移，卡片才不会跳（之前清位移就是乱跳的根源）。
+        fun dragStep(dy: Float, index: Int) {
+            if (!sort.dragging) handleStart(index)
             sort.dragBy(dy)
             val from = sort.dragIndex
             val rows = measuredRows()
             if (from < 0 || rows.isEmpty()) return
-            val me = rows.firstOrNull { it.index == from } ?: return
+            // 卡片当前实际 y 由基准 + 手指位移推出来，不去读换位后可能还没重新测到的旧值
+            val top = sort.slotTop + sort.travel
             val target = DragReorder.targetIndex(
-                draggedCenter = me.center + sort.dragOffset,
+                draggedCenter = top + sort.slotHeight / 2f,
                 rows = rows, from = from, count = shown.size,
             )
             if (target != from) {
                 shown = DragReorder.move(shown, from, target)
-                sort.start(target)
+                sort.setIndex(target)
             }
         }
 
@@ -860,8 +870,8 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                     count = shown.size,
                     dragging = sort.dragIndex == i,
                     longPressAnywhere = false,
-                    startDrag = { if (!saving) sort.start(i) },
-                    dragBy = { dy -> dragStep(dy) },
+                    startDrag = { handleStart(i) },
+                    dragBy = { dy -> dragStep(dy, i) },
                     endDrag = { drop() },
                     onClick = { if (sort.dragIndex < 0) openEdit(tag) },
                     onMeasured = { top, bottom -> putRow(i, top, bottom) },
@@ -871,8 +881,12 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                             .fillMaxWidth()
                             .padding(horizontal = 18.dp, vertical = 4.dp)
                             .graphicsLayer {
-                                // 被拖的那张卡跟着手指走；其它卡保持原位，换位后自然重排
-                                translationY = if (sort.dragIndex == i) sort.dragOffset else 0f
+                                // 被拖的那张卡：基准位置 + 手指位移（位移一次拖动内不归零），
+                                // 换位后它的基准位置就变成新槽位，卡片因此贴着手指平滑移动
+                                translationY = if (sort.dragIndex == i) {
+                                    sort.slotTop + sort.travel -
+                                        (if (i in rowTops.indices) rowTops[i] else 0f)
+                                } else 0f
                                 // 按住时微微放大 + 投影，像从列表里被拎起来
                                 scaleX = if (sort.dragIndex == i) 1.02f else 1f
                                 scaleY = if (sort.dragIndex == i) 1.02f else 1f
@@ -888,8 +902,8 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                                 accent = t.accent,
                                 dragging = sort.dragIndex == i,
                                 onScan = { if (scanning) onToast("正在扫描，稍等一下") else scanOne(tag) },
-                                onHandleStart = { if (!saving) sort.start(i) },
-                                onHandleDrag = { dy -> dragStep(dy) },
+                                onHandleStart = { handleStart(i) },
+                                onHandleDrag = { dy -> dragStep(dy, i) },
                                 onHandleEnd = { drop() },
                                 onMeasured = { top, bottom -> putRow(i, top, bottom) },
                             )
