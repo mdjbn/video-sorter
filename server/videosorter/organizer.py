@@ -222,13 +222,15 @@ def _writable_reason(p: str, allow_missing: bool = False) -> tuple[bool, str]:
             return False, "不是一个目录"
     except OSError as e:  # pragma: no cover — exists/isdir 很少抛
         return False, f"无法访问：{e}"
-    try:
-        if os.access(p, os.W_OK, effective_ids=True):
-            return True, ""
-        if os.access(p, os.W_OK):
-            return True, ""
-    except (OSError, NotImplementedError):  # pragma: no cover — 不支持 effective_ids 的平台
-        pass
+    # 先试带 effective_ids 的（suid 场景更准），不支持就退回普通 os.access。
+    # 两次调用必须各自 try：Windows 上 effective_ids=True 会抛 NotImplementedError，
+    # 若把普通那次也包在同一个 try 里，整个函数会静默判成「不可写」（v1.3.6 的 CI 就是这么炸的）。
+    for kwargs in ({"effective_ids": True}, {}):
+        try:
+            if os.access(p, os.W_OK, **kwargs):
+                return True, ""
+        except (OSError, NotImplementedError, TypeError):
+            continue
     return False, "服务用户没有写权限"
 
 

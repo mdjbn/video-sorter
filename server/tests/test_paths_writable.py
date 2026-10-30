@@ -339,3 +339,53 @@ def test_execute_plan_marks_hint_for_unwritable_target(env, tmp_path) -> None:
     finally:
         os.chmod(target, 0o755)
         os.chmod(ro, 0o755)
+
+
+def test_writable_reason_survives_missing_effective_ids(tmp_path) -> None:
+    """Windows 上 os.access(effective_ids=True) 抛 NotImplementedError。
+
+    v1.3.6 的第一次发版就是这么炸的：两次 os.access 被包在同一个 try 里，
+    Windows 抛异常后连普通那次也没跑，于是**每台可写目录都被判成「没有写权限」**，
+    windows job 的 14 个用例全挂。这里把 effective_ids 分支强行做成抛
+    NotImplementedError，验证普通判定仍然能给出「可写」。
+    """
+    d = tmp_path / "writable"
+    d.mkdir()
+    real_access = os.access
+
+    def fake_access(path, mode, *, effective_ids=False, **kw):
+        if effective_ids:
+            raise NotImplementedError("effective_ids not supported on this platform")
+        return real_access(path, mode, **kw)
+
+    original = organizer.os.access
+    organizer.os.access = fake_access
+    try:
+        ok, why = organizer._writable_reason(str(d))
+        assert ok is True, why
+        assert why == ""
+    finally:
+        organizer.os.access = original
+
+
+def test_writable_reason_reports_readonly_after_fallback(tmp_path) -> None:
+    """退回普通 os.access 后仍然要能识别真正的只读目录（别把上面那条修成永远 True）。"""
+    d = tmp_path / "ro"
+    d.mkdir()
+    os.chmod(d, 0o555)
+    real_access = os.access
+
+    def fake_access(path, mode, *, effective_ids=False, **kw):
+        if effective_ids:
+            raise NotImplementedError("effective_ids not supported on this platform")
+        return real_access(path, mode, **kw)
+
+    original = organizer.os.access
+    organizer.os.access = fake_access
+    try:
+        ok, why = organizer._writable_reason(str(d))
+        assert ok is False
+        assert why == "服务用户没有写权限"
+    finally:
+        organizer.os.access = original
+        os.chmod(d, 0o755)
