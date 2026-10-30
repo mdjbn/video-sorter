@@ -3,6 +3,7 @@ package com.videosorter.app.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -76,7 +77,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
@@ -808,10 +809,18 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             }
         }
 
+        // 拖动过程中「谁在让位」：只记一个落点下标，不动 shown。
+        // 数据一旦在中途重排，LazyColumn 会立刻把卡片挪到新槽位，手指下的那张就会跳一下，
+        // 相邻卡片也要等下一帧才让开（看起来像叠在一起）。所以拖动期间只算浮动位置，
+        // 松手才把数据搬过去。
+        var dropIndex by remember { mutableStateOf(-1) }
+        val dragLift by animateDpAsState(if (sort.dragging) 3.dp else 0.dp, label = "drag-lift")
+
         fun handleStart(index: Int) {
             if (saving || sort.dragging) return
             val top = if (index in rowTops.indices) rowTops[index] else 0f
             val bottom = if (index in rowBottoms.indices) rowBottoms[index] else top
+            dropIndex = index
             sort.start(index, top, (bottom - top).coerceAtLeast(1f))
         }
 
@@ -826,19 +835,66 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             // 卡片当前实际 y 由基准 + 手指位移推出来，不去读换位后可能还没重新测到的旧值
             val top = sort.slotTop + sort.travel
             val target = DragReorder.targetIndex(
-                draggedCenter = top + sort.slotHeight / 2f,
+                draggedTop = top,
                 rows = rows, from = from, count = shown.size,
             )
-            if (target != from) {
-                shown = DragReorder.move(shown, from, target)
-                sort.setIndex(target)
+            dropIndex = target
+        }
+
+        /**
+         * 其他卡片为了让开被拖卡片要挪多远。
+         *
+         * 拖动期间不动 [shown]（重排会让 LazyColumn 立刻搬迁，手指下那张会跳），
+         * 所以让位只能逐张算：往下拖时，被越过的卡片整体上移一格；往上拖时整体下移一格。
+         */
+        // 卡片间距 6dp，换算成像素供让位计算
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val gap = with(density) { 6.dp.toPx() }
+
+        fun rowHeight(i: Int): Float =
+            if (i in rowTops.indices && i in rowBottoms.indices) {
+                (rowBottoms[i] - rowTops[i]).coerceAtLeast(1f)
+            } else {
+                sort.slotHeight
             }
+
+        /**
+         * 让位卡片该挪多远。
+         *
+         * [rowTops] 量的是「让位之前」的位置，直接拿来用会让靠后的卡片越让越晚（先被压住半格
+         * 才挪）。所以这里顺着自己这一侧一路推：
+         * 往下拖时，紧挨着被拖卡片（或上一张已让位的卡片）下方接上去；
+         * 往上拖时，紧挨着它（或下一张已让位的卡片）上方叠上去。
+         */
+        fun shiftFor(index: Int): Float {
+            val from = sort.dragIndex
+            val to = dropIndex
+            if (!sort.dragging || from < 0 || to < 0 || index == from) return 0f
+            val base = if (index in rowTops.indices) rowTops[index] else 0f
+            val moved = when {
+                // 往下拖：从被拖卡片空出来的位置开始，依次往下接
+                to > from && index in (from + 1)..to -> {
+                    var top = sort.slotTop
+                    for (k in (from + 1) until index) top += rowHeight(k) + gap
+                    top + sort.slotHeight + gap
+                }
+                // 往上拖：卡片依次往下退一格，退的都是自己这一格的高度
+                to < from && index in to until from -> base + rowHeight(index) + gap
+                else -> base
+            }
+            return moved - base
         }
 
         fun orderChanged(): Boolean = shown.map { it.id } != tags.map { it.id }
 
         fun drop() {
+            val from = sort.dragIndex
+            val to = dropIndex
             sort.end()
+            dropIndex = -1
+            if (from >= 0 && to >= 0 && to != from && to < shown.size) {
+                shown = DragReorder.move(shown, from, to)
+            }
             if (!orderChanged() || saving) return
             val ids = shown.map { it.id }
             saving = true
@@ -875,18 +931,16 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                     endDrag = { drop() },
                     onClick = { if (sort.dragIndex < 0) openEdit(tag) },
                     onMeasured = { top, bottom -> putRow(i, top, bottom) },
+                    // 被拖的那张卡：位移由 DragSortItem 挂在内层，外层保持静止，
+                    // 行测量才不会被自己拖走的位移污染。别的卡片拖动期间原地不动（不让位），
+                    // 松手重排时它们才换过去——这样中途就不会有卡片互相压着。
+                    offsetY = if (sort.dragIndex == i) sort.travel else shiftFor(i),
                 ) {
                     Box(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 18.dp, vertical = 4.dp)
                             .graphicsLayer {
-                                // 被拖的那张卡：基准位置 + 手指位移（位移一次拖动内不归零），
-                                // 换位后它的基准位置就变成新槽位，卡片因此贴着手指平滑移动
-                                translationY = if (sort.dragIndex == i) {
-                                    sort.slotTop + sort.travel -
-                                        (if (i in rowTops.indices) rowTops[i] else 0f)
-                                } else 0f
                                 // 按住时微微放大 + 投影，像从列表里被拎起来
                                 scaleX = if (sort.dragIndex == i) 1.02f else 1f
                                 scaleY = if (sort.dragIndex == i) 1.02f else 1f
@@ -905,7 +959,6 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                                 onHandleStart = { handleStart(i) },
                                 onHandleDrag = { dy -> dragStep(dy, i) },
                                 onHandleEnd = { drop() },
-                                onMeasured = { top, bottom -> putRow(i, top, bottom) },
                             )
                         }
                     }
@@ -1021,15 +1074,23 @@ private fun TagRow(
     onHandleStart: () -> Unit,
     onHandleDrag: (Float) -> Unit,
     onHandleEnd: () -> Unit,
-    onMeasured: (Float, Float) -> Unit,
+    onMeasured: ((Float, Float) -> Unit)? = null,
 ) {
     val t = tokens()
     Row(
         Modifier
             .fillMaxWidth()
-            .onGloballyPositioned { coords ->
-                onMeasured(coords.positionInParent().y, coords.positionInParent().y + coords.size.height)
-            }
+            .then(
+                // 行区间由外层 DragSortItem 上报（它保持静止），这里只是兼容旧调用
+                if (onMeasured == null) {
+                    Modifier
+                } else {
+                    Modifier.onGloballyPositioned { coords ->
+                        val y = coords.positionInRoot().y
+                        onMeasured(y, y + coords.size.height)
+                    }
+                },
+            )
             .alpha(if (dim) 0.85f else 1f)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

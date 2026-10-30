@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -50,13 +51,14 @@ object DragReorder {
      * 正好落回同一个视觉位置）。
      * 向下拖时它自然变成 from+1、from+2…；向上拖时变成 from-1、from-2…
      */
-    fun targetIndex(draggedCenter: Float, rows: List<RowY>, from: Int, count: Int): Int {
+    fun targetIndex(draggedTop: Float, rows: List<RowY>, from: Int, count: Int): Int {
         if (count <= 0) return 0
         if (rows.isEmpty()) return from.coerceIn(0, count - 1)
-        // 只看别人的中线：越过一半就换位，拖动时行不会来回抽搐
+        // 用「被拖卡片的顶边」跟别人的顶边比：顶边越过谁的顶边，就该插到谁前面。
+        // 跟中线比会晚半格——卡片已经压住上面那张了才换位，看起来就是叠在一起。
         val others = rows.filter { it.index != from }.sortedBy { it.index }
         if (others.isEmpty()) return from.coerceIn(0, count - 1)
-        val below = others.firstOrNull { it.center > draggedCenter }
+        val below = others.firstOrNull { it.top > draggedTop }
         if (below != null) {
             // 插到 below 前面。若我从上方拖来，这个位置就是 below.index - 1；
             // 若我从下方拖来，就是 below.index。统一用「摘掉自己后 below 的新下标」：
@@ -104,6 +106,7 @@ fun DragSortItem(
     onClick: () -> Unit,
     longPressAnywhere: Boolean = true,
     onMeasured: ((Float, Float) -> Unit)? = null,
+    offsetY: Float = 0f,
     content: @Composable () -> Unit,
 ) {
     // 注意：这里必须自己处理「轻点」。
@@ -143,7 +146,11 @@ fun DragSortItem(
                 onClick = onClick,
             ),
     ) {
-        content()
+        // 位移只挂在内层：外层负责测量，必须保持静止，否则测到的 y 会把自己被拖走的那段
+        // 位移也算进去（self-referential），行区间一路漂走，落点判断跟着乱跳。
+        Box(Modifier.graphicsLayer { translationY = offsetY }) {
+            content()
+        }
     }
 }
 

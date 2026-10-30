@@ -327,37 +327,40 @@ class LogicTest {
     )
 
     /**
-     * 落点语义：返回的是「最终下标」，坐标系还是 from 那一行仍在位的当前列表。
-     * 三行高 100，中心 50 / 150 / 250。
+     * 落点语义：传进去的是被拖卡片的「顶边 y」，返回最终下标。
+     * 三行高 100，顶边 0 / 100 / 200，中心 50 / 150 / 250。
+     * 判据用顶边比顶边——用中心比会晚半格，卡片会先压住上一张才换位。
      */
     @Test
-    fun dragStaysPutWhileAboveTheNextRowCenter() {
-        // 第 0 行中心 50，往下拖到 140：还没越过第 1 行的中心 150 → 不动
-        val target = DragReorder.targetIndex(140f, threeRows(), from = 0, count = 3)
+    fun dragStaysPutWhileAboveTheNextRowTop() {
+        // 顶边拖到 99：还没越过第 1 行的顶边 100 → 不动
+        val target = DragReorder.targetIndex(99f, threeRows(), from = 0, count = 3)
         assertEquals(0, target)
         assertEquals(listOf(0, 1, 2), DragReorder.move(listOf(0, 1, 2), 0, target))
     }
 
     @Test
-    fun dragMovesDownPastNeighbourCenter() {
-        // 越过第 1 行中心 150 → 换到 1
-        val t1 = DragReorder.targetIndex(160f, threeRows(), from = 0, count = 3)
+    fun dragMovesDownPastNeighbourTop() {
+        // 顶边越过第 1 行顶边 100 → 换到 1
+        val t1 = DragReorder.targetIndex(120f, threeRows(), from = 0, count = 3)
         assertEquals(1, t1)
         assertEquals(listOf(1, 0, 2), DragReorder.move(listOf(0, 1, 2), 0, t1))
-        // 越过第 2 行中心 250 → 换到 2（末尾）
-        val t2 = DragReorder.targetIndex(260f, threeRows(), from = 0, count = 3)
+        // 越过第 2 行顶边 200 → 换到 2（末尾）
+        val t2 = DragReorder.targetIndex(220f, threeRows(), from = 0, count = 3)
         assertEquals(2, t2)
         assertEquals(listOf(1, 2, 0), DragReorder.move(listOf(0, 1, 2), 0, t2))
     }
 
     @Test
-    fun dragMovesUpPastNeighbourCenter() {
-        // 第 2 行中心 250，往上拖到 140：第一个「中心 > 140」的行是第 1 行（150）→ 插到它前面 = 1
-        val t1 = DragReorder.targetIndex(140f, threeRows(), from = 2, count = 3)
+    fun dragMovesUpPastNeighbourTop() {
+        // 第 2 行往上拖到顶边 120：第一个「顶边 > 120」的行是第 2 行自己之外的第 0、1 行…
+        // 只看别人：第 0 行顶边 0、第 1 行顶边 100 都不大于 120 → 没有 below → 落到最后可见行之后
+        // 这里给它 99：越过第 1 行顶边 100 → 插到第 1 行前 = 1
+        val t1 = DragReorder.targetIndex(99f, threeRows(), from = 2, count = 3)
         assertEquals(1, t1)
         assertEquals(listOf(0, 2, 1), DragReorder.move(listOf(0, 1, 2), 2, t1))
-        // 再往上拖到 40：没有任何行中心在 40 下方 → 落到最上面 0
-        val t0 = DragReorder.targetIndex(40f, threeRows(), from = 2, count = 3)
+        // 再往上顶边到 -50：越过第 0 行顶边 0 → 落到最上面 0
+        val t0 = DragReorder.targetIndex(-50f, threeRows(), from = 2, count = 3)
         assertEquals(0, t0)
         assertEquals(listOf(2, 0, 1), DragReorder.move(listOf(0, 1, 2), 2, t0))
     }
