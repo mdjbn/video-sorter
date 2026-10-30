@@ -17,8 +17,8 @@ val keystoreProps = Properties().apply {
 val hasReleaseSigning = keystoreProps.getProperty("storeFile") != null &&
     rootProject.file(keystoreProps.getProperty("storeFile")).exists()
 
-// versionName 是唯一真源，versionCode 由它推导：1.3.6 -> 10306（Android 要求 versionCode 单调递增）
-val appVersionName = "1.3.6"
+// versionName 是唯一真源，versionCode 由它推导：1.3.7 -> 10307（Android 要求 versionCode 单调递增）
+val appVersionName = "1.3.7"
 val appVersionCode = appVersionName.split(".").let {
     it[0].toInt() * 10000 + it[1].toInt() * 100 + it[2].toInt()
 }

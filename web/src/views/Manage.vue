@@ -1174,6 +1174,7 @@ const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeM
 
 /* ---------------- 更新日志（关于页只显示最近 5 条） ---------------- */
 const LOGS: { v: string; text: string }[] = [
+  { v: '1.3.7', text: '手机 App 体验改进：视频库来回切页不再跳回顶部（滚动位置会保留）；播放页点标签不再有点击水波，点下即亮；标签顺序可以在「设置 → 标签管理」里用每行右侧的上下箭头调整，点一下立刻保存；播放页右下角新增全屏按钮，横屏观看时只留视频，轻点屏幕或暂停会唤出标题、标签和进度条，返回键即可退出全屏。' },
   { v: '1.3.6', text: '整理失败会明确报错了：整批都没搬成功时不再假装「已完成」，而是标成失败并写清原因（例如「2 个视频全部整理失败：源文件已不存在」），网页和 App 里都能展开看到每个文件失败的原因；整理前先检查目标文件夹能不能写，不能写的目录会提前在视频库顶部和整理页用黄色提示条列出来（写明是哪个目录、为什么不可写），执行时直接跳过这些视频并在结果里说明，不再搬到一半才报错；转码缓存（NAS 上切出来的 HLS 分片）现在有上限也会过期了，默认超过 4 GB 或 7 天没看过就自动清理，设置页新增「缓存」卡片可以改上限、改过期时间，也能一键立即清理；安卓 App 的播放缓存上限从固定 512 MB 改成可选（256 MB / 512 MB / 1 GB / 2 GB / 4 GB），在「设置 → 缓存与储存 → 本机播放缓存」里改，缓存放不下时自动淘汰最久没看的。' },
   { v: '1.3.5', text: '手机 App 优先直连原文件：MKV / TS 容器与 HEVC、AC3、EAC3、FLAC 在手机上能硬解的格式不再走 NAS 转码，直接播原文件（不占 CPU、起播更快），万一某个机型的解码器解不了会自动退回转码；设置页「转码」卡片新增「使用 GPU 转码」开关：打开时有显卡就自动用显卡编码、没驱动或没权限自动回落 CPU，关掉则只用 CPU 编码（功耗低）；新增「设置」页：整理根目录、上传目录、缩略图位置、扫描线程数、转码、局域网发现都可以在网页里改；新增「备份设置 / 导入设置」，把配置、源文件夹、标签一起导出成一个 JSON 文件，换机器或重装后一键还原（导入只补不会删）；关于页的更新日志只显示最近 5 条，完整历史去 GitHub Releases 看；所有填目录的输入框后面多了「选择」按钮，可直接点选文件夹（fnOS 里调系统目录选择器，其它环境用内置目录浏览）。转码默认改用显卡：有 NVIDIA / Intel 核显 / AMD 显卡 / Apple 芯片时优先硬件编码，CPU 时间大幅下降（实测 1080p 快 4～5 倍）、可同时转更多路；没驱动或没权限时自动回落 CPU，不会转码失败；设置页新增「转码编码器」选项（自动 / 指定硬件 / 只用 CPU）并显示当前实际使用的编码器；即使只用 CPU 编码，解码也尽量交给显卡。' },
   { v: '1.3.4', text: 'Windows 桌面端修复「英文等非中文系统启动即崩」（控制台编码打印中文报错导致服务端起不来）；发版自动产出 Windows 安装包（.exe / .msi）；新增 Docker 镜像，同时发布到 Docker Hub 与 GHCR（amd64 / arm64）；安卓安装包改用固定证书签名，以后升级可直接覆盖安装、不用卸载重装（这一版仍需卸载旧包一次）。' },
@@ -1899,7 +1900,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.6' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.7' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
