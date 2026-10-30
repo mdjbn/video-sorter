@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -775,9 +776,8 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         var saving by remember { mutableStateOf(false) }
         val sort = remember { DragSortState() }
         val listState = rememberLazyListState()
-        // 所有标签行都在同一个 LazyColumn item 里（一个 GroupCard 包住），
-        // LazyListState.visibleRowYs() 只能看到那一张卡片的边界，量不到每一行，
-        // 所以这里让每行自己上报位置，拖动时按这份实测数据算落点。
+        // 所有标签卡片都在 LazyColumn 里，LazyListState.visibleRowYs() 量不到卡片内部，
+        // 所以这里让每张卡自己上报位置，拖动时按这份实测数据算落点。
         val rowTops = remember { mutableStateListOf<Float>() }
         val rowBottoms = remember { mutableStateListOf<Float>() }
         fun putRow(index: Int, top: Float, bottom: Float) {
@@ -791,7 +791,22 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                 .filter { it < rowBottoms.size && rowBottoms[it] > rowTops[it] }
                 .map { DragReorder.RowY(it, rowTops[it], rowBottoms[it]) }
         // tags 每次刷新都是新对象，得跟着同步一次（拖动中不改，免得打架）
-        LaunchedEffect(tags) { if (!sort.dragging) shown = tags }
+        LaunchedEffect(tags) {
+            if (!sort.dragging) {
+                shown = tags
+                rowTops.clear(); rowBottoms.clear()
+            }
+        }
+        // 进页面自己拉一次：顺序可能在网页端或别的设备上改过，
+        // 只靠 MainScreen.reload() 的话这里会一直显示旧顺序
+        LaunchedEffect(Unit) {
+            try {
+                val fresh = api.tags()
+                if (!sort.dragging) { shown = fresh; rowTops.clear(); rowBottoms.clear() }
+            } catch (_: Throwable) {
+                // 拉不到就先用传进来的那份，不打扰用户
+            }
+        }
 
         // 一次拖动位移：先挪，再看是否该换位
         fun dragStep(dy: Float) {
@@ -834,30 +849,37 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(18.dp),
+            // 卡片自己带左右 18dp 内边距，这里只留上下
+            contentPadding = PaddingValues(top = 14.dp, bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            item(key = "tags-card") {
-                GroupCard {
-                    shown.forEachIndexed { i, tag ->
-                        if (i > 0) RowDivider()
-                        DragSortItem(
-                            index = i,
-                            count = shown.size,
-                            dragging = sort.dragIndex == i,
-                            longPressAnywhere = false,
-                            startDrag = { if (!saving) sort.start(i) },
-                            dragBy = { dy -> dragStep(dy) },
-                            endDrag = { drop() },
-                            onClick = { if (sort.dragIndex < 0) openEdit(tag) },
-                            onMeasured = { top, bottom -> putRow(i, top, bottom) },
-                        ) {
-                            Box(
-                                Modifier.fillMaxWidth().graphicsLayer {
-                                    // 被拖的那行跟着手指走；其它行保持原位，换位后自然重排
-                                    translationY = if (sort.dragIndex == i) sort.dragOffset else 0f
-                                    shadowElevation = if (sort.dragIndex == i) 10.dp.toPx() else 0f
-                                },
-                            ) {
+            // 每个标签自己一张小卡片：拖动排序时整张卡一起走，卡片之间留 8dp 间隙
+            itemsIndexed(shown, key = { _, tag -> tag.id }) { i, tag ->
+                DragSortItem(
+                    index = i,
+                    count = shown.size,
+                    dragging = sort.dragIndex == i,
+                    longPressAnywhere = false,
+                    startDrag = { if (!saving) sort.start(i) },
+                    dragBy = { dy -> dragStep(dy) },
+                    endDrag = { drop() },
+                    onClick = { if (sort.dragIndex < 0) openEdit(tag) },
+                    onMeasured = { top, bottom -> putRow(i, top, bottom) },
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 4.dp)
+                            .graphicsLayer {
+                                // 被拖的那张卡跟着手指走；其它卡保持原位，换位后自然重排
+                                translationY = if (sort.dragIndex == i) sort.dragOffset else 0f
+                                // 按住时微微放大 + 投影，像从列表里被拎起来
+                                scaleX = if (sort.dragIndex == i) 1.02f else 1f
+                                scaleY = if (sort.dragIndex == i) 1.02f else 1f
+                                shadowElevation = if (sort.dragIndex == i) 12.dp.toPx() else 0f
+                            },
+                    ) {
+                        GroupCard {
                             TagRow(
                                 tag = tag,
                                 dim = sort.dragIndex == i,
@@ -871,7 +893,6 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                                 onHandleEnd = { drop() },
                                 onMeasured = { top, bottom -> putRow(i, top, bottom) },
                             )
-                            }
                         }
                     }
                 }
@@ -880,7 +901,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                 Text(
                     "按住每行右侧的握把上下拖动即可调整标签顺序；「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
                     color = t.muted2, fontSize = 10.5.sp, lineHeight = 15.sp,
-                    modifier = Modifier.padding(horizontal = 4.dp),
+                    modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 10.dp),
                 )
             }
         }
