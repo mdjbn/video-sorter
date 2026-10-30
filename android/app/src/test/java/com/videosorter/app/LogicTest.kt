@@ -10,6 +10,7 @@ import com.videosorter.app.data.parseReply
 import com.videosorter.app.data.VideoPage
 import com.videosorter.app.ui.CACHE_MB_OPTIONS
 import com.videosorter.app.ui.DragReorder
+import com.videosorter.app.ui.ScrubEnd
 import com.videosorter.app.ui.MAX_SHOWN
 import com.videosorter.app.ui.OrganizeFailState
 import com.videosorter.app.ui.cacheBytesText
@@ -342,4 +343,22 @@ class LogicTest {
         assertEquals(ids, DragReorder.move(ids, ids.size - 1, ids.size - 1))
     }
 
+
+    // ---------------- 拖进度条时播完了（ScrubEnd） ----------------
+
+    @Test
+    fun scrubHoldsInsteadOfAdvancingWhenVideoEndsMidDrag() {
+        // 按着进度条预览时播完：不许跳下一个，先停在结尾
+        assertEquals(ScrubEnd.OnEnded.HOLD, ScrubEnd.onEnded(scrubbing = true))
+        // 没按进度条：照旧自动下一个
+        assertEquals(ScrubEnd.OnEnded.ADVANCE, ScrubEnd.onEnded(scrubbing = false))
+    }
+
+    @Test
+    fun scrubReleaseRestartsOnlyIfItEndedDuringPreview() {
+        // 预览期间播完了 → 播放器停在 STATE_ENDED，必须 play() 才动得起来
+        assertEquals(ScrubEnd.OnRelease.RESTART, ScrubEnd.onRelease(endedWhileScrubbing = true))
+        // 没播完 → 只是把 playWhenReady 设回去
+        assertEquals(ScrubEnd.OnRelease.RESUME, ScrubEnd.onRelease(endedWhileScrubbing = false))
+    }
 }

@@ -211,6 +211,9 @@ fun PlayerScreen(
     var duration by remember { mutableStateOf(0.0) }
     // 正在拖进度条（拖动期间 position 是预览值，轮询不要覆盖它）
     var scrubActive by remember { mutableStateOf(false) }
+    // 拖进度条期间视频正好播完了：压住「自动下一个」，等松手 seek 完再继续。
+    // 不压的话，用户手指还按在进度条上、正想往回拖，画面已经跳到下一个视频了。
+    var endedWhileScrubbing by remember { mutableStateOf(false) }
     var hud by remember { mutableStateOf<HudSpec?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var loadingSrc by remember { mutableStateOf(true) }
@@ -359,7 +362,15 @@ fun PlayerScreen(
                 if (state == Player.STATE_ENDED) {
                     // 播完了：进度记 0（下次从头播），再自动下一个
                     current?.let { savePos(it.id) }
-                    if (pagerState.currentPage + 1 < count) onIndexChange(pagerState.currentPage + 1)
+                    if (ScrubEnd.onEnded(scrubActive) == ScrubEnd.OnEnded.HOLD) {
+                        // 用户正按着进度条预览：先停在这里，不要跳下一个。
+                        // 松手后进度条那段逻辑会 seek 到滑块位置并恢复播放，
+                        // endedWhileScrubbing 在那里被消费掉。
+                        endedWhileScrubbing = true
+                        player.playWhenReady = false
+                    } else if (pagerState.currentPage + 1 < count) {
+                        onIndexChange(pagerState.currentPage + 1)
+                    }
                 }
             }
 
@@ -1223,10 +1234,18 @@ fun PlayerScreen(
                                     }
                                     // 松手才真正跳过去（拖动期间不打断播放）
                                     val target = scrub * total
-                                    player.seekTo((target * 1000).toLong())
                                     position = target
+                                    // 先把拖动标记清掉再动播放器：下面 seek 到结尾附近会再触发一次
+                                    // STATE_ENDED，那时必须走「正常播完」的分支
                                     dragging = false
                                     scrubActive = false
+                                    val mode = ScrubEnd.onRelease(endedWhileScrubbing)
+                                    endedWhileScrubbing = false
+                                    player.seekTo((target * 1000).toLong())
+                                    when (mode) {
+                                        ScrubEnd.OnRelease.RESTART -> player.play()
+                                        ScrubEnd.OnRelease.RESUME -> player.playWhenReady = true
+                                    }
                                 }
                             },
                         contentAlignment = Alignment.CenterStart,
