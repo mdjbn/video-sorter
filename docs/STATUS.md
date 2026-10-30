@@ -19,7 +19,7 @@ chmod +x run.sh
 
 | 模块 | 项目 | 状态 | 证据 |
 | --- | --- | --- | --- |
-| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **125 passed** |
+| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **127 passed**（Windows 上 118 passed / 9 skipped，见下）|
 | 后端 | Range 播放 + 按需 HLS 转码 | ✅ 本机通过 | pytest 内 mkv→HLS 用例（`index.m3u8` + `seg00000.ts`）|
 | 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
 | 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **21/21 PASS**（CI：`.github/workflows/e2e.yml`）|
@@ -33,7 +33,7 @@ chmod +x run.sh
 | 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
 | 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
-| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.5` 跑通全链路；`v1.3.6` 本地构建三件产物并真机覆盖安装验证（Release 附件以 CI 为准）|
+| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.6` 五个 job 全绿，Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|
 
 ## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
 
@@ -102,6 +102,17 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 | 整理 → 部分成功 | 「整理 2 个 → 旅行 / 美食」+「撤销」；红块「1 个被跳过」；待整理剩 1 个 |
 | 启动 / 播放 / 连通性 | 1.3.6 App 连 1.3.6 后端正常播放，关于页显示 v1.3.6 |
 
+### 平台差异：只读目录预检用例在 Windows 跳过（2026-10-30）
+
+`server/tests/test_paths_writable.py` 里 9 个用例靠 `chmod 0o555` 制造不可写目录来断言预检。
+这在 POSIX 上成立，Windows 上不成立（chmod 只切只读位、`os.access(W_OK)` 照旧为真），
+所以它们挂 `@pytest.mark.skipif(os.name == "nt")`，Windows 上只跑两条不打 chmod 的回归用例
+（`effective_ids` 抛 `NotImplementedError` 时仍判可写 / 仍判只读）。
+
+同一次发版还修了一个真 bug：`organizer._writable_reason()` 把两次 `os.access` 包在同一个 `try` 里，
+Windows 上 `effective_ids=True` 抛异常后连普通判定也没跑到，导致**所有可写目录都被判成不可写**。
+改完 CI 的 windows job 才转绿。详见 `docs/HANDOFF.md` §8.20。
+
 ## 四、接下来还需要什么
 
 1. ✅ 仓库已开源：<https://github.com/mdjbn/video-sorter>，`v1.0.0` 已发布全部安装包。
@@ -123,7 +134,7 @@ cd src-tauri && cargo check --target x86_64-pc-windows-gnu
 
 | 工作流 | 触发 | 内容 | 最近状态 |
 |---|---|---|---|
-| `backend.yml` | push main / PR | `pytest`（125 项） | ✅ |
+| `backend.yml` | push main / PR | `pytest`（127 项） | ✅ |
 | `web.yml` | push main | `vue-tsc` + `vite build` | ✅ |
 | `e2e.yml` | push main / PR | 起服务 + Puppeteer 真实浏览器 21 项断言 | ✅ |
 | `android.yml` | push main（android/**）/ 手动 | 单测 + `assembleRelease`（签名校验）→ APK artifact | ✅ |
