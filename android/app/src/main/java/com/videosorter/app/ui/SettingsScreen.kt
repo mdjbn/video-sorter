@@ -71,6 +71,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -779,31 +780,45 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         val listState = rememberLazyListState()
         // 所有标签卡片都在 LazyColumn 里，LazyListState.visibleRowYs() 量不到卡片内部，
         // 所以这里让每张卡自己上报位置，拖动时按这份实测数据算落点。
-        val rowTops = remember { mutableStateListOf<Float>() }
-        val rowBottoms = remember { mutableStateListOf<Float>() }
-        fun putRow(index: Int, top: Float, bottom: Float) {
-            while (rowTops.size <= index) rowTops.add(0f)
-            while (rowBottoms.size <= index) rowBottoms.add(0f)
-            rowTops[index] = top
-            rowBottoms[index] = bottom
+        // 按 tag.id 记账，不用下标当身份：顺序一换，下标就指向别的卡片了，
+        // 上一轮残留的旧坐标会让第二次之后的拖动落到错的槽位（"第一次正常、后面偶发出错"）。
+        val rowTops = remember { mutableStateMapOf<Int, Float>() }
+        val rowBottoms = remember { mutableStateMapOf<Int, Float>() }
+        fun putRow(id: Int, top: Float, bottom: Float) {
+            rowTops[id] = top
+            rowBottoms[id] = bottom
         }
+        /** 当前 [shown] 顺序下每行实测的区间，下标即列表下标。 */
         fun measuredRows(): List<DragReorder.RowY> =
-            rowTops.indices
-                .filter { it < rowBottoms.size && rowBottoms[it] > rowTops[it] }
-                .map { DragReorder.RowY(it, rowTops[it], rowBottoms[it]) }
+            shown.indices.mapNotNull { i ->
+                val id = shown[i].id
+                val top = rowTops[id] ?: return@mapNotNull null
+                val bottom = rowBottoms[id] ?: return@mapNotNull null
+                if (bottom > top) DragReorder.RowY(i, top, bottom) else null
+            }
+        /** 某张卡实测的顶边 / 高度（按 id 查，顺序变了也不会张冠李戴）。 */
+        fun rowTopOf(i: Int): Float? = shown.getOrNull(i)?.let { rowTops[it.id] }
+        fun rowHeightOf(i: Int): Float? {
+            val id = shown.getOrNull(i)?.id ?: return null
+            val top = rowTops[id] ?: return null
+            val bottom = rowBottoms[id] ?: return null
+            return if (bottom > top) bottom - top else null
+        }
         // tags 每次刷新都是新对象，得跟着同步一次（拖动中不改，免得打架）
         LaunchedEffect(tags) {
-            if (!sort.dragging) {
-                shown = tags
-                rowTops.clear(); rowBottoms.clear()
-            }
+            if (!sort.dragging) shown = tags
         }
+        // 注意：这里**不能**清空 rowTops/rowBottoms。清掉之后，已经组合好的卡片布局没变，
+        // onGloballyPositioned 不会重新触发，表就永远是空的 → 下一次按下时 handleStart
+        // 取不到位置，整次拖动直接失效（用户报的「第一次能拖、后面拖不动」）。
+        // 顺序一变，用 id 记账的旧值会被新一轮 onGloballyPositioned 覆盖；即使没覆盖，
+        // 也只是那一次用了过期坐标，比彻底拖不动好得多。
         // 进页面自己拉一次：顺序可能在网页端或别的设备上改过，
         // 只靠 MainScreen.reload() 的话这里会一直显示旧顺序
         LaunchedEffect(Unit) {
             try {
                 val fresh = api.tags()
-                if (!sort.dragging) { shown = fresh; rowTops.clear(); rowBottoms.clear() }
+                if (!sort.dragging) shown = fresh
             } catch (_: Throwable) {
                 // 拉不到就先用传进来的那份，不打扰用户
             }
@@ -818,10 +833,12 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
 
         fun handleStart(index: Int) {
             if (saving || sort.dragging) return
-            val top = if (index in rowTops.indices) rowTops[index] else 0f
-            val bottom = if (index in rowBottoms.indices) rowBottoms[index] else top
+            val top = rowTopOf(index) ?: 0f
+            val height = rowHeightOf(index) ?: 1f
+            // 实测还没到（比如刚进页面就按住）就先不启动，等测量回来
+            if (rowTopOf(index) == null) return
             dropIndex = index
-            sort.start(index, top, (bottom - top).coerceAtLeast(1f))
+            sort.start(index, top, height.coerceAtLeast(1f))
         }
 
         // 手指位移：先累计，再按「基准位置 + 累计位移」算落点。
@@ -837,6 +854,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             val target = DragReorder.targetIndex(
                 draggedTop = top,
                 rows = rows, from = from, count = shown.size,
+                slotHeight = sort.slotHeight,
             )
             dropIndex = target
         }
@@ -851,12 +869,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         val density = androidx.compose.ui.platform.LocalDensity.current
         val gap = with(density) { 6.dp.toPx() }
 
-        fun rowHeight(i: Int): Float =
-            if (i in rowTops.indices && i in rowBottoms.indices) {
-                (rowBottoms[i] - rowTops[i]).coerceAtLeast(1f)
-            } else {
-                sort.slotHeight
-            }
+        fun rowHeight(i: Int): Float = rowHeightOf(i) ?: sort.slotHeight
 
         /**
          * 让位卡片该挪多远。
@@ -870,7 +883,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             val from = sort.dragIndex
             val to = dropIndex
             if (!sort.dragging || from < 0 || to < 0 || index == from) return 0f
-            val base = if (index in rowTops.indices) rowTops[index] else 0f
+            val base = rowTopOf(index) ?: 0f
             val moved = when {
                 // 往下拖：从被拖卡片空出来的位置开始，依次往下接
                 to > from && index in (from + 1)..to -> {
@@ -930,7 +943,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                     dragBy = { dy -> dragStep(dy, i) },
                     endDrag = { drop() },
                     onClick = { if (sort.dragIndex < 0) openEdit(tag) },
-                    onMeasured = { top, bottom -> putRow(i, top, bottom) },
+                    onMeasured = { top, bottom -> putRow(tag.id, top, bottom) },
                     // 被拖的那张卡：位移由 DragSortItem 挂在内层，外层保持静止，
                     // 行测量才不会被自己拖走的位移污染。别的卡片拖动期间原地不动（不让位），
                     // 松手重排时它们才换过去——这样中途就不会有卡片互相压着。

@@ -2,6 +2,9 @@ package com.videosorter.app.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -51,27 +54,45 @@ object DragReorder {
      * 正好落回同一个视觉位置）。
      * 向下拖时它自然变成 from+1、from+2…；向上拖时变成 from-1、from-2…
      */
-    fun targetIndex(draggedTop: Float, rows: List<RowY>, from: Int, count: Int): Int {
+    /**
+     * 拖动时应该落在哪个位置。
+     *
+     * @param draggedTop  被拖卡片当前顶边（屏幕坐标）
+     * @param rows        各行的实测区间（下标 = 当前列表下标）
+     * @param from        被拖卡片起始下标
+     * @param count       列表长度
+     * @param slotHeight  被拖卡片高度，用它的半格当换位阈值
+     *
+     * 判据：把每张卡看作占 [top, top+slotHeight) 的槽位。被拖卡片的顶边落在
+     * 谁的槽位里，就排到谁那个位置。等价于「越过对方顶边 + 半格」——半格而不是整格，
+     * 是因为实拍里 adb 拖一格只走约 220px 而一格 243px，差几像素就白拖一次
+     * （表现为「第一次能拖、后面常常拖不动」）。
+     */
+    fun targetIndex(
+        draggedTop: Float,
+        rows: List<RowY>,
+        from: Int,
+        count: Int,
+        slotHeight: Float = 0f,
+    ): Int {
         if (count <= 0) return 0
         if (rows.isEmpty()) return from.coerceIn(0, count - 1)
-        // 用「被拖卡片的顶边」跟别人的顶边比：顶边越过谁的顶边，就该插到谁前面。
-        // 跟中线比会晚半格——卡片已经压住上面那张了才换位，看起来就是叠在一起。
-        val others = rows.filter { it.index != from }.sortedBy { it.index }
-        if (others.isEmpty()) return from.coerceIn(0, count - 1)
-        val below = others.firstOrNull { it.top > draggedTop }
-        if (below != null) {
-            // 插到 below 前面。若我从上方拖来，这个位置就是 below.index - 1；
-            // 若我从下方拖来，就是 below.index。统一用「摘掉自己后 below 的新下标」：
-            val belowAfterRemoval = if (below.index > from) below.index - 1 else below.index
-            return belowAfterRemoval.coerceIn(0, count - 1)
+        val sorted = rows.sortedBy { it.index }
+        // 半格按被拖卡片自己的高度算；没传就用可见行中位高
+        val slot = if (slotHeight > 0f) {
+            slotHeight
+        } else {
+            sorted.map { it.bottom - it.top }.sorted().let { it[it.size / 2] }
         }
-        // 没有任何行在我下方 → 排到最后一个可见行之后
-        val bottom = others.last()
-        val afterBottom = if (bottom.index > from) bottom.index else bottom.index + 1
-        return afterBottom.coerceIn(0, count - 1)
+        // 我的中心落在哪一行里，就占那一行的位置
+        val probe = draggedTop + slot / 2f
+        for (row in sorted) {
+            if (probe < row.bottom) return row.index.coerceIn(0, count - 1)
+        }
+        // 落到所有行下方 → 最后一个可见行的位置
+        return sorted.last().index.coerceIn(0, count - 1)
     }
 
-    /** 把手里的列表按 from→to 挪一格，返回新列表（不原地改，方便回滚）。 */
     fun <T> move(list: List<T>, from: Int, to: Int): List<T> {
         if (from == to) return list
         if (from !in list.indices) return list
@@ -170,16 +191,24 @@ fun DragHandle(
     val interaction = remember { MutableInteractionSource() }
     Box(
         Modifier
+            // 一按下就抢下手势：不等系统手指移动阈值。否则在可滚动列表里，
+            // 向上的拖动会先被 LazyColumn 当成滚动吃掉（松手时 onDragEnd 也不来），
+            // 表现就是「往上拖没反应、往下拖正常」。
             .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { onStart() },
-                    onDragEnd = { onEnd() },
-                    onDragCancel = { onEnd() },
-                    onDrag = { change, dragAmount ->
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    onStart()
+                    var last = down.position.y
+                    // drag(...) 会一直跟到手指抬起或手势被取消，返回 true 才是正常抬起
+                    val ok = drag(down.id) { change ->
+                        val dy = change.position.y - last
+                        last = change.position.y
                         change.consume()
-                        onDragBy(dragAmount.y)
-                    },
-                )
+                        if (dy != 0f) onDragBy(dy)
+                    }
+                    onEnd()
+                }
             }
             .clickable(interactionSource = interaction, indication = null) { },
     ) {

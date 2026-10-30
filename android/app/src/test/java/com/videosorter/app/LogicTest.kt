@@ -328,41 +328,46 @@ class LogicTest {
 
     /**
      * 落点语义：传进去的是被拖卡片的「顶边 y」，返回最终下标。
-     * 三行高 100，顶边 0 / 100 / 200，中心 50 / 150 / 250。
-     * 判据用顶边比顶边——用中心比会晚半格，卡片会先压住上一张才换位。
+     * 三行高 100，顶边 0 / 100 / 200；每张卡占 [top, top+100) 的槽位，
+     * 判据是「被拖卡片的中心（顶边 + 半格）落在谁的槽位里」。
+     * 用中心而不是整格越过：实拍里 adb 拖一格只走约 220px 而一格 243px，
+     * 要求整格越过会差几像素就白拖一次（用户报的「第一次能拖、后面常常拖不动」）。
      */
     @Test
-    fun dragStaysPutWhileAboveTheNextRowTop() {
-        // 顶边拖到 99：还没越过第 1 行的顶边 100 → 不动
-        val target = DragReorder.targetIndex(99f, threeRows(), from = 0, count = 3)
-        assertEquals(0, target)
-        assertEquals(listOf(0, 1, 2), DragReorder.move(listOf(0, 1, 2), 0, target))
+    fun dragStaysInPlaceInsideOwnSlot() {
+        // 中心还在第 0 槽 [0,100) 里 → 0
+        for (top in listOf(-50f, 0f, 49f)) {
+            assertEquals(0, DragReorder.targetIndex(top, threeRows(), from = 0, count = 3))
+        }
+        assertEquals(listOf(0, 1, 2), DragReorder.move(listOf(0, 1, 2), 0, 0))
     }
 
     @Test
-    fun dragMovesDownPastNeighbourTop() {
-        // 顶边越过第 1 行顶边 100 → 换到 1
-        val t1 = DragReorder.targetIndex(120f, threeRows(), from = 0, count = 3)
-        assertEquals(1, t1)
-        assertEquals(listOf(1, 0, 2), DragReorder.move(listOf(0, 1, 2), 0, t1))
-        // 越过第 2 行顶边 200 → 换到 2（末尾）
-        val t2 = DragReorder.targetIndex(220f, threeRows(), from = 0, count = 3)
-        assertEquals(2, t2)
-        assertEquals(listOf(1, 2, 0), DragReorder.move(listOf(0, 1, 2), 0, t2))
+    fun dragMovesDownSlotBySlot() {
+        // 中心 50+50=100 起进入第 1 槽 → 1
+        for (top in listOf(50f, 99f, 149f)) {
+            assertEquals(1, DragReorder.targetIndex(top, threeRows(), from = 0, count = 3))
+        }
+        assertEquals(listOf(1, 0, 2), DragReorder.move(listOf(0, 1, 2), 0, 1))
+        // 中心 150+50=200 起进入第 2 槽 → 2（末尾）
+        for (top in listOf(150f, 200f, 5000f)) {
+            assertEquals(2, DragReorder.targetIndex(top, threeRows(), from = 0, count = 3))
+        }
+        assertEquals(listOf(1, 2, 0), DragReorder.move(listOf(0, 1, 2), 0, 2))
     }
 
     @Test
-    fun dragMovesUpPastNeighbourTop() {
-        // 第 2 行往上拖到顶边 120：第一个「顶边 > 120」的行是第 2 行自己之外的第 0、1 行…
-        // 只看别人：第 0 行顶边 0、第 1 行顶边 100 都不大于 120 → 没有 below → 落到最后可见行之后
-        // 这里给它 99：越过第 1 行顶边 100 → 插到第 1 行前 = 1
-        val t1 = DragReorder.targetIndex(99f, threeRows(), from = 2, count = 3)
-        assertEquals(1, t1)
-        assertEquals(listOf(0, 2, 1), DragReorder.move(listOf(0, 1, 2), 2, t1))
-        // 再往上顶边到 -50：越过第 0 行顶边 0 → 落到最上面 0
-        val t0 = DragReorder.targetIndex(-50f, threeRows(), from = 2, count = 3)
-        assertEquals(0, t0)
-        assertEquals(listOf(2, 0, 1), DragReorder.move(listOf(0, 1, 2), 2, t0))
+    fun dragMovesUpSlotBySlot() {
+        // 从第 2 行（顶边 200）往上：中心落在第 1 槽 [100,200) → 1
+        for (top in listOf(50f, 99f, 100f, 149f)) {
+            assertEquals(1, DragReorder.targetIndex(top, threeRows(), from = 2, count = 3))
+        }
+        assertEquals(listOf(0, 2, 1), DragReorder.move(listOf(0, 1, 2), 2, 1))
+        // 中心落回第 0 槽 → 0（最上面）
+        for (top in listOf(-50f, 0f, 49f)) {
+            assertEquals(0, DragReorder.targetIndex(top, threeRows(), from = 2, count = 3))
+        }
+        assertEquals(listOf(2, 0, 1), DragReorder.move(listOf(0, 1, 2), 2, 0))
     }
 
     @Test
