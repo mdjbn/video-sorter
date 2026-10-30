@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Label
@@ -74,6 +75,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -766,13 +770,45 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.Add, "新建标签", tint = t.ink(0.75f), modifier = Modifier.size(17.dp)) }
     }) {
-        // 长按拖动排序：本地先排好给人看，松手才发请求；失败就退回原顺序并提示
+        // 按住握把拖动排序：本地先排好给人看，松手才发请求；失败就退回原顺序并提示
         var shown by remember { mutableStateOf(tags) }
         var saving by remember { mutableStateOf(false) }
         val sort = remember { DragSortState() }
         val listState = rememberLazyListState()
+        // 所有标签行都在同一个 LazyColumn item 里（一个 GroupCard 包住），
+        // LazyListState.visibleRowYs() 只能看到那一张卡片的边界，量不到每一行，
+        // 所以这里让每行自己上报位置，拖动时按这份实测数据算落点。
+        val rowTops = remember { mutableStateListOf<Float>() }
+        val rowBottoms = remember { mutableStateListOf<Float>() }
+        fun putRow(index: Int, top: Float, bottom: Float) {
+            while (rowTops.size <= index) rowTops.add(0f)
+            while (rowBottoms.size <= index) rowBottoms.add(0f)
+            rowTops[index] = top
+            rowBottoms[index] = bottom
+        }
+        fun measuredRows(): List<DragReorder.RowY> =
+            rowTops.indices
+                .filter { it < rowBottoms.size && rowBottoms[it] > rowTops[it] }
+                .map { DragReorder.RowY(it, rowTops[it], rowBottoms[it]) }
         // tags 每次刷新都是新对象，得跟着同步一次（拖动中不改，免得打架）
         LaunchedEffect(tags) { if (!sort.dragging) shown = tags }
+
+        // 一次拖动位移：先挪，再看是否该换位
+        fun dragStep(dy: Float) {
+            sort.dragBy(dy)
+            val from = sort.dragIndex
+            val rows = measuredRows()
+            if (from < 0 || rows.isEmpty()) return
+            val me = rows.firstOrNull { it.index == from } ?: return
+            val target = DragReorder.targetIndex(
+                draggedCenter = me.center + sort.dragOffset,
+                rows = rows, from = from, count = shown.size,
+            )
+            if (target != from) {
+                shown = DragReorder.move(shown, from, target)
+                sort.start(target)
+            }
+        }
 
         fun orderChanged(): Boolean = shown.map { it.id } != tags.map { it.id }
 
@@ -808,44 +844,41 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                             index = i,
                             count = shown.size,
                             dragging = sort.dragIndex == i,
+                            longPressAnywhere = false,
                             startDrag = { if (!saving) sort.start(i) },
-                            dragBy = { dy ->
-                                sort.dragBy(dy)
-                                val from = sort.dragIndex
-                                if (from >= 0) {
-                                    // 手指把这一行拖过邻居一半就换位，边拖边排
-                                    val rows = listState.visibleRowYs()
-                                    val me = rows.firstOrNull { it.index == from }
-                                    if (me != null) {
-                                        val target = DragReorder.targetIndex(
-                                            draggedCenter = me.center + sort.dragOffset,
-                                            rows = rows, from = from, count = shown.size,
-                                        )
-                                        if (target != from) {
-                                            shown = DragReorder.move(shown, from, target)
-                                            sort.start(target)
-                                        }
-                                    }
-                                }
-                            },
+                            dragBy = { dy -> dragStep(dy) },
                             endDrag = { drop() },
                             onClick = { if (sort.dragIndex < 0) openEdit(tag) },
+                            onMeasured = { top, bottom -> putRow(i, top, bottom) },
                         ) {
+                            Box(
+                                Modifier.fillMaxWidth().graphicsLayer {
+                                    // 被拖的那行跟着手指走；其它行保持原位，换位后自然重排
+                                    translationY = if (sort.dragIndex == i) sort.dragOffset else 0f
+                                    shadowElevation = if (sort.dragIndex == i) 10.dp.toPx() else 0f
+                                },
+                            ) {
                             TagRow(
                                 tag = tag,
                                 dim = sort.dragIndex == i,
                                 scanning = scanning,
                                 scanTagId = scanTagId,
                                 accent = t.accent,
+                                dragging = sort.dragIndex == i,
                                 onScan = { if (scanning) onToast("正在扫描，稍等一下") else scanOne(tag) },
+                                onHandleStart = { if (!saving) sort.start(i) },
+                                onHandleDrag = { dy -> dragStep(dy) },
+                                onHandleEnd = { drop() },
+                                onMeasured = { top, bottom -> putRow(i, top, bottom) },
                             )
+                            }
                         }
                     }
                 }
             }
             item(key = "tags-tip") {
                 Text(
-                    "长按标签行可以上下拖动排序；「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
+                    "按住每行右侧的握把上下拖动即可调整标签顺序；「扫描」会同时遍历源文件夹与上面每个标签的目标文件夹，整理过的视频也能重新入库。",
                     color = t.muted2, fontSize = 10.5.sp, lineHeight = 15.sp,
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
@@ -948,12 +981,20 @@ private fun TagRow(
     scanning: Boolean,
     scanTagId: Int?,
     accent: androidx.compose.ui.graphics.Color,
+    dragging: Boolean,
     onScan: () -> Unit,
+    onHandleStart: () -> Unit,
+    onHandleDrag: (Float) -> Unit,
+    onHandleEnd: () -> Unit,
+    onMeasured: (Float, Float) -> Unit,
 ) {
     val t = tokens()
     Row(
         Modifier
             .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+                onMeasured(coords.positionInParent().y, coords.positionInParent().y + coords.size.height)
+            }
             .alpha(if (dim) 0.85f else 1f)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -990,6 +1031,28 @@ private fun TagRow(
                     contentDescription = "扫描「${tag.name}」的文件夹",
                     tint = t.ink(0.55f),
                     modifier = Modifier.size(15.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(4.dp))
+        // 拖动握把：按住就能上下拖（不用先长按），和网页端一致
+        DragHandle(
+            onStart = onHandleStart,
+            onDragBy = onHandleDrag,
+            onEnd = onHandleEnd,
+        ) {
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (dragging) accent.copy(alpha = 0.16f) else t.ink(0.04f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.DragHandle,
+                    contentDescription = "按住拖动「${tag.name}」排序",
+                    tint = if (dragging) accent else t.ink(0.5f),
+                    modifier = Modifier.size(17.dp),
                 )
             }
         }

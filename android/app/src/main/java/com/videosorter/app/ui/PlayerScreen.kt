@@ -735,8 +735,10 @@ fun PlayerScreen(
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // 命中进度条等控件时，那一层已经消费了按下事件 —— 这里直接让开，避免抢走拖动
                         if (down.isConsumed) return@awaitEachGesture
-                        // 上下黑边里点按/双击不响应，但上下滑切视频要能整块屏幕起手
-                        val inPicture = videoRect.height <= 0f ||
+                        // 上下黑边里点按/双击不响应，但上下滑切视频要能整块屏幕起手。
+                        // 全屏时整块屏幕都算视频区：黑边里的点按、双击快进也一并生效，
+                        // 否则横屏时画面上下各有一条黑边，正好是手指最容易落到的地方。
+                        val inPicture = fullscreen || videoRect.height <= 0f ||
                             (down.position.y >= videoRect.top && down.position.y <= videoRect.bottom &&
                                 down.position.x >= videoRect.left && down.position.x <= videoRect.right)
                         val startY = down.position.y

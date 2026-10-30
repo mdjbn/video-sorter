@@ -1,6 +1,7 @@
 package com.videosorter.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.zIndex
 
 /**
@@ -103,17 +106,27 @@ fun DragSortItem(
     dragBy: (Float) -> Unit,
     endDrag: () -> Unit,
     onClick: () -> Unit,
+    longPressAnywhere: Boolean = true,
+    onMeasured: ((Float, Float) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     // 注意：这里必须自己处理「轻点」。
     // 如果内容里有 .clickable，它会先把按下事件消费掉，外面这层的长按手势就永远等不到
     // awaitLongPressOrCancellation，拖动就完全不响应。
     val interaction = remember { MutableInteractionSource() }
+    val base = Modifier
+        .fillMaxWidth()
+        .zIndex(if (dragging) 1f else 0f)
+        .then(
+            // 把这一行的纵向区间上报给页面：所有行都在同一个 LazyColumn item 里，
+            // LazyListState 量不到单行，只能靠行自己报
+            if (onMeasured == null) Modifier else Modifier.onGloballyPositioned { coords ->
+                onMeasured(coords.positionInParent().y, coords.positionInParent().y + coords.size.height)
+            },
+        )
     Box(
-        Modifier
-            .fillMaxWidth()
-            .zIndex(if (dragging) 1f else 0f)
-            .pointerInput(index, count) {
+        (if (longPressAnywhere) {
+            base.pointerInput(index, count) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { startDrag() },
                     onDragEnd = { endDrag() },
@@ -124,12 +137,48 @@ fun DragSortItem(
                     },
                 )
             }
+        } else {
+            base
+        })
             // 长按没成立时的普通点击（detectDragGesturesAfterLongPress 不消费短按，这里补上）
             .clickable(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onClick,
             ),
+    ) {
+        content()
+    }
+}
+
+/**
+ * 行内的拖动手柄：按住就立刻能拖（不必长按），和网页端标签列表的握把一致。
+ *
+ * 用 `detectDragGestures` 而不是 `detectDragGesturesAfterLongPress`：手指按在手柄上
+ * 本来就不会误触，需要的是「一按就能走」。
+ */
+@Composable
+fun DragHandle(
+    onStart: () -> Unit,
+    onDragBy: (Float) -> Unit,
+    onEnd: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        Modifier
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { onStart() },
+                    onDragEnd = { onEnd() },
+                    onDragCancel = { onEnd() },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDragBy(dragAmount.y)
+                    },
+                )
+            }
+            .clickable(interactionSource = interaction, indication = null) { },
     ) {
         content()
     }
