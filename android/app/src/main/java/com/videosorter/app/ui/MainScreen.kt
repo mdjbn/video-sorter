@@ -77,6 +77,10 @@ fun MainScreen(
     // 视频库筛选（服务端筛选）：状态 + 多个标签，播放器与视频库共用同一份结果
     var statusFilter by remember { mutableStateOf("all") }
     var tagFilter by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    // 视频库排序（服务端排序）：添加时间 / 文件名 / 时长 / 文件大小，各支持升降序。
+    // 和其他筛选一样放在这一层，切到别的 tab 再回来不会丢。
+    var sortKey by remember { mutableStateOf("added") }
+    var sortAsc by remember { mutableStateOf(true) }
     // 视频库搜索词放在这一层：切到别的 tab 再回来（ListScreen 被销毁重建）也不会丢
     var libQuery by rememberSaveable { mutableStateOf("") }
     // 视频库的滚动位置同理：AnimatedContent 切 tab 会重建 ListScreen，state 提上来才留得住
@@ -112,7 +116,12 @@ fun MainScreen(
     suspend fun reload(silent: Boolean = false) {
         if (!silent) loading = true
         try {
-            val page = api.videos(filter = statusFilter, tags = tagFilter)
+            val page = api.videos(
+                filter = statusFilter,
+                tags = tagFilter,
+                sort = sortKey,
+                order = if (sortAsc) "asc" else "desc",
+            )
             videos = page.items
             counts = page.counts
             tags = api.tags()
@@ -281,6 +290,13 @@ fun MainScreen(
                     toast = ::toast,
                     sheets = sheets,
                     listState = libListState,
+                    sortKey = sortKey,
+                    sortAsc = sortAsc,
+                    onSort = { key, asc ->
+                        // 换字段时按该字段的常用方向起步；点同一字段则只翻转方向
+                        if (key == sortKey) sortAsc = asc else { sortKey = key; sortAsc = asc }
+                        scope.launch { reload(silent = true) }
+                    },
                 )
 
                 2 -> OrganizeScreen(

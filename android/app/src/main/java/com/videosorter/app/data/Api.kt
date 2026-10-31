@@ -129,9 +129,12 @@ class Api(baseUrl: String, var token: String? = null) {
         q: String = "",
         tagId: Int? = null,
         tags: Collection<Int> = emptyList(),
+        // 排序：added=添加时间、name=文件名、duration=时长、size=文件大小；order=asc|desc
+        sort: String = "added",
+        order: String = "asc",
     ): VideoPage {
         val query = buildString {
-            append("/api/videos?limit=0&sort=added&order=asc")
+            append("/api/videos?limit=0&sort=").append(sort).append("&order=").append(order)
             when {
                 filter == "tagged" -> append("&status=tagged")
                 filter == "idle" -> append("&status=idle")

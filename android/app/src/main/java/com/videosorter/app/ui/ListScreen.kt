@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -62,6 +63,22 @@ import com.videosorter.app.data.Video
 
 private val LIST_FILTERS = listOf("all" to "全部", "idle" to "未标记", "tagged" to "待整理", "organized" to "已整理")
 
+/** 排序字段（顺序就是弹窗里的顺序）。服务端 /api/videos 的 sort 参数认得这几个 key。 */
+private val SORT_FIELDS = listOf(
+    "added" to "添加时间",
+    "name" to "文件名",
+    "duration" to "时长",
+    "size" to "文件大小",
+)
+private val SORT_LABELS = SORT_FIELDS.toMap()
+/** 换到某个字段时的默认方向：时间新的在前、其它从小到大 */
+private val SORT_DEFAULT_ASC = mapOf(
+    "added" to false,
+    "name" to true,
+    "duration" to false,
+    "size" to false,
+)
+
 @Composable
 fun ListScreen(
     api: Api,
@@ -85,6 +102,10 @@ fun ListScreen(
     sheets: SheetState,
     // 列表滚动状态由 MainScreen 持有：切到别的 tab 再回来位置不变（AnimatedContent 会重建本组件）
     listState: LazyListState,
+    // 排序（服务端排序）：字段 + 方向
+    sortKey: String = "added",
+    sortAsc: Boolean = true,
+    onSort: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     val t = tokens()
 
@@ -133,6 +154,48 @@ fun ListScreen(
         }
     }
 
+    fun openSortSheet() {
+        sheets.open("排序方式", "选一个字段；再点一次同一个字段就切换升序 / 降序") {
+            SORT_FIELDS.forEach { (key, label) ->
+                val on = sortKey == key
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(11.dp))
+                        .clickable {
+                            // 点当前字段 = 翻转方向；点别的字段 = 换字段并用该字段的常用方向
+                            if (on) {
+                                sheets.close()
+                                onSort(key, !sortAsc)
+                            } else {
+                                sheets.close()
+                                onSort(key, SORT_DEFAULT_ASC[key] ?: true)
+                            }
+                        }
+                        .padding(vertical = 11.dp, horizontal = 4.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            label,
+                            color = if (on) t.accent else t.text,
+                            fontSize = 13.5.sp,
+                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (on) {
+                            Text(
+                                if (sortAsc) "↑ 升序" else "↓ 降序",
+                                color = t.accent,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(
             Modifier
@@ -150,6 +213,12 @@ fun ListScreen(
                 )
             }
             Spacer(Modifier.weight(1f))
+            GlassIconButton(
+                Icons.AutoMirrored.Rounded.Sort,
+                onClick = { openSortSheet() },
+                contentDescription = "排序：${SORT_LABELS[sortKey] ?: "添加时间"}，${if (sortAsc) "升序" else "降序"}",
+            )
+            Spacer(Modifier.width(6.dp))
             GlassIconButton(Icons.Rounded.Refresh, onClick = onRefresh, contentDescription = "刷新")
             Spacer(Modifier.width(6.dp))
             GlassIconButton(Icons.Rounded.SwapVert, onClick = onOpenTransfer, contentDescription = "传输")
@@ -233,30 +302,15 @@ fun ListScreen(
                 verticalArrangement = Arrangement.spacedBy(9.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                // 两组：还没整理的（文件在源文件夹里）/ 已整理到标签文件夹的
-                val fromSource = shown.filter { !it.isOrganized }
-                val fromTags = shown.filter { it.isOrganized }
-                if (fromSource.isNotEmpty()) {
-                    item(key = "sec-source") { GroupHead("源文件夹", fromSource.size) }
-                    items(fromSource, key = { "s-${it.id}" }) { v ->
-                        VideoRow(
-                            v = v,
-                            thumb = api.thumbUrl(v),
-                            onClick = { onOpen(v.id) },
-                            onTagClick = { openTagSheet(v) },
-                        )
-                    }
-                }
-                if (fromTags.isNotEmpty()) {
-                    item(key = "sec-organized") { GroupHead("标签文件夹", fromTags.size) }
-                    items(fromTags, key = { "o-${it.id}" }) { v ->
-                        VideoRow(
-                            v = v,
-                            thumb = api.thumbUrl(v),
-                            onClick = { onOpen(v.id) },
-                            onTagClick = { openTagSheet(v) },
-                        )
-                    }
+                // 不再按「源文件夹 / 标签文件夹」分组：都在同一个视频库里，谁在哪儿不该让人操心，
+                // 而且分组会把排序结果切成两截。统一按当前排序规则显示成一条列表。
+                items(shown, key = { it.id }) { v ->
+                    VideoRow(
+                        v = v,
+                        thumb = api.thumbUrl(v),
+                        onClick = { onOpen(v.id) },
+                        onTagClick = { openTagSheet(v) },
+                    )
                 }
             }
         }
@@ -405,31 +459,5 @@ internal fun sizeText(bytes: Long): String {
         mb >= 1 -> "%.1f MB".format(mb)
         kb >= 1 -> "%.0f KB".format(kb)
         else -> "$bytes B"
-    }
-}
-
-/** 视频库分组标题：源文件夹 / 标签文件夹 */
-@Composable
-private fun GroupHead(title: String, count: Int) {
-    val t = tokens()
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 1.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(6.dp).clip(CircleShape).background(t.accent),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(title, color = t.ink(0.9f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            "$count",
-            color = t.accent,
-            fontSize = 11.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(t.accentDim)
-                .padding(horizontal = 7.dp, vertical = 1.dp),
-        )
     }
 }
