@@ -24,6 +24,7 @@ chmod +x run.sh
 | 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
 | 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **21/21 PASS**（CI：`.github/workflows/e2e.yml`）|
 | 网页端 | 整理失败明细 / 不可写提示条 / 缓存设置（1.3.6） | ✅ 本机通过 | 18941 实例 + puppeteer 逐场景截图，见 `docs/screenshots/v136*.png`、`v136b-*.png` |
+| 安卓 | 按标签筛选时改标签不跳片（1.3.7 之后，未发版） | ✅ 真机通过 | debug + release 各一轮：筛「旅行」播第 2 条时改标签，画面不换、计数 3/3→2/2；截图 `v137-tagjump-*.png` |
 | 安卓 | 四条体验改进（1.3.7：滚动位置 / 去水波 / 排序按钮 / 横屏全屏） | ✅ 真机通过 | 见下方「安卓真机实测（1.3.7）」，截图 `v136c-*.png`、`v136g-*.png`、`v137-*.png` |
 | fnOS | 打成 `.fpk` 应用包 | ✅ 本机通过 | `bash packaging/fnos/build.sh` → `dist/fnos/videosorter.fpk`（3.5 MB）|
 | fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |

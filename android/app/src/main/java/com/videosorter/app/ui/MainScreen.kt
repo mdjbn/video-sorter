@@ -67,6 +67,11 @@ fun MainScreen(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var playerIndex by remember { mutableIntStateOf(0) }
+    // 正在播的这条视频的 id。列表会被筛选/改标签重拉，下标随时失真，id 才是稳定身份：
+    // 重拉之后靠它把播放位置接回原来那条，避免「改个标签就跳下一个」。
+    var playerVideoId by remember { mutableIntStateOf(-1) }
+    // 当前这条视频是否还在最新列表里（改了标签被筛掉就变 false）
+    var playerIdAlive by remember { mutableStateOf(true) }
     // 第一次拉到列表时用「上次播放的视频」定位，之后的过滤不要来回跳。
     // 这个值必须在发起任何网络请求之前读出来：reload 中间有多次挂起，期间界面可能已经
     // 把「第一个视频」写回存储，事后再读就拿不到真正的上次位置了。
@@ -118,11 +123,31 @@ fun MainScreen(
             tags = api.tags()
             if (!resumedOnce) {
                 val idx = videos.indexOfFirst { it.id == bootLastVideoId }
-                if (idx >= 0) playerIndex = idx
+                if (idx >= 0) {
+                    playerIndex = idx
+                    playerVideoId = videos[idx].id
+                }
                 resumedOnce = true
             }
             bootResolved = true
-            if (playerIndex >= videos.size) playerIndex = 0
+            // 重拉后按 id 把播放位置接回来：顺序变了、前面多了/少了条目都不影响。
+            // 之前这里是 `if (playerIndex >= videos.size) playerIndex = 0`，一旦当前视频被筛掉
+            // 就直接跳回第一个，表现就是「改个标签就跳到别的视频」。
+            if (playerVideoId > 0) {
+                val idx = videos.indexOfFirst { it.id == playerVideoId }
+                if (idx >= 0) {
+                    playerIndex = idx
+                    playerIdAlive = true
+                } else {
+                    // 这条已经从当前筛选里消失（改了标签/被删/换筛选）：原地不动，仍看这一条。
+                    // 播放器那边拿到 startVideoId=-1 就知道「别再按 id 找了」，不会乱跳。
+                    playerIndex = playerIndex.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
+                    playerIdAlive = false
+                }
+            } else {
+                playerIndex = playerIndex.coerceIn(0, (videos.size - 1).coerceAtLeast(0))
+                playerVideoId = videos.getOrNull(playerIndex)?.id ?: -1
+            }
             error = null
         } catch (e: Exception) {
             if (!authFail(e)) error = friendlyError(e)
@@ -223,10 +248,15 @@ fun MainScreen(
                     tags = tags,
                     counts = counts,
                     startIndex = playerIndex,
+                    startVideoId = if (playerIdAlive) playerVideoId else -1,
                     onIndexChange = { idx ->
                         playerIndex = idx
-                        // 只在用户真的换片时落盘：启动初次的组合不能写，否则会把「第一个视频」覆盖上去
-                        videos.getOrNull(idx)?.let { session.setLastVideoId(it.id, api.base) }
+                        videos.getOrNull(idx)?.let {
+                            playerVideoId = it.id
+                            playerIdAlive = true
+                            // 只在用户真的换片时落盘：启动初次的组合不能写，否则会把「第一个视频」覆盖上去
+                            session.setLastVideoId(it.id, api.base)
+                        }
                     },
                     onTag = { videoId, tagId -> markTag(videoId, tagId) },
                     onCreateTag = { name, color ->
@@ -264,6 +294,7 @@ fun MainScreen(
                         val idx = videos.indexOfFirst { it.id == id }
                         if (idx >= 0) {
                             playerIndex = idx
+                            playerVideoId = id
                             tab = 0
                         }
                     },
@@ -309,6 +340,7 @@ fun MainScreen(
                         val idx = videos.indexOfFirst { it.id == id }
                         if (idx >= 0) {
                             playerIndex = idx
+                            playerVideoId = id
                             tab = 0
                         } else {
                             toast("这条记录的视频已不在库里")

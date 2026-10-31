@@ -124,6 +124,9 @@ fun PlayerScreen(
     tags: List<Tag>,
     counts: Counts,
     startIndex: Int,
+    // 在列表被重新拉取（换筛选、改标签）后，靠这个 id 把播放位置接回原来那条视频：
+    // 只按数组下标定位的话，一旦列表顺序变了就会莫名其妙跳片。
+    startVideoId: Int = -1,
     onIndexChange: (Int) -> Unit,
     onTag: (Int, Int?) -> Unit,
     onCreateTag: (String, String) -> Unit,
@@ -168,7 +171,12 @@ fun PlayerScreen(
     }
 
     val count = videos.size
-    val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, (count - 1).coerceAtLeast(0))) {
+    // 初始页：优先按视频 id 找（列表可能因为筛选/改标签而重排过），找不到才退回下标
+    val initialPage = remember {
+        val byId = if (startVideoId > 0) videos.indexOfFirst { it.id == startVideoId } else -1
+        (if (byId >= 0) byId else startIndex).coerceIn(0, (count - 1).coerceAtLeast(0))
+    }
+    val pagerState = rememberPagerState(initialPage = initialPage) {
         count.coerceAtLeast(1)
     }
 
@@ -184,22 +192,71 @@ fun PlayerScreen(
     var pagerSyncing by remember { mutableStateOf(false) }
     // 首次按 startIndex 定位完成之前，pager 的 currentPage 不算数（否则会把续播定位冲掉）
     var syncReady by remember { mutableStateOf(false) }
+    // 上一次看到的列表条数：用来区分「只是重排」和「筛选结果真变了」
+    var lastCount by remember { mutableIntStateOf(count) }
 
-    // 外部指定要播第几个（续播定位、播放历史跳转、整理页跳转、播完自动下一个）→ 同步到 pager
-    LaunchedEffect(startIndex, count) {
+    // 记住「正在播的是哪条视频」，列表重排后按它把 pager 拨回去。
+    //
+    // 这是「改标签不再跳片」的核心：列表是服务端筛选结果，改标签/换筛选会把同一条视频
+    // 挪到别的下标（甚至整个掉出去）。pager 盯的是下标，所以内容一换它就会显示成另一条。
+    // 用 id 记身份，列表一变就按 id 重新对齐，播放器感知不到任何「换片」。
+    var playingVideoId by remember { mutableIntStateOf(-1) }
+
+    // 列表内容变了（同一个 currentPage 指向了别的视频）→ 按 id 把 pager 拨回原视频
+    LaunchedEffect(videos) {
+        if (!syncReady || pagerSyncing || count <= 0) return@LaunchedEffect
+        val wantId = when {
+            // 上层明确指定了要播哪条 → 以它为准
+            startVideoId > 0 -> startVideoId
+            // 否则维持当前正在播的那条
+            else -> playingVideoId
+        }
+        if (wantId <= 0) return@LaunchedEffect
+        val idx = videos.indexOfFirst { it.id == wantId }
+        if (idx < 0) return@LaunchedEffect           // 这条已不在筛选里：原地不动，继续播它
+        if (idx == pagerState.currentPage) return@LaunchedEffect
+        pagerSyncing = true
+        try {
+            pagerState.scrollToPage(idx)             // 瞬间对齐，不做滚动动画，用户看不到位移
+        } finally {
+            pagerSyncing = false
+        }
+    }
+
+    // 外部指定要播第几个（续播定位、播放历史跳转、整理页跳转、播完自动下一个）→ 同步到 pager。
+    //
+    // 关键约束：**列表重排不该换片**。改标签会让服务端筛选结果变样（比如正在按「旅行」筛选，
+    // 把这个视频改成「美食」，它就掉出列表了），重拉后下标对应的已经是别的视频。
+    // 所以定位优先用 id：id 还在列表里就按 id 找；id 不见了（被筛掉/被删）才退回下标。
+    LaunchedEffect(startIndex, startVideoId, count) {
         if (count <= 0) {
             syncReady = true
             return@LaunchedEffect
         }
-        if (startIndex in 0 until count && startIndex != pagerState.currentPage) {
+        val byId = if (startVideoId > 0) videos.indexOfFirst { it.id == startVideoId } else -1
+        // 当前正在播的那条还在列表里 → 什么都不用做（列表重排而已，别打断播放）
+        val curId = videos.getOrNull(pagerState.currentPage)?.id
+        if (startVideoId > 0 && curId == startVideoId) {
+            syncReady = true
+            return@LaunchedEffect
+        }
+        // startVideoId=-1（当前视频被筛掉、上层已放弃按 id 定位）且列表条数没变 → 是重排，
+        // 不是用户要换片，保持原位。条数变了才说明筛选结果真变了，按 startIndex 走。
+        if (startVideoId <= 0 && count == lastCount) {
+            syncReady = true
+            return@LaunchedEffect
+        }
+        val target = if (byId >= 0) byId else startIndex
+        if (target in 0 until count && target != pagerState.currentPage) {
             pagerSyncing = true
             try {
                 // 还没露过面（启动续播）就瞬间定位，避免「先显示第一个视频再滑上去」的闪烁
-                if (!syncReady) pagerState.scrollToPage(startIndex) else pagerState.animateScrollToPage(startIndex)
+                if (!syncReady) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target)
             } finally {
                 pagerSyncing = false
             }
         }
+        lastCount = count
         syncReady = true
     }
 
@@ -280,6 +337,9 @@ fun PlayerScreen(
         val v = current ?: return@LaunchedEffect
         // 列表还没到 / 正在按外部位置同步时不要回报，避免启动瞬间把定位覆盖成 0
         if (syncReady && !pagerSyncing && count > 0) onIndexChange(pagerState.currentPage)
+        // 真的换了片（用户翻页 / 外部跳转）才更新身份。列表重排时 pager 还没对齐，
+        // 这里的 v 可能已经是别的视频，绝不能拿去覆盖「正在播哪条」。
+        if (v.id != lastLoadedId) playingVideoId = v.id
         // reloadKey 变化（直连失败改走转码）时同一视频要重新加载一次，所以不能只看 videoId
         if (v.id == lastLoadedId && reloadKey == lastReloadKey) return@LaunchedEffect
         if (v.id != lastLoadedId) usingHls = api.hlsFallback(v.id)
