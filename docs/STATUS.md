@@ -19,12 +19,14 @@ chmod +x run.sh
 
 | 模块 | 项目 | 状态 | 证据 |
 | --- | --- | --- | --- |
-| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **127 passed**（Windows 上 118 passed / 9 skipped，见下）|
+| 后端 | 接口/扫描/播放/整理/撤销/上传/发现 | ✅ 本机通过 | `cd server && .venv/bin/python -m pytest -q` → **132 passed**（Windows 上跳过 9 个只读目录用例，见下）|
 | 后端 | Range 播放 + 按需 HLS 转码 | ✅ 本机通过 | pytest 内 mkv→HLS 用例（`index.m3u8` + `seg00000.ts`）|
 | 网页端 | 类型检查 + 生产构建 | ✅ 本机通过 | `cd web && npx vue-tsc --noEmit && npm run build:only` |
 | 网页端 | 端到端（登录/播放/打标签/主题/整理/撤销/管理页） | ✅ 本机通过 | `bash tools/e2e-web.sh` → **21/21 PASS**（CI：`.github/workflows/e2e.yml`）|
 | 网页端 | 整理失败明细 / 不可写提示条 / 缓存设置（1.3.6） | ✅ 本机通过 | 18941 实例 + puppeteer 逐场景截图，见 `docs/screenshots/v136*.png`、`v136b-*.png` |
 | 安卓 | 四条体验改进（1.3.7：滚动位置 / 去水波 / 排序按钮 / 横屏全屏） | ✅ 真机通过 | 见下方「安卓真机实测（1.3.7）」，截图 `v136c-*.png`、`v136g-*.png`、`v137-*.png` |
+| 安卓 | 视频库去分组 + 排序（1.3.8） | ✅ 真机通过 | 37 个视频连成一条列表；四个字段与升降序切换逐一验证，截图 `v138-*.png` |
+| 后端 | 双栈监听 IPv4 + IPv6（1.3.8） | ✅ 本机通过 | `0.0.0.0` 与 `[::]` 两个 socket 并存；IPv4 回环/内网、IPv6 公网地址访问 `/api/health`、网页首页、登录接口均 200；新增 `tests/test_dual_stack.py` 5 用例 |
 | fnOS | 打成 `.fpk` 应用包 | ✅ 本机通过 | `bash packaging/fnos/build.sh` → `dist/fnos/videosorter.fpk`（3.5 MB）|
 | fnOS | 包内应用启动 + 生命周期脚本 | ✅ 本机通过 | 解包后模拟 `TRIM_*` 环境跑 `cmd/main start/status/stop`，`/api/health` 正常 |
 | fnOS | 包内应用端到端 | ✅ 本机通过 | 用包内实例跑 `tools/e2e-web.js` → **21/21 PASS**（含真实文件移动与撤销）|
@@ -34,7 +36,7 @@ chmod +x run.sh
 | 安卓 | 真机运行（Xiaomi M2104K10AC / Android 13 / adb 无线） | ✅ 已验证 | 登录（局域网发现）→ 上传 → 播放（直放 + HLS 转码）→ 打标签 → 整理 → 下载全链路通过；见下方「安卓真机实测」 |
 | 桌面端 | Rust 代码编译（Windows 目标） | ✅ 本机通过 | `cargo check --target x86_64-pc-windows-gnu`（用 zig 充当 C 编译器/链接器）|
 | 桌面端 | 链接 exe / NSIS / MSI 打包 | ✅ CI 通过 | `windows.yml`（windows-latest）→ `VideoSorter_1.0.0_x64-setup.exe` 67 MB / `.msi` 90 MB |
-| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.6`、`v1.3.7` 五个 job 全绿，Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|\n| 发布 | Windows 打包的 ffmpeg 下载 | ✅ 加多源回退 | gyan.dev 偶发 503 会卡死整个 job，`windows.yml` 现在按 gyan.dev → GyanD/codexffmpeg → BtbN 顺序重试，每个源 3 次并校验体积 |
+| 发布 | tag 触发一键出包 | ✅ 已跑通 | `v1.3.6`、`v1.3.7`、`v1.3.8` 五个 job 全绿，Release 六个附件（x86/arm fpk、arm64/armeabi APK、Windows exe/msi）|\n| 发布 | Windows 打包的 ffmpeg 下载 | ✅ 加多源回退 | gyan.dev 偶发 503 会卡死整个 job，`windows.yml` 现在按 gyan.dev → GyanD/codexffmpeg → BtbN 顺序重试，每个源 3 次并校验体积 |
 
 ## 三、本机如何验证 Windows 目标的 Rust 代码（无 gcc/mingw 的情况）
 
