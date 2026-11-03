@@ -3,9 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import DirPicker from '../components/DirPicker.vue'
-import { api, fmtDur, fmtSize, fmtTime, waitTask, type CacheInfo, type FailedFile, type OrganizeResult, type SkipSummary, type HistoryItem, type Plan, type PlanItem, type ScanPending, type Source, type Stats, type Tag, type Unwritable, type Video } from '../api'
+import { api, fmtDur, fmtSize, fmtTime, waitTask, type CacheInfo, type FailedFile, type OrganizeResult, type SkipSummary, type HistoryItem, type Plan, type PlanItem, type ScanDirResult, type ScanPending, type Source, type Stats, type Tag, type Unwritable, type Video } from '../api'
 import { isFnosHost, pickDirFromHost } from '../fnos'
-import { toast } from '../toast'
+import { toast, toastEach } from '../toast'
 import { nextThemeMode, setThemeMode, themeMode, THEME_LABEL, type ThemeMode } from '../theme'
 import '../styles/manage.css'
 
@@ -351,6 +351,41 @@ async function refreshQueue() {
   }
 }
 
+/* ---------------- 扫描面板（页头常驻按钮展开） ---------------- */
+// 一次扫描的逐目录结果，留在面板里给用户回看（toast 会飘走，这里不飘）
+const scanPanel = ref(false)
+type ScanHistoryItem = {
+  at: string
+  label: string
+  dirs: ScanDirResult[]
+  added: number
+  updated: number
+  missing: number
+  failed: number
+}
+const scanHistory = ref<ScanHistoryItem[]>([])
+
+/** 角标数字：正在扫 + 排队中的总条数（也就是「还有几件事没干完」） */
+const scanBadge = computed(() => (scan.running ? 1 : 0) + scanQueue.value.length)
+
+/** 一条目录结果的说明文字，如「源文件夹 inbox：新增 3、更新 1」 */
+function dirResultText(d: ScanDirResult): string {
+  const kind = d.kind === 'tag' ? '标签' : '源文件夹'
+  const bits: string[] = []
+  if (d.added) bits.push(`新增 ${d.added}`)
+  if (d.updated) bits.push(`更新 ${d.updated}`)
+  if (d.failed) bits.push(`失败 ${d.failed}`)
+  if (!bits.length) bits.push(d.skipped ? `无变化（${d.skipped} 个）` : '没有视频')
+  return `${kind}「${d.name}」扫完：${bits.join('、')}`
+}
+
+/** 面板/角标上的短状态 */
+const scanStateText = computed(() => {
+  if (scan.running) return scan.text || '正在扫描…'
+  if (scanQueue.value.length) return `排队中 ${scanQueue.value.length} 个`
+  return '空闲'
+})
+
 /** 扫描任务结束后把排队列表刷新一下（同时兜住「别的标签页排的队」） */
 function pollQueue() {
   window.clearInterval(queueTimer)
@@ -422,10 +457,27 @@ async function runScan(payload: ScanPayload = {}) {
     const added = Number(r.added ?? 0)
     const removed = Number(r.missing ?? 0)
     scan.text = `扫描完成：新增 ${added}，更新 ${r.updated ?? 0}，移除 ${removed}`
+    // 每个文件夹单独弹一条：用户想知道「哪个目录、扫到几个」，
+    // 汇总成一句就看不出来了。用 toastEach 逐条播放，避免互相顶掉。
+    const dirs: ScanDirResult[] = Array.isArray(r.dirs) ? r.dirs : []
+    for (const d of dirs) toastEach(dirResultText(d))
     const bits: string[] = []
     if (added) bits.push(`新增 ${added} 个`)
     if (removed) bits.push(`移除 ${removed} 个`)
-    toast(bits.length ? `扫描完成，${bits.join('、')}视频` : '扫描完成，没有变化')
+    // 末尾再补一条总账（逐目录都报了，这条给个整体数）
+    toastEach(bits.length ? `扫描完成，共${bits.join('、')}视频` : '扫描完成，没有变化')
+    if (dirs.length) {
+      scanHistory.value.unshift({
+        at: new Date().toISOString(),
+        label: (task as any).label || '扫描',
+        dirs,
+        added,
+        updated: Number(r.updated ?? 0),
+        missing: removed,
+        failed: Number(r.failed ?? 0),
+      })
+      scanHistory.value = scanHistory.value.slice(0, 8)
+    }
     markLibStale()
     await Promise.all([loadStats(), loadSources(), loadTags()])
     if (view.value === 'library') await loadLibrary(true)
@@ -1254,9 +1306,13 @@ onMounted(async () => {
   window.addEventListener('resize', onResize)
   await Promise.all([loadTags(), loadStats(), loadSources(), loadRecords()])
   counts.lib = stats.value?.total || 0
+  // 页面一开就拉一次队列：别的标签页/手机 App 排的队也能看到
+  void refreshQueue()
+  pollQueue()
 })
 
 onBeforeUnmount(() => {
+  window.clearInterval(queueTimer)
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('click', closeColorPop)
   window.removeEventListener('resize', onResize)
@@ -1306,7 +1362,69 @@ function onResize() {
         <button id="btnAppDl" class="btn primary top-cta" title="下载手机 App" @click="openAppDl">
           <Icon name="download" :size="15" /><span class="lbl-long">下载手机 App</span><span class="lbl-short">下载 App</span>
         </button>
+        <button
+          id="btnScanPanel"
+          class="icon-btn scan-btn"
+          :class="{ live: scanBadge > 0, on: scanPanel }"
+          :title="`扫描进度与排队 · ${scanStateText}`"
+          :aria-label="`扫描进度与排队 · ${scanStateText}`"
+          @click.stop="scanPanel = !scanPanel"
+        >
+          <Icon name="refresh" :size="17" />
+          <span v-if="scanBadge > 0" class="scan-badge">{{ scanBadge }}</span>
+        </button>
         <button id="btnTheme" class="icon-btn" :title="themeTitle" @click="cycleTheme"><Icon :name="themeMode === 'auto' ? 'auto' : themeMode === 'light' ? 'sun' : 'moon'" :size="17" /></button>
+      </div>
+
+      <!-- 扫描面板：常驻按钮展开，显示当前进度、排队情况、最近几次逐目录结果 -->
+      <div v-if="scanPanel" class="scan-pop" @click.stop>
+        <div class="sp-head">
+          <Icon name="refresh" :size="14" />
+          <b>扫描进度与排队</b>
+          <span class="sp-state" :class="{ live: scanBadge > 0 }">{{ scanStateText }}</span>
+          <div class="spacer" />
+          <button class="icon-act" title="关闭" @click="scanPanel = false"><Icon name="close" :size="14" /></button>
+        </div>
+
+        <!-- 正在扫 -->
+        <div v-if="scan.running || scan.percent > 0" class="sp-block">
+          <div class="sp-row"><span>当前扫描</span><span class="num">{{ Math.round(scan.percent) }}%</span></div>
+          <div class="track"><i :style="{ width: scan.percent + '%' }" /></div>
+          <div class="sp-note">{{ scan.text || '正在扫描…' }}</div>
+        </div>
+        <div v-else class="sp-empty">现在没有在扫描</div>
+
+        <!-- 排队 -->
+        <div v-if="scanQueue.length" class="sp-block">
+          <div class="sp-row"><span>排队中</span><span class="num">{{ scanQueue.length }} 个</span></div>
+          <div v-for="q in scanQueue" :key="q.task_id" class="sp-q">
+            <span class="q-idx">{{ q.position }}</span>
+            <span class="q-label">{{ q.label }}</span>
+            <span class="q-what">{{ q.tag_ids.length ? `${q.tag_ids.length} 个标签` : q.source_ids.length ? `${q.source_ids.length} 个源文件夹` : '全部' }}</span>
+          </div>
+        </div>
+
+        <!-- 最近几次的逐目录结果 -->
+        <div v-if="scanHistory.length" class="sp-block">
+          <div class="sp-row"><span>最近扫描</span><span class="num">{{ scanHistory.length }} 次</span></div>
+          <div v-for="(h, i) in scanHistory" :key="i" class="sp-hist">
+            <div class="h-head">
+              <span class="h-time">{{ fmtTime(h.at) }}</span>
+              <span class="h-sum">新增 {{ h.added }} · 更新 {{ h.updated }}<template v-if="h.missing"> · 移除 {{ h.missing }}</template><template v-if="h.failed"> · 失败 {{ h.failed }}</template></span>
+            </div>
+            <div v-for="(d, j) in h.dirs" :key="j" class="h-dir">
+              <span class="d-kind" :class="d.kind">{{ d.kind === 'tag' ? '标签' : '源' }}</span>
+              <span class="d-name">{{ d.name }}</span>
+              <span class="d-num">
+                <template v-if="d.added">+{{ d.added }}</template>
+                <template v-else-if="d.updated">~{{ d.updated }}</template>
+                <template v-else-if="d.failed" class="bad">!{{ d.failed }}</template>
+                <template v-else>无变化</template>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="!scan.running && !scanQueue.length" class="sp-empty">还没有扫描记录</div>
       </div>
 
       <div class="m-scroll">

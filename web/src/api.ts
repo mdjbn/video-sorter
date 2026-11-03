@@ -65,6 +65,19 @@ export type Stats = {
   sources: Source[]
 }
 
+/** 某一个文件夹的扫描结果（前端逐目录弹提示用） */
+export type ScanDirResult = {
+  kind: 'source' | 'tag'
+  id: number
+  name: string
+  path: string
+  found: number
+  added: number
+  updated: number
+  skipped: number
+  failed: number
+}
+
 /** 提交扫描后的回执：排队了没有、排第几个、是不是并入了一个已有的同类任务 */
 export type ScanAccepted = {
   task_id: string
@@ -76,6 +89,8 @@ export type ScanAccepted = {
 
 export type ScanPending = {
   task_id: string
+  /** 排第几个（1 = 下一个就跑） */
+  position: number
   label: string
   source_ids: number[]
   tag_ids: number[]

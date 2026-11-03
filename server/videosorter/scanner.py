@@ -55,6 +55,10 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
     else:
         rows = db.query("SELECT * FROM sources WHERE enabled=1")
     roots = [Path(r["path"]) for r in rows]
+    source_id_by_path = {str(Path(r["path"])): int(r["id"]) for r in rows}
+
+    def _source_id_of(rows_arg, root_path: Path) -> int:
+        return source_id_by_path.get(str(root_path), 0)
 
     # 标签对应的目标文件夹也算扫描范围：整理过的视频就躺在这些目录里，
     # 不扫它们的话，重装/换机后这些文件无法重新入库。
@@ -112,6 +116,44 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
     in_scope_roots = roots + [d for d, _ in tag_dirs]
     tag_dirs_only = [d for d, _ in tag_dirs]
 
+    # 每个文件夹单独的扫描结果：前端「每个目录扫完弹一条 toast」就靠它。
+    # 标签文件夹优先归属（同一个文件被两处扫到时，它算标签文件夹的）；
+    # 只在源文件夹里出现的才算源文件夹的。
+    per_dir: list[dict[str, Any]] = []
+    dir_of: dict[str, str] = {}   # 文件真实路径 → per_dir 里的 key
+    for tdir, tid in tag_dirs:
+        if not tdir.exists():
+            continue
+        per_dir.append({"kind": "tag", "id": tid, "name": tdir.name, "path": str(tdir),
+                        "found": 0, "added": 0, "updated": 0, "skipped": 0, "failed": 0})
+    for root in roots:
+        if not root.exists():
+            continue
+        per_dir.append({"kind": "source", "id": _source_id_of(rows, root), "name": root.name or str(root),
+                        "path": str(root), "found": 0, "added": 0, "updated": 0, "skipped": 0, "failed": 0})
+
+    def _dir_key(d: dict[str, Any]) -> str:
+        return f"{d['kind']}:{d['id']}"
+
+    dir_index = {_dir_key(d): d for d in per_dir}
+    # 先给标签文件夹打标，再给源文件夹（这样同一条文件归属唯一）
+    for p, tid in files:
+        k = _key(p)
+        if tid is not None:
+            dir_of[k] = f"tag:{tid}"
+    for p, tid in files:
+        k = _key(p)
+        if k in dir_of:
+            continue
+        for root in roots:
+            if _is_under(p, root):
+                dir_of[k] = f"source:{_source_id_of(rows, root)}"
+                break
+    for k, key in dir_of.items():
+        d = dir_index.get(key)
+        if d is not None:
+            d["found"] += 1
+
     def tag_dir_of(p: Path) -> bool:
         """文件是否真的躺在某个标签文件夹里（按真实路径 + 字符串前缀双重判断）。"""
         return any(_is_under(p, d) for d in tag_dirs_only)
@@ -142,14 +184,22 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
 
     # 全局共享线程池：scan_workers 是**全局上限**，不是每个扫描各一份。
     # 以前每次扫描自己开一个池，两个扫描并发就是 6 个 ffprobe 同时跑。
+    def bump(key: str, field: str) -> None:
+        d = dir_index.get(dir_of.get(key) or "")
+        if d is not None:
+            d[field] += 1
+
     pool = scan_pool(workers)
     for (p, tag_id), item in zip(files, pool.map(work, [f[0] for f in files])):
         if tasks.is_cancelled(task_id):
             break
         spath = str(p)
         seen.add(spath)
+        dkey = dir_of.get(_key(p))
         if item is None:
             stats["failed"] += 1
+            if dkey and dkey in dir_index:
+                dir_index[dkey]["failed"] += 1
             tasks.step(task_id, f"跳过（无法读取）：{p.name}")
             continue
         if not item["need_probe"]:
@@ -165,6 +215,7 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                     (fixed, now_iso(), old_row["id"]),
                 )
                 stats["updated"] += 1
+                bump(spath, "updated")
                 tasks.step(task_id, f"归位（不在标签文件夹里）：{p.name}")
                 continue
             if old_row is not None and tag_id is not None and (
@@ -177,6 +228,7 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                     (tag_id, now_iso(), now_iso(), spath),
                 )
                 stats["updated"] += 1
+                bump(spath, "updated")
                 tasks.step(task_id, f"归类为标签文件夹：{p.name}")
             elif old_row is not None and str(old_row["status"]) == "missing":
                 # 文件重新出现但大小/mtime 未变：不需要重新探测，但状态要恢复
@@ -185,9 +237,11 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                     ("organized" if tag_id is not None else "idle", now_iso(), spath),
                 )
                 stats["updated"] += 1
+                bump(spath, "updated")
                 tasks.step(task_id, f"恢复：{p.name}")
             else:
                 stats["skipped"] += 1
+                bump(spath, "skipped")
                 tasks.step(task_id, f"未变化：{p.name}")
             continue
         # 先入库拿到真实 id，再用 id 命名缩略图（之前用时间戳当 id，同一毫秒内会撞名 →
@@ -208,10 +262,12 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
                 pass
         if item["old"] is None:
             stats["added"] += 1
+            bump(spath, "added")
             prefix = "新增（标签文件夹）" if tag_id is not None else "新增"
             tasks.step(task_id, f"{prefix}：{p.name}")
         else:
             stats["updated"] += 1
+            bump(spath, "updated")
             tasks.step(task_id, f"更新：{p.name}")
 
     # 3) 标记丢失的文件（源文件夹与标签文件夹范围内的）
@@ -237,6 +293,9 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
         db.execute("UPDATE sources SET last_scan_at=? WHERE id=?", (stamp, r["id"]))
     for tid in scanned_tag_ids:
         db.execute("UPDATE tags SET last_scan_at=? WHERE id=?", (stamp, tid))
+
+    # 每个文件夹一条结果，给前端「每个目录扫完弹一条 toast」用
+    stats["dirs"] = per_dir
     return warn_unwritable(tasks, task_id, stats)
 
 

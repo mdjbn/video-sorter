@@ -21,11 +21,54 @@
 .logout-mini { margin-left: auto; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: var(--muted-2); }
 .logout-mini:hover { color: var(--danger); background: rgba(255,107,107,.1); }
 
-.m-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* position: relative 是给扫描面板定位用的（贴页头右下方） */
+.m-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .m-top { display: flex; align-items: center; gap: 12px; height: 58px; padding: 0 20px; border-bottom: 1px solid var(--line); background: rgba(var(--glass), .58); backdrop-filter: blur(14px); }
 .m-crumb { font-size: 14px; color: var(--muted); }
 .m-crumb b { color: var(--text); font-weight: 600; }
 .m-top .sp { flex: 1; }
+
+/* 扫描进度与排队：页头常驻按钮 + 展开面板 */
+.scan-btn { position: relative; }
+.scan-btn.live { color: var(--accent); }
+.scan-btn.on { background: rgba(var(--ink), .07); color: var(--text); }
+.scan-badge {
+  position: absolute; top: 2px; right: 2px; min-width: 15px; height: 15px; padding: 0 4px;
+  border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700;
+  line-height: 15px; text-align: center; box-shadow: 0 0 0 2px var(--panel);
+}
+.scan-pop {
+  position: absolute; top: 54px; right: 18px; z-index: 40; width: 380px; max-height: 72vh; overflow: auto;
+  padding: 12px 14px 14px; border-radius: 14px; background: var(--panel);
+  border: 1px solid var(--line); box-shadow: 0 18px 44px rgba(0, 0, 0, .16);
+}
+.scan-pop .sp-head { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 10px; }
+.scan-pop .sp-head .spacer { flex: 1; }
+.scan-pop .sp-state { font-size: 11px; color: var(--muted-2); }
+.scan-pop .sp-state.live { color: var(--accent); }
+.scan-pop .sp-block { margin-top: 12px; }
+.scan-pop .sp-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.scan-pop .sp-row .num { margin-left: auto; color: var(--text); font-weight: 600; }
+.scan-pop .track { height: 5px; border-radius: 3px; background: rgba(var(--ink), .08); overflow: hidden; }
+.scan-pop .track i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+.scan-pop .sp-note { font-size: 11.5px; color: var(--muted-2); margin-top: 6px; }
+.scan-pop .sp-empty { font-size: 12px; color: var(--muted-2); padding: 10px 0; }
+.scan-pop .sp-q { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+.scan-pop .sp-q:last-child { border-bottom: none; }
+.scan-pop .q-idx { width: 16px; height: 16px; border-radius: 50%; background: rgba(var(--ink), .07); font-size: 10px; text-align: center; line-height: 16px; color: var(--muted); }
+.scan-pop .q-label { color: var(--text); }
+.scan-pop .q-what { margin-left: auto; color: var(--muted-2); font-size: 11px; }
+.scan-pop .sp-hist { padding: 7px 0; border-top: 1px dashed var(--line); }
+.scan-pop .sp-hist:first-of-type { border-top: none; }
+.scan-pop .h-head { display: flex; gap: 8px; font-size: 11.5px; color: var(--muted-2); margin-bottom: 4px; }
+.scan-pop .h-time { color: var(--muted); }
+.scan-pop .h-sum { margin-left: auto; }
+.scan-pop .h-dir { display: flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 2px 0; }
+.scan-pop .d-kind { flex: none; font-size: 10px; padding: 1px 5px; border-radius: 6px; background: rgba(var(--ink), .07); color: var(--muted); }
+.scan-pop .d-kind.tag { background: var(--accent-dim); color: var(--accent); }
+.scan-pop .d-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scan-pop .d-num { margin-left: auto; color: var(--muted-2); white-space: nowrap; }
+.scan-pop .d-num .bad { color: var(--danger); }
 .m-scroll { flex: 1; overflow: auto; padding: 22px 24px 40px; }
 .m-title { font-size: 21px; font-weight: 700; letter-spacing: .01em; }
 .m-desc { color: var(--muted); font-size: 13px; margin-top: 6px; line-height: 1.6; }
