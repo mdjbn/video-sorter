@@ -97,9 +97,13 @@ const importInput = ref<HTMLInputElement | null>(null)
 // 「用显卡/不用显卡」由上面的开关表达，这里只列具体的编码器（不含 auto）
 const encoderOptions = computed(() => {
   const list = info.value?.encoder?.choices || []
+  // 「自动」这一项必须留着：GPU 开关打开、但还没指定具体编码器时，库里存的就是 auto。
+  // 之前把 auto 过滤掉了，下拉框找不到对应选项就显示成空白（看着像根本没设置）。
+  const auto = list.find((e: { name: string }) => e.name === 'auto')
+    || { name: 'auto', label: '自动（优先用显卡）', hw: false }
   const concrete = list.filter((e: { name: string }) => e.name !== 'auto')
-  if (concrete.length) return concrete
-  return [{ name: 'libx264', label: 'CPU（libx264）', hw: false }]
+  if (concrete.length) return [auto, ...concrete]
+  return [auto, { name: 'libx264', label: 'CPU（libx264）', hw: false }]
 })
 
 /** 显卡开关 → 实际保存的编码器：关 = libx264，开 = 原来选的硬件编码器或 auto */
@@ -1928,159 +1932,140 @@ function onResize() {
           <div v-if="setRestart" class="set-warn">有改动需要重启服务后生效。</div>
 
           <div class="set-grid">
-            <!-- 1. 目录：视频从哪儿来、扫到哪儿去 -->
-            <div class="card">
-              <div class="card-head"><h2>目录</h2></div>
-              <div class="card-body">
-                <div class="form-row"><label>整理根目录（留空则跟随各标签自己的设置）</label>
-                  <div class="dir-line">
-                    <input v-model="setForm.root_dir" class="field" placeholder="/volume1/videos" spellcheck="false" />
-                    <button class="btn ghost dir-btn" title="选择文件夹" @click="chooseDir({ kind: 'setting', key: 'root_dir' })">
-                      <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
-                    </button>
+          <div class="set-col">
+            <!-- 左列：目录 → 转码 → 备份与恢复（从“视频在哪 / 怎么转 / 怎么带走”的顺序读下来） -->
+              <!-- 1. 目录：视频从哪儿来、扫到哪儿去 -->
+              <div class="card">
+                <div class="card-head"><h2>目录</h2></div>
+                <div class="card-body">
+                  <div class="form-row"><label>整理根目录（留空则跟随各标签自己的设置）</label>
+                    <div class="dir-line">
+                      <input v-model="setForm.root_dir" class="field" placeholder="/volume1/videos" spellcheck="false" />
+                      <button class="btn ghost dir-btn" title="选择文件夹" @click="chooseDir({ kind: 'setting', key: 'root_dir' })">
+                        <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div class="form-row"><label>上传目录（手机/网页上传的视频存到这里）</label>
-                  <div class="dir-line">
-                    <input v-model="setForm.upload_dir" class="field" :placeholder="info?.upload_dir || '默认：源目录/手机上传'" spellcheck="false" />
-                    <button class="btn ghost dir-btn" title="选择文件夹" @click="chooseDir({ kind: 'setting', key: 'upload_dir' })">
-                      <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
-                    </button>
+                  <div class="form-row"><label>上传目录（手机/网页上传的视频存到这里）</label>
+                    <div class="dir-line">
+                      <input v-model="setForm.upload_dir" class="field" :placeholder="info?.upload_dir || '默认：源目录/手机上传'" spellcheck="false" />
+                      <button class="btn ghost dir-btn" title="选择文件夹" @click="chooseDir({ kind: 'setting', key: 'upload_dir' })">
+                        <Icon name="folder" :size="15" /><span class="dir-btn-lbl">选择</span>
+                      </button>
+                    </div>
                   </div>
+                  <div class="set-note">上传目录同时也是一条源文件夹，扫描时会一起遍历。上传目录可以改路径，但不能删除。</div>
                 </div>
-                <ul class="tips">
-                  <li>上传目录同时也是一条源文件夹，扫描时会一起遍历。</li>
-                  <li>上传目录可以改路径，但不能删除。</li>
-                </ul>
               </div>
-            </div>
-
-            <!-- 2. 扫描与主题：怎么扫、长什么样 -->
-            <div class="card">
-              <div class="card-head"><h2>扫描与主题</h2></div>
-              <div class="card-body">
-                <div class="form-row"><label>扫描线程数（1–16）</label>
-                  <input v-model.number="setForm.scan_workers" class="field" type="number" min="1" max="16" />
-                </div>
-                <div class="form-row"><label>封面取第几秒的画面</label>
-                  <input v-model.number="setForm.thumb_position" class="field" type="number" step="0.5" min="0" />
-                </div>
-                <div class="form-row"><label>主题</label>
-                  <div class="seg">
-                    <button v-for="t in THEME_OPTIONS" :key="t.v" :class="{ on: themeKeyPreview === t.v }" @click="pickTheme(t.v)">{{ t.label }}</button>
+              <!-- 3. 转码：播不了怎么办 -->
+              <div class="card">
+                <div class="card-head"><h2>转码</h2></div>
+                <div class="card-body">
+                  <label class="chk-row"><input v-model="setForm.transcode" type="checkbox" /><span>浏览器不能直放的格式自动转码（HLS）</span></label>
+                  <label class="chk-row"><input :checked="setForm.transcode_gpu" type="checkbox"
+                      @change="setGpu(($event.target as HTMLInputElement).checked)" /><span>使用 GPU 转码（有显卡时自动用显卡编码）</span></label>
+                  <div v-if="setForm.transcode_gpu" class="form-row"><label>转码编码器</label>
+                    <select v-model="setForm.transcode_encoder" class="field">
+                      <option v-for="e in encoderOptions" :key="e.name" :value="e.name">{{ e.label }}</option>
+                    </select>
                   </div>
+                  <div class="kv"><span class="k">当前使用</span>
+                    <span class="v">{{ encNow }}</span>
+                  </div>
+                  <div class="form-row" :class="{ muted: setForm.transcode_gpu }"><label>转码预设（仅 CPU 编码时生效）</label>
+                    <select v-model="setForm.transcode_preset" class="field" :disabled="setForm.transcode_gpu">
+                      <option v-for="p in TRANSCODE_PRESETS" :key="p.v" :value="p.v">{{ p.label }}</option>
+                    </select>
+                  </div>
+                  <div class="form-row"><label>同时转码任务数</label>
+                    <select v-model.number="setForm.transcode_jobs" class="field">
+                      <option v-for="n in TRANSCODE_JOBS" :key="n.v" :value="n.v">{{ n.label }}</option>
+                    </select>
+                  </div>
+                  <div class="set-note">开 GPU 时优先用显卡编码：CPU 占用低、能同时转更多路；没驱动或没权限会自动回落 CPU，不会转码失败。关掉 GPU 则只用 CPU 编码：功耗低、体积更小。手机 App 能直解的格式（MKV / HEVC / AC3 等）不转码，直接播原文件。同时转码任务数用来限并发：一路 1080p CPU 编码就能吃满四核，机器弱或有核显时建议调高。</div>
                 </div>
-                <ul class="tips">
-                  <li>线程数越大扫描越快，但 ffprobe 也吃 CPU；机械盘建议 3 左右。</li>
-                </ul>
               </div>
-            </div>
-
-            <!-- 3. 转码：播不了怎么办 -->
-            <div class="card">
-              <div class="card-head"><h2>转码</h2></div>
-              <div class="card-body">
-                <label class="chk-row"><input v-model="setForm.transcode" type="checkbox" /><span>浏览器不能直放的格式自动转码（HLS）</span></label>
-                <label class="chk-row"><input :checked="setForm.transcode_gpu" type="checkbox"
-                    @change="setGpu(($event.target as HTMLInputElement).checked)" /><span>使用 GPU 转码（有显卡时自动用显卡编码）</span></label>
-                <div v-if="setForm.transcode_gpu" class="form-row"><label>转码编码器</label>
-                  <select v-model="setForm.transcode_encoder" class="field">
-                    <option v-for="e in encoderOptions" :key="e.name" :value="e.name">{{ e.label }}</option>
-                  </select>
-                </div>
-                <div class="kv"><span class="k">当前使用</span>
-                  <span class="v">{{ encNow }}</span>
-                </div>
-                <div class="form-row" :class="{ muted: setForm.transcode_gpu }"><label>转码预设（仅 CPU 编码时生效）</label>
-                  <select v-model="setForm.transcode_preset" class="field" :disabled="setForm.transcode_gpu">
-                    <option v-for="p in TRANSCODE_PRESETS" :key="p.v" :value="p.v">{{ p.label }}</option>
-                  </select>
-                </div>
-                <div class="form-row"><label>同时转码任务数</label>
-                  <select v-model.number="setForm.transcode_jobs" class="field">
-                    <option v-for="n in TRANSCODE_JOBS" :key="n.v" :value="n.v">{{ n.label }}</option>
-                  </select>
-                </div>
-                <ul class="tips">
-                  <li>开 GPU 时优先用显卡编码：CPU 占用低、能同时转更多路；没驱动或没权限会自动回落 CPU，不会转码失败。</li>
-                  <li>关掉 GPU 则只用 CPU 编码：功耗低、体积更小。</li>
-                  <li>手机 App 能直解的格式（MKV / HEVC / AC3 等）不转码，直接播原文件。</li>
-                  <li>同时转码任务数用来限并发：一路 1080p CPU 编码就能吃满四核，机器弱或有核显时建议调高。</li>
-                </ul>
-              </div>
-            </div>
-
-            <!-- 4. 缓存：转码产物占多少、怎么清（和转码是一件事的两面，放同一行） -->
-            <div class="card">
-              <div class="card-head"><h2>缓存</h2></div>
-              <div class="card-body">
-                <div class="cache-usage">
-                  <div class="cu-top">
-                    <span class="cu-lbl">转码缓存</span>
-                    <span class="cu-val" :class="{ over: cacheOver }">{{ cacheUsageText }}</span>
-                  </div>
-                  <div class="cu-track">
-                    <i :class="{ over: cacheOver, off: !setForm.hls_cache_limit_mb }" :style="{ width: (setForm.hls_cache_limit_mb ? Math.max(cachePct, cacheOver ? 100 : 2) : 0) + '%' }" />
-                  </div>
-                </div>
-                <div class="form-row"><label>缓存上限</label>
-                  <select v-model.number="setForm.hls_cache_limit_mb" class="field">
-                    <option v-for="o in HLS_LIMITS" :key="o.v" :value="o.v">{{ o.label }}</option>
-                  </select>
-                </div>
-                <div class="form-row"><label>多久没看就清理</label>
-                  <select v-model.number="setForm.hls_cache_max_age_hours" class="field" :disabled="!setForm.hls_cache_limit_mb">
-                    <option v-for="o in HLS_MAX_AGE" :key="o.v" :value="o.v">{{ o.label }}</option>
-                  </select>
-                </div>
-                <div class="row-btns">
-                  <button class="btn ghost sm" :disabled="sweeping || cacheLoading" @click="sweepCache">
-                    <Icon name="refresh" :size="14" />{{ sweeping ? '清理中…' : '立即清理超额缓存' }}
+              <!-- 6. 备份与恢复：和发现并排，两个都短，不留空 -->
+              <div class="card set-backup">
+                <div class="card-head">
+                  <h2>备份与恢复</h2>
+                  <div class="spacer" />
+                  <button class="btn ghost sm" @click="backupSettings"><Icon name="download" :size="14" />备份</button>
+                  <button class="btn ghost sm" :disabled="importing" @click="pickImportFile">
+                    <Icon name="upload" :size="14" />{{ importing ? '导入中…' : '导入' }}
                   </button>
+                  <input ref="importInput" type="file" accept=".json,application/json" hidden @change="onImportFile" />
                 </div>
-                <ul class="tips">
-                  <li>转码出来的 HLS 分片一直占着数据盘，超过上限时按最久没看的先清。</li>
-                  <li>上限选「不自动清理」时缓存会一直增长，需要自己定期点上面的按钮。</li>
-                  <li>清理只删转码分片，原视频和封面不受影响；正在看的视频不会被删。</li>
-                </ul>
-              </div>
-            </div>
-
-            <!-- 5. 局域网发现：手机怎么找到这台机器 -->
-            <div class="card">
-              <div class="card-head"><h2>局域网发现</h2></div>
-              <div class="card-body">
-                <label class="chk-row"><input v-model="setForm.discovery" type="checkbox" /><span>广播服务器地址，手机 App 能自动发现</span></label>
-                <div class="form-row"><label>发现端口（UDP）</label>
-                  <input v-model.number="setForm.discovery_port" class="field" type="number" min="1" max="65535" />
+                <div class="card-body">
+                  <div class="set-note">备份把「设置 + 源文件夹 + 标签（含目标文件夹）」导出成一个 JSON。换机器或重装后导入即可还原。导入只补不删：已存在的源文件夹会跳过，同名标签更新颜色和目录。</div>
                 </div>
-                <div class="kv"><span class="k">当前监听</span><span class="v">{{ setForm.host }}:{{ setForm.port }}</span></div>
-                <ul class="tips">
-                  <li>关掉后手机 App 只能手动填地址。</li>
-                </ul>
               </div>
-            </div>
-
-            <!-- 6. 备份与恢复：和发现并排，两个都短，不留空 -->
-            <div class="card set-backup">
-              <div class="card-head">
-                <h2>备份与恢复</h2>
-                <div class="spacer" />
-                <button class="btn ghost sm" @click="backupSettings"><Icon name="download" :size="14" />备份</button>
-                <button class="btn ghost sm" :disabled="importing" @click="pickImportFile">
-                  <Icon name="upload" :size="14" />{{ importing ? '导入中…' : '导入' }}
-                </button>
-                <input ref="importInput" type="file" accept=".json,application/json" hidden @change="onImportFile" />
-              </div>
-              <div class="card-body">
-                <ul class="tips">
-                  <li>备份把「设置 + 源文件夹 + 标签（含目标文件夹）」导出成一个 JSON。</li>
-                  <li>换机器或重装后导入即可还原。</li>
-                  <li>导入只补不删：已存在的源文件夹会跳过，同名标签更新颜色和目录。</li>
-                </ul>
-              </div>
-            </div>
           </div>
+          <div class="set-col">
+            <!-- 右列：扫描与主题 → 缓存 → 局域网发现（都是“跑起来之后”的调参） -->
+              <!-- 2. 扫描与主题：怎么扫、长什么样 -->
+              <div class="card">
+                <div class="card-head"><h2>扫描与主题</h2></div>
+                <div class="card-body">
+                  <div class="form-row"><label>扫描线程数（1–16）</label>
+                    <input v-model.number="setForm.scan_workers" class="field" type="number" min="1" max="16" />
+                  </div>
+                  <div class="form-row"><label>封面取第几秒的画面</label>
+                    <input v-model.number="setForm.thumb_position" class="field" type="number" step="0.5" min="0" />
+                  </div>
+                  <div class="form-row"><label>主题</label>
+                    <div class="seg">
+                      <button v-for="t in THEME_OPTIONS" :key="t.v" :class="{ on: themeKeyPreview === t.v }" @click="pickTheme(t.v)">{{ t.label }}</button>
+                    </div>
+                  </div>
+                  <div class="set-note">线程数越大扫描越快，但 ffprobe 也吃 CPU；机械盘建议 3 左右。</div>
+                </div>
+              </div>
+              <!-- 4. 缓存：转码产物占多少、怎么清（和转码是一件事的两面，放同一行） -->
+              <div class="card">
+                <div class="card-head"><h2>缓存</h2></div>
+                <div class="card-body">
+                  <div class="cache-usage">
+                    <div class="cu-top">
+                      <span class="cu-lbl">转码缓存</span>
+                      <span class="cu-val" :class="{ over: cacheOver }">{{ cacheUsageText }}</span>
+                    </div>
+                    <div class="cu-track">
+                      <i :class="{ over: cacheOver, off: !setForm.hls_cache_limit_mb }" :style="{ width: (setForm.hls_cache_limit_mb ? Math.max(cachePct, cacheOver ? 100 : 2) : 0) + '%' }" />
+                    </div>
+                  </div>
+                  <div class="form-row"><label>缓存上限</label>
+                    <select v-model.number="setForm.hls_cache_limit_mb" class="field">
+                      <option v-for="o in HLS_LIMITS" :key="o.v" :value="o.v">{{ o.label }}</option>
+                    </select>
+                  </div>
+                  <div class="form-row"><label>多久没看就清理</label>
+                    <select v-model.number="setForm.hls_cache_max_age_hours" class="field" :disabled="!setForm.hls_cache_limit_mb">
+                      <option v-for="o in HLS_MAX_AGE" :key="o.v" :value="o.v">{{ o.label }}</option>
+                    </select>
+                  </div>
+                  <div class="row-btns">
+                    <button class="btn ghost sm" :disabled="sweeping || cacheLoading" @click="sweepCache">
+                      <Icon name="refresh" :size="14" />{{ sweeping ? '清理中…' : '立即清理超额缓存' }}
+                    </button>
+                  </div>
+                  <div class="set-note">转码出来的 HLS 分片一直占着数据盘，超过上限时按最久没看的先清。上限选「不自动清理」时缓存会一直增长，需要自己定期点上面的按钮。清理只删转码分片，原视频和封面不受影响；正在看的视频不会被删。</div>
+                </div>
+              </div>
+              <!-- 5. 局域网发现：手机怎么找到这台机器 -->
+              <div class="card">
+                <div class="card-head"><h2>局域网发现</h2></div>
+                <div class="card-body">
+                  <label class="chk-row"><input v-model="setForm.discovery" type="checkbox" /><span>广播服务器地址，手机 App 能自动发现</span></label>
+                  <div class="form-row"><label>发现端口（UDP）</label>
+                    <input v-model.number="setForm.discovery_port" class="field" type="number" min="1" max="65535" />
+                  </div>
+                  <div class="kv"><span class="k">当前监听</span><span class="v">{{ setForm.host }}:{{ setForm.port }}</span></div>
+                  <div class="set-note">关掉后手机 App 只能手动填地址。</div>
+                </div>
+              </div>
+          </div>
+        </div>
 
         </template>
 
