@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import DirPicker from '../components/DirPicker.vue'
-import { api, fmtDur, fmtSize, fmtTime, waitTask, type CacheInfo, type FailedFile, type OrganizeResult, type SkipSummary, type HistoryItem, type Plan, type PlanItem, type ScanDirResult, type ScanPending, type Source, type Stats, type Tag, type Unwritable, type Video } from '../api'
+import { api, fmtDur, fmtSize, fmtTime, waitTask, type CacheInfo, type FailedFile, type OrganizeResult, type SkipSummary, type HistoryItem, type Plan, type LastScan, type PlanItem, type ScanDirResult, type ScanPending, type Source, type Stats, type Tag, type Unwritable, type Video } from '../api'
 import { isFnosHost, pickDirFromHost } from '../fnos'
 import { toast, toastEach } from '../toast'
 import { nextThemeMode, setThemeMode, themeMode, THEME_LABEL, type ThemeMode } from '../theme'
@@ -377,6 +377,17 @@ function dirResultText(d: ScanDirResult): string {
   if (d.failed) bits.push(`失败 ${d.failed}`)
   if (!bits.length) bits.push(d.skipped ? `无变化（${d.skipped} 个）` : '没有视频')
   return `${kind}「${d.name}」扫完：${bits.join('、')}`
+}
+
+/** 「新增 2」这种短结果，用在行上的「扫于 今天 15:30 · 新增 2」 */
+function shortScanResult(ls?: LastScan | null): string {
+  if (!ls) return ''
+  const bits: string[] = []
+  if (ls.added) bits.push(`新增 ${ls.added}`)
+  if (ls.updated) bits.push(`更新 ${ls.updated}`)
+  if (ls.failed) bits.push(`失败 ${ls.failed}`)
+  if (bits.length) return bits.join(' ')
+  return ls.skipped ? '无变化' : '没有视频'
 }
 
 /** 面板/角标上的短状态 */
@@ -1571,7 +1582,7 @@ function onResize() {
                       <span v-if="s.kind === 'upload'" class="up-badge">上传目录</span>
                     </div>
                     <div class="s">
-                      {{ s.count ?? 0 }} 个视频 · 上次扫描 {{ s.last_scan_at ? fmtTime(s.last_scan_at) : '从未' }}
+                      {{ s.count ?? 0 }} 个视频 · 上次扫描 {{ s.last_scan_at ? fmtTime(s.last_scan_at) : '从未' }}<template v-if="s.last_scan && shortScanResult(s.last_scan)"> · {{ shortScanResult(s.last_scan) }}</template>
                       <template v-if="s.kind === 'upload'"> · 手机/网页上传都存到这里，可改路径不可删除</template>
                     </div>
                   </div>
@@ -1700,7 +1711,10 @@ function onResize() {
               <input class="inline-name" v-model="draftOf(t).name" spellcheck="false" title="标签名称" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
               <button class="tag-color" :style="{ background: draftOf(t).color }" :title="`颜色 ${draftOf(t).color}（点击修改）`" @click.stop="toggleColorPop(t.id)" />
               <span class="ct">{{ t.count ?? 0 }} 个视频</span>
-              <span class="ct scan-time" :title="t.last_scan_at ? `上次扫描：${fmtTime(t.last_scan_at)}` : '还没扫过这个文件夹'">{{ t.last_scan_at ? '扫于 ' + fmtTime(t.last_scan_at) : '未扫描' }}</span>
+              <span
+                class="ct scan-time"
+                :title="t.last_scan_at ? `上次扫描：${fmtTime(t.last_scan_at)}${t.last_scan ? '\n发现 ' + t.last_scan.found + ' 个，新增 ' + t.last_scan.added + '，更新 ' + t.last_scan.updated + '，未变化 ' + t.last_scan.skipped + (t.last_scan.failed ? '，失败 ' + t.last_scan.failed : '') : ''}` : '还没扫过这个文件夹'"
+              >{{ t.last_scan_at ? '扫于 ' + fmtTime(t.last_scan_at) : '未扫描' }}<template v-if="t.last_scan && shortScanResult(t.last_scan)"> · {{ shortScanResult(t.last_scan) }}</template></span>
               <input class="inline-dir" v-model="draftOf(t).dir_path" :placeholder="t.effective_dir" :title="t.dir_path || t.effective_dir" spellcheck="false" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
               <button class="icon-act" title="选择目标文件夹" @click="chooseDir({ kind: 'tag', id: t.id })"><Icon name="folder" :size="15" /></button>
               <span class="save-hint">

@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS sources (
   enabled      INTEGER NOT NULL DEFAULT 1,
   kind         TEXT NOT NULL DEFAULT '',
   created_at   TEXT NOT NULL,
-  last_scan_at TEXT
+  last_scan_at TEXT,
+  last_scan_result TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tags (
@@ -48,7 +49,8 @@ CREATE TABLE IF NOT EXISTS tags (
   dir_path     TEXT NOT NULL DEFAULT '',
   sort_order   INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL,
-  last_scan_at TEXT
+  last_scan_at TEXT,
+  last_scan_result TEXT
 );
 
 CREATE TABLE IF NOT EXISTS videos (
@@ -174,10 +176,15 @@ class Database:
             scols = {r["name"] for r in c.execute("PRAGMA table_info(sources)").fetchall()}
             if "kind" not in scols:
                 c.execute("ALTER TABLE sources ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
+            if "last_scan_result" not in scols:
+                # 老库升级：和 last_scan_at 一起记「上次扫这个目录扫到了什么」
+                c.execute("ALTER TABLE sources ADD COLUMN last_scan_result TEXT")
             # 老库升级：标签也记自己的「上次扫描时间」（1.3.9 起不再有全局 last_scan_at）
             tcols = {r["name"] for r in c.execute("PRAGMA table_info(tags)").fetchall()}
             if "last_scan_at" not in tcols:
                 c.execute("ALTER TABLE tags ADD COLUMN last_scan_at TEXT")
+            if "last_scan_result" not in tcols:
+                c.execute("ALTER TABLE tags ADD COLUMN last_scan_result TEXT")
             row = c.execute("SELECT COUNT(*) AS n FROM tags").fetchone()
             if row and row["n"] == 0:
                 # 标签目录必须填（1.3.9 起 dir_path 是必填项）。默认落在数据目录下的

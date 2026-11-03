@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import string
 import threading
@@ -110,6 +111,17 @@ def _counts(db) -> dict[str, int]:
     return out
 
 
+def _parse_scan_result(raw: str | None) -> dict[str, Any] | None:
+    """库里的 last_scan_result 是一小段 JSON，坏了就当没有，别让列表接口跟着挂。"""
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
 @router.get("/sources")
 def list_sources(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
@@ -126,6 +138,8 @@ def list_sources(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]
             f"SELECT COUNT(*) AS n FROM videos WHERE ({clause}) AND status<>'missing'", params)
         d["count"] = int(total["n"]) if total else 0
         d["kind"] = d.get("kind") or ""
+        # 上次扫描结果的原始 JSON（前端解析成 {added, updated, ...}）；没扫过就是 None
+        d["last_scan"] = _parse_scan_result(d.pop("last_scan_result", None))
         d["editable"] = True
         d["deletable"] = d["kind"] != "upload"
         out.append(d)

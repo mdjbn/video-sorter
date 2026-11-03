@@ -39,6 +39,19 @@ export type Tag = {
   effective_dir: string
   /** 这个标签目录上次真正被扫描的时间；空串 = 没扫过（目录不存在时不记） */
   last_scan_at: string
+  /** 上次扫描结果；null = 还没扫过 */
+  last_scan?: LastScan | null
+}
+
+/** 某一个文件夹上次扫描扫到了什么（库里存着，刷新/重启都还在） */
+export type LastScan = {
+  kind: 'source' | 'tag'
+  name: string
+  found: number
+  added: number
+  updated: number
+  skipped: number
+  failed: number
 }
 
 export type Source = {
@@ -46,6 +59,8 @@ export type Source = {
   path: string
   enabled: number
   last_scan_at: string
+  /** 上次扫描结果；null = 还没扫过 */
+  last_scan?: LastScan | null
   count: number
   /** '' 普通源目录；'upload' 内置上传目录（可改路径、不可删除） */
   kind?: string

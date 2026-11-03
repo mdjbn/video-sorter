@@ -1,6 +1,7 @@
 """扫描源目录：增量收集视频文件、探测元数据、生成封面。"""
 from __future__ import annotations
 
+import json
 import os
 import time
 from .concurrency import scan_pool
@@ -288,11 +289,19 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
     # 「上次扫描时间」按目录各记各的：源文件夹记在自己那行、标签记在自己那行。
     # 以前另有一个全局 settings.last_scan_at，只扫一个标签也会被刷新，看起来像源文件夹
     # 刚查过——误导（而且两个扫描并发时后完成的会覆盖先完成的）。现在整库不留全局时间。
+    # 顺手把「这次扫到了什么」也存进那一行：界面上「扫于 今天 15:30 · 新增 2」，
+    # 光有时间看不出这次有没有扫出新东西，还得翻别处。只留最后一次（不堆历史）。
     stamp = now_iso()
-    for r in rows:
-        db.execute("UPDATE sources SET last_scan_at=? WHERE id=?", (stamp, r["id"]))
-    for tid in scanned_tag_ids:
-        db.execute("UPDATE tags SET last_scan_at=? WHERE id=?", (stamp, tid))
+    for d in per_dir:
+        payload = json.dumps({k: d[k] for k in ("kind", "name", "found", "added",
+                                                "updated", "skipped", "failed")},
+                             ensure_ascii=False)
+        if d["kind"] == "source":
+            db.execute("UPDATE sources SET last_scan_at=?, last_scan_result=? WHERE id=?",
+                       (stamp, payload, d["id"]))
+        else:
+            db.execute("UPDATE tags SET last_scan_at=?, last_scan_result=? WHERE id=?",
+                       (stamp, payload, d["id"]))
 
     # 每个文件夹一条结果，给前端「每个目录扫完弹一条 toast」用
     stats["dirs"] = per_dir

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -64,6 +65,17 @@ def check_tag_dir(st, dir_path: str, *, exclude_tag_id: int | None = None) -> st
     return path
 
 
+def _parse_scan_result(raw: str | None) -> dict[str, Any] | None:
+    """库里的 last_scan_result 是一小段 JSON，坏了就当没有，别让列表接口跟着挂。"""
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
 def _serialize(row: Any, counts: dict[int, int], st) -> dict[str, Any]:
     d = dict(row)
     tag = {"name": d["name"], "dir_path": d["dir_path"]}
@@ -71,6 +83,8 @@ def _serialize(row: Any, counts: dict[int, int], st) -> dict[str, Any]:
     d["default_dir"] = default_tag_dir(st.db, st.cfg, d["name"])
     eff = resolve_tag_dir(st.db, st.cfg, tag)
     d["effective_dir"] = str(eff) if eff else ""
+    # 上次扫描结果的原始 JSON（前端把它解析成 {added, updated, ...}）；没扫过就是 None
+    d["last_scan"] = _parse_scan_result(d.pop("last_scan_result", None))
     return d
 
 
