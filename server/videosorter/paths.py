@@ -40,10 +40,31 @@ def norm_path(path: str | Path) -> str:
     except (OSError, RuntimeError):
         return raw.rstrip("/\\")
     text = str(resolved)
-    # 根目录（`/`）不能再去尾部分隔符，否则会变成空串
-    if len(text) > 1:
-        text = text.rstrip("\\/")
-    return text
+    # 根目录不能去尾部分隔符，否则会变成空串：
+    #   Linux/macOS 的根是 "/"，Windows 的盘根被 Path 解析成 "D:\"，两者都要原样保留。
+    # 判断「是不是根」用 Path(...).parent == Path(...)（根的 parent 还是它自己），
+    # 比按长度判断可靠——"D:\\" 长度是 3，按长度判断会把它截成 "D:"。
+    if _is_root_text(text):
+        return text
+    return text.rstrip("\\/")
+
+
+def _is_root_text(text: str) -> bool:
+    """这段文本是不是一个根：`/`、`\`、`D:`、`D:\`（Windows 盘根）。
+
+    两种来源都要照顾：
+      - 平台原生的判断 —— `Path(text).parent == Path(text)`（根的 parent 是它自己），
+        在 Linux 上 `Path("/").parent == Path("/")` 为 True；
+      - 跨平台的字面量判断 —— 参数里可能写着 Windows 盘根（比如在 Linux 上收到 "D:\\"），
+        这时 Path 按 POSIX 解析，判断不出来，只能看形状：去尾分隔符后形如 "X:"。
+    """
+    try:
+        if Path(text).parent == Path(text):
+            return True
+    except (OSError, RuntimeError):
+        pass
+    bare = text.rstrip("\\/")
+    return bare in ("", "/") or (len(bare) == 2 and bare[1] == ":")
 
 
 def is_same_dir(a: str | Path, b: str | Path) -> bool:

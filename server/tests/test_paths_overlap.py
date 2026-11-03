@@ -13,7 +13,30 @@ def test_norm_path_strips_trailing_separator(tmp_path: Path) -> None:
 
 
 def test_norm_path_keeps_root() -> None:
-    assert norm_path("/") == "/"
+    # 本机根（Linux 是 "/"，Windows 是 "D:\\" 这类盘根）都要原样保留。
+    # 之前只写死 "/"，而 Windows runner 上 Path("/").resolve() 会变成 "D:\\"，
+    # 于是 CI 的 windows job 直接红（1 failed / 169 passed / 9 skipped）。
+    root = str(Path(Path.cwd().anchor))
+    assert norm_path(root) == root
+
+
+def test_norm_path_keeps_windows_drive_root() -> None:
+    """Windows 盘根不能被截成 "D:"。
+
+    背景：CI 的 windows job 因为 `assert norm_path("/") == "/"` 红了——Windows 上
+    `Path("/").resolve()` 结果是 "D:\\"。所以这里覆盖两种形态：带尾分隔符的 "D:\\"
+    和裸盘符 "D:"，两者都必须原样返回。
+    """
+    from videosorter.paths import _is_root_text
+
+    assert _is_root_text("D:\\")
+    assert _is_root_text("D:")
+    assert _is_root_text("C:\\")
+    assert _is_root_text("/")
+    assert _is_root_text("\\")
+    assert not _is_root_text("D:\\videos")
+    assert not _is_root_text("/volume1")
+    assert not _is_root_text("/volume1/videos")
 
 
 def test_norm_path_empty() -> None:
