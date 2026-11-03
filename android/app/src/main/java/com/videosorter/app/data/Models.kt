@@ -71,13 +71,37 @@ data class Tag(
     val count: Int = 0,
     @SerialName("dir_path") val dirPath: String? = null,
     @SerialName("effective_dir") val dir: String? = null,
+    /** 上次扫描这个标签目录的时间（ISO 时间串）。**没扫过时后端给 null**，所以这里必须可空——
+     *  写成非空 String 会让 kotlinx 直接抛 JsonDecodingException，整个标签列表都拿不到。 */
+    @SerialName("last_scan_at") val lastScanAt: String? = null,
+    /** 上次扫描的结果摘要：{kind,name,found,added,updated,skipped,failed} */
+    @SerialName("last_scan") val lastScan: LastScan? = null,
+    /** 新建标签时建议的目录（服务端按「根目录/标签名」推出来） */
+    @SerialName("default_dir") val defaultDir: String = "",
+)
+
+/** 一个目录上一次扫描的结果（源文件夹和标签都用这个结构）。 */
+@Serializable
+data class LastScan(
+    val kind: String = "",
+    val name: String = "",
+    val found: Int = 0,
+    val added: Int = 0,
+    val updated: Int = 0,
+    val skipped: Int = 0,
+    val failed: Int = 0,
 )
 
 @Serializable
 data class TagList(val tags: List<Tag> = emptyList())
 
 @Serializable
-data class NewTagIn(val name: String, val color: String = "#8d98a8", @SerialName("dir_path") val dirPath: String? = null)
+/**
+ * 新建标签。dir_path 是**必填**的（v1.3.9 起后端 Pydantic 不给默认值）：
+ * 服务端原来可以留空、按「根目录/标签名」隐式推导，但那会让「这个标签的文件到底在哪个
+ * 目录」变成猜的，也让目录重叠检查无从下手，所以改成必须显式给。
+ */
+data class NewTagIn(val name: String, val color: String = "#8d98a8", @SerialName("dir_path") val dirPath: String)
 
 @Serializable
 data class PlanItem(
@@ -153,6 +177,30 @@ data class TaskResult(
     @Serializable(with = FailedListSerializer::class)
     val failed: List<FailedItem> = emptyList(),
     val items: List<FailedItem> = emptyList(),
+    // 以下只在扫描任务里有：总账 + 每个目录一条明细
+    val added: Int = 0,
+    val updated: Int = 0,
+    val skipped: Int = 0,
+    val missing: Int = 0,
+    val dirs: List<ScanDirResult> = emptyList(),
+)
+
+/** GET /api/tags/default-dir */
+@Serializable
+data class DefaultDirOut(val dir: String = "")
+
+/** 扫描时每个目录（源文件夹 / 标签文件夹）各自的战果。 */
+@Serializable
+data class ScanDirResult(
+    val kind: String = "",
+    val id: Int = 0,
+    val name: String = "",
+    val path: String = "",
+    val found: Int = 0,
+    val added: Int = 0,
+    val updated: Int = 0,
+    val skipped: Int = 0,
+    val failed: Int = 0,
 )
 
 @Serializable
@@ -215,7 +263,15 @@ data class HlsStatus(
 )
 
 @Serializable
-data class ScanOut(@SerialName("task_id") val taskId: String = "")
+data class ScanOut(
+    @SerialName("task_id") val taskId: String = "",
+    /** 排在队尾（前面还有活）时为 true */
+    val queued: Boolean = false,
+    /** 队列里的位置，1 是下一个就轮到；0 表示已经在跑 */
+    val position: Int = 0,
+    /** 同样的扫描已经在队列里了，复用了那条任务 */
+    val merged: Boolean = false,
+)
 
 @Serializable
 data class CacheBucket(val count: Int = 0, val bytes: Long = 0)
@@ -274,6 +330,10 @@ data class Source(
     val kind: String = "",
     val editable: Boolean = true,
     val deletable: Boolean = true,
+    /** 上次扫描这个源目录的时间（ISO 时间串）。没扫过时后端给 null，必须可空。 */
+    @SerialName("last_scan_at") val lastScanAt: String? = null,
+    /** 上次扫描的结果摘要 */
+    @SerialName("last_scan") val lastScan: LastScan? = null,
 )
 
 @Serializable

@@ -98,14 +98,49 @@ class ToastState {
     var isError by mutableStateOf(false)
         private set
 
+    /**
+     * 排队中的提示。一次扫描会有「每个目录一条 + 末尾一条总账」好几条，
+     * 原来 show() 是**覆盖式**的：连着调只看得到最后一条（而且 2.2 秒就没了）。
+     * 现在按顺序排队播放，每条按长度停留 1.6~5 秒，用户来得及看完每个目录的结果。
+     */
+    private val queue = mutableListOf<Pair<String, Boolean>>()
+    private var playing = false
+
     fun show(msg: String, error: Boolean = false) {
         message = msg
         isError = error
     }
 
+    /** 排一条提示，按顺序播放，不覆盖前面还没播完的。 */
+    fun enqueue(msg: String, error: Boolean = false) {
+        if (msg.isBlank()) return
+        queue.add(msg to error)
+        if (!playing) showNext()
+    }
+
+    /** 一次排多条。 */
+    fun enqueueAll(items: List<String>, error: Boolean = false) {
+        items.forEach { enqueue(it, error) }
+    }
+
+    /** 供界面在停留时间到了之后调：播下一条，没有就收起。 */
+    internal fun showNext() {
+        val next = queue.removeFirstOrNull()
+        if (next == null) {
+            playing = false
+            clear()
+        } else {
+            playing = true
+            show(next.first, next.second)
+        }
+    }
+
     fun clear() {
         message = null
     }
+
+    /** 当前这条该停留多久（毫秒）：字数多给久一点，但不至于让队列拖太久。 */
+    fun stayFor(msg: String): Long = (900L + msg.length * 90L).coerceIn(1600L, 5200L)
 }
 
 @Composable
@@ -115,8 +150,9 @@ fun ToastHost(state: ToastState, modifier: Modifier = Modifier) {
     var tick by remember { mutableStateOf(0) }
     androidx.compose.runtime.LaunchedEffect(msg) {
         if (msg != null) {
-            delay(2200)
-            state.clear()
+            delay(state.stayFor(msg))
+            // 播完这条接着播队列里的下一条；没有就收起
+            state.showNext()
         }
     }
     AnimatedVisibility(

@@ -97,6 +97,18 @@ def list_tags(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return {"tags": [_serialize(r, counts, st) for r in rows]}
 
 
+@router.get("/default-dir")
+def tag_default_dir(name: str = "", user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+    """新建标签时建议的目标文件夹。
+
+    默认规则和以前一致：全局根目录/标签名 → 首个源目录/标签名。
+    v1.3.9 起建标签必须带 dir_path，而手机 App 从播放页「新建标签」时没有输入框，
+    靠这个接口把建议值填进去，免得一律报 422。
+    """
+    st = get_state()
+    return {"dir": default_tag_dir(st.db, st.cfg, (name or "").strip())}
+
+
 @router.post("")
 def create_tag(body: TagIn, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()

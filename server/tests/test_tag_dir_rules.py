@@ -249,3 +249,26 @@ def test_upload_source_cannot_contain_others(env, tmp_path) -> None:
     # 只要拦住就行——两条都属于「这个位置不能当上传目录」。
     assert ("源文件夹不能重叠" in r.json()["detail"]
             or "标签目录" in r.json()["detail"]), r.json()["detail"]
+
+
+def test_default_dir_endpoint_suggests_dir_from_source(env) -> None:
+    """新建标签的「建议目录」：没配全局根目录时用首个源目录/标签名。"""
+    c, h = env["client"], _login(env["client"])
+    c.post("/api/sources", json={"path": str(env["src"])}, headers=h)
+    r = c.get("/api/tags/default-dir", params={"name": "美食"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["dir"] == str(env["src"] / "美食"), r.json()
+
+
+def test_default_dir_endpoint_follows_root_dir_setting(env) -> None:
+    """配了全局根目录就用 根目录/标签名。"""
+    c, h = env["client"], _login(env["client"])
+    root = env["data"].parent / "整理根"
+    c.put("/api/settings", json={"root_dir": str(root)}, headers=h)
+    r = c.get("/api/tags/default-dir", params={"name": "运动"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["dir"] == str(root / "运动"), r.json()
+
+
+def test_default_dir_endpoint_requires_login(env) -> None:
+    assert env["client"].get("/api/tags/default-dir", params={"name": "x"}).status_code == 401

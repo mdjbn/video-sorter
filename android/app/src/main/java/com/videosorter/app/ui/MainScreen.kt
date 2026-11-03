@@ -95,6 +95,9 @@ fun MainScreen(
 
     fun toast(msg: String, err: Boolean = false) = toastState.show(msg, err)
 
+    /** 排一条提示（不覆盖前面没播完的）。逐目录扫描结果用它，一次好几条。 */
+    fun toastEach(msg: String, err: Boolean = false) = toastState.enqueue(msg, err)
+
     /** 把异常压成一句人话，避免把整段 JSON 解析栈糊在页面上 */
     fun friendlyError(e: Throwable): String {
         val raw = (e.message ?: e::class.simpleName ?: "未知错误").replace("\n", " ")
@@ -240,7 +243,15 @@ fun MainScreen(
                     onTag = { videoId, tagId -> markTag(videoId, tagId) },
                     onCreateTag = { name, color ->
                         scope.launch {
-                            runCatching { api.createTag(name, color) }
+                            // 建标签现在必须带目标文件夹，而播放页的快捷建标签框没有目录输入。
+                            // 先问服务端要建议目录（根目录/标签名 → 首个源目录/标签名），再建。
+                            runCatching {
+                                val dir = api.tagDefaultDir(name)
+                                if (dir.isBlank()) {
+                                    throw IllegalStateException("还没配置源文件夹，先去设置里加一个再建标签")
+                                }
+                                api.createTag(name, color, dir)
+                            }
                                 .onSuccess { reload(silent = true) }
                                 .onFailure { if (!authFail(it)) toast(it.message ?: "创建失败", err = true) }
                         }
@@ -313,6 +324,7 @@ fun MainScreen(
                     onThemeChange = onThemeChange,
                     counts = counts,
                     onToast = { toast(it) },
+                    onToastEach = { toastEach(it) },
                     onRefresh = { scope.launch { reload() } },
                     onLogout = {
                         scope.launch { runCatching { api.logout() } }

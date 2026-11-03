@@ -123,6 +123,8 @@ fun SettingsScreen(
     onThemeChange: (String) -> Unit,
     counts: Counts,
     onToast: (String) -> Unit,
+    /** 队列式提示：逐目录扫描结果一次好几条，用普通 onToast 会互相覆盖 */
+    onToastEach: ((String) -> Unit)? = null,
     onRefresh: () -> Unit,
     onLogout: () -> Unit,
     onSwitchServer: (String) -> Unit,
@@ -149,6 +151,8 @@ fun SettingsScreen(
         },
         label = "settings-page",
     ) { p ->
+        // 逐目录扫描结果一次好几条，必须排队播；没传就退回普通 toast
+        val toastEach: (String) -> Unit = onToastEach ?: onToast
         when (p) {
             SetPage.HOME -> SettingsHome(
             api = api,
@@ -164,8 +168,8 @@ fun SettingsScreen(
         )
             SetPage.SERVER -> ServerPage(api, session, onToast, onSwitchServer) { page = SetPage.HOME }
             SetPage.ACCOUNT -> AccountPage(api, session, onToast, onLogout) { page = SetPage.HOME }
-            SetPage.SOURCES -> SourcesPage(api, onToast, onRefresh) { page = SetPage.HOME }
-            SetPage.TAGS -> TagsPage(api, tags, onToast, onRefresh) { page = SetPage.HOME }
+            SetPage.SOURCES -> SourcesPage(api, onToast, toastEach, onRefresh) { page = SetPage.HOME }
+            SetPage.TAGS -> TagsPage(api, tags, onToast, toastEach, onRefresh) { page = SetPage.HOME }
             SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) { page = SetPage.HOME }
             SetPage.CACHE -> CachePage(api, onToast) { page = SetPage.HOME }
             SetPage.ABOUT -> AboutPage { page = SetPage.HOME }
@@ -482,7 +486,14 @@ private fun AccountPage(api: Api, session: Session, onToast: (String) -> Unit, o
 // ---------------- 源文件夹 ----------------
 
 @Composable
-private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Unit, onBack: () -> Unit) {
+private fun SourcesPage(
+    api: Api,
+    onToast: (String) -> Unit,
+    onToastEach: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val each: (String) -> Unit = onToastEach
     val t = tokens()
     val scope = rememberCoroutineScope()
     var list by remember { mutableStateOf<List<Source>>(emptyList()) }
@@ -558,6 +569,14 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
                                     color = if (s0.exists) t.muted2 else t.danger,
                                     fontSize = 10.sp,
                                 )
+                                Spacer(Modifier.height(1.dp))
+                                Text(
+                                    ScanText.lastScanLine(s0.lastScanAt, s0.lastScan),
+                                    color = t.muted2,
+                                    fontSize = 9.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
                             if (s0.deletable) {
                                 Box(
@@ -587,15 +606,7 @@ private fun SourcesPage(api: Api, onToast: (String) -> Unit, onRefresh: () -> Un
                     busy = true
                     scope.launch {
                         try {
-                            val taskId = api.scan()
-                            while (true) {
-                                val task = api.task(taskId)
-                                if (task.status != "running") {
-                                    onToast("扫描完成：${task.message.ifEmpty { "ok" }}")
-                                    break
-                                }
-                                kotlinx.coroutines.delay(400)
-                            }
+                            runScanTask(api, onQueued = each, onToast = onToast)
                             load()
                             onRefresh()
                         } catch (e: Throwable) {
@@ -692,7 +703,15 @@ private val TAG_COLORS = listOf(
 )
 
 @Composable
-private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRefresh: () -> Unit, onBack: () -> Unit) {
+private fun TagsPage(
+    api: Api,
+    tags: List<Tag>,
+    onToast: (String) -> Unit,
+    onToastEach: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onBack: () -> Unit,
+) {
+    val each: (String) -> Unit = onToastEach
     val t = tokens()
     val scope = rememberCoroutineScope()
     var scanning by remember { mutableStateOf(false) }
@@ -710,15 +729,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         scanTagId = tag.id
         scope.launch {
             try {
-                val taskId = api.scan(tagIds = listOf(tag.id))
-                while (true) {
-                    val task = api.task(taskId)
-                    if (task.status != "running") {
-                        onToast("「${tag.name}」扫描完成：${task.message.ifEmpty { "ok" }}")
-                        break
-                    }
-                    kotlinx.coroutines.delay(400)
-                }
+                runScanTask(api, tagIds = listOf(tag.id), onQueued = each, onToast = onToast, label = "「${tag.name}」扫描")
                 onRefresh()
             } catch (e: Throwable) {
                 onToast("扫描失败：${e.message ?: ""}")
@@ -736,6 +747,20 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         dir = tag.dirPath ?: ""
     }
 
+    /**
+     * 新建标签：先把服务端算出来的「建议目录」填进输入框（根目录/标签名 → 首个源目录/标签名）。
+     * 目录必填之后如果还是空的，用户得自己敲一条绝对路径，手机上很难做；预填一下多数情况下直接保存即可。
+     */
+    fun openCreate() {
+        creating = true
+        name = ""
+        color = TAG_COLORS[0]
+        dir = ""
+        scope.launch {
+            dir = runCatching { api.tagDefaultDir("") }.getOrDefault("")
+        }
+    }
+
     SubScaffold("标签管理", onBack, actions = {
         // 扫描：同时覆盖源文件夹与各标签的目标文件夹（整理过的视频就在后者里）
         Box(
@@ -744,15 +769,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                 scanning = true
                 scope.launch {
                     try {
-                        val taskId = api.scan()
-                        while (true) {
-                            val task = api.task(taskId)
-                            if (task.status != "running") {
-                                onToast("扫描完成：${task.message.ifEmpty { "ok" }}")
-                                break
-                            }
-                            kotlinx.coroutines.delay(400)
-                        }
+                        runScanTask(api, onQueued = each, onToast = onToast)
                         onRefresh()
                     } catch (e: Throwable) {
                         onToast("扫描失败：${e.message ?: ""}")
@@ -771,7 +788,7 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
         }
         Box(
             Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(t.ink(0.06f)).clickable {
-                creating = true; name = ""; color = TAG_COLORS[0]; dir = ""
+                openCreate()
             },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.Add, "新建标签", tint = t.ink(0.75f), modifier = Modifier.size(17.dp)) }
@@ -901,12 +918,12 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                     GlassField(
                             dir,
                             { dir = it },
-                            placeholder = "目标文件夹（可留空）",
+                            placeholder = "目标文件夹（必填）",
                             keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
                         )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "留空时按规则：全局根目录/标签名 → 首个源目录/标签名",
+                        "必填。整理时这个标签的视频就搬到这个文件夹；不能和别的标签重叠，也不能放在源文件夹里面。",
                         color = t.muted2,
                         fontSize = 10.sp,
                     )
@@ -936,15 +953,22 @@ private fun TagsPage(api: Api, tags: List<Tag>, onToast: (String) -> Unit, onRef
                             onToast("请填写标签名称")
                             return@TextButton
                         }
+                        // 目录必填：后端 v1.3.9 起留空直接 400「请填写这个标签的目标文件夹」，
+                        // 在这里先挡一道，省得用户看到一个像是「网络出错」的提示。
+                        val d = dir.trim()
+                        if (d.isEmpty()) {
+                            onToast("请填写这个标签的目标文件夹")
+                            return@TextButton
+                        }
                         val target = editing
                         editing = null
                         creating = false
                         scope.launch {
                             try {
                                 if (target == null) {
-                                    api.createTag(n, color, dir.trim())
+                                    api.createTag(n, color, d)
                                 } else {
-                                    api.updateTag(target.id, n, color, dir.trim())
+                                    api.updateTag(target.id, n, color, d)
                                 }
                                 onRefresh()
                                 onToast("已保存")
@@ -1008,6 +1032,38 @@ private fun MoveButton(
     }
 }
 
+
+/**
+ * 提交一次扫描并等它跑完，返回最终的任务状态。
+ *
+ * 关键：**不能**用 `status != "running"` 当完成判据——后端 v1.3.9 起了排队态 `queued`，
+ * 排队中的任务不是 running，会被误判成「已完成」，用户点一下就看到「扫描完成」，实际一个文件都没扫。
+ * 判据统一走 [TaskFlow.isFinished]，提示语也统一由 [TaskFlow.finishMessage] 生成（失败会带原因）。
+ */
+private suspend fun runScanTask(
+    api: Api,
+    tagIds: List<Int>? = null,
+    /** 队列式提示（不覆盖前面的）：排队位置、逐目录扫描结果都走它 */
+    onQueued: (String) -> Unit = {},
+    onToast: (String) -> Unit,
+    label: String = "扫描",
+): String {
+    val out = api.scan(tagIds = tagIds)
+    val hint = TaskFlow.submitHint(out)
+    if (hint.isNotEmpty()) onQueued(hint)
+    while (true) {
+        val task = api.task(out.taskId)
+        if (TaskFlow.isFinished(task.status)) {
+            // 先逐个目录播（每个文件夹扫到什么、新增多少），最后播总账；
+            // toast 已改成队列式，不会互相覆盖。
+            task.result?.dirs?.forEach { onQueued(ScanText.dirResultLine(it)) }
+            onToast(TaskFlow.finishMessage(task.status, task.message, task.error, label))
+            return task.status
+        }
+        kotlinx.coroutines.delay(400)
+    }
+}
+
 /** 标签管理里的一行：色点 + 名称 + 目标目录 + 个数 + 单个标签的扫描按钮 + 上下移按钮。 */
 @Composable
 private fun TagRow(
@@ -1036,9 +1092,18 @@ private fun TagRow(
             Text(tag.name, color = t.ink(0.9f), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
             Text(
-                "目标：${tag.dirPath?.takeIf { it.isNotEmpty() } ?: "按规则自动（源目录/标签名）"}",
+                // 目录必填之后一般不会为空；但老数据可能还是空的，这时给个明确提示，别显示成空白
+                "目标：${tag.dirPath?.takeIf { it.isNotBlank() } ?: "未设置（点这一行填上）"}",
                 color = t.muted2,
                 fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(1.dp))
+            Text(
+                ScanText.lastScanLine(tag.lastScanAt, tag.lastScan),
+                color = t.muted2,
+                fontSize = 9.5.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

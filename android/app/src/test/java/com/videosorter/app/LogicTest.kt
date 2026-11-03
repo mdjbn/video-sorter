@@ -12,6 +12,12 @@ import com.videosorter.app.ui.CACHE_MB_OPTIONS
 import com.videosorter.app.ui.DragReorder
 import com.videosorter.app.ui.ScrubEnd
 import com.videosorter.app.ui.MAX_SHOWN
+import com.videosorter.app.data.ScanOut
+import com.videosorter.app.ui.ScanText
+import com.videosorter.app.ui.ScanTime
+import com.videosorter.app.ui.TaskFlow
+import com.videosorter.app.data.LastScan
+import com.videosorter.app.data.ScanDirResult
 import com.videosorter.app.ui.OrganizeFailState
 import com.videosorter.app.ui.cacheBytesText
 import com.videosorter.app.ui.cacheMbText
@@ -360,5 +366,76 @@ class LogicTest {
         assertEquals(ScrubEnd.OnRelease.RESTART, ScrubEnd.onRelease(endedWhileScrubbing = true))
         // 没播完 → 只是把 playWhenReady 设回去
         assertEquals(ScrubEnd.OnRelease.RESUME, ScrubEnd.onRelease(endedWhileScrubbing = false))
+    }
+
+    // ---------- 扫描任务的状态判定（v1.3.9 加了排队态 queued） ----------
+
+    @Test
+    fun queuedScanIsNotTreatedAsFinished() {
+        // 回归：以前是 if (status != "running") 就当完成，排队中的任务会立刻弹「扫描完成」。
+        assertFalse(TaskFlow.isFinished("queued"))
+        assertFalse(TaskFlow.isFinished("running"))
+        assertTrue(TaskFlow.isFinished("done"))
+        assertTrue(TaskFlow.isFinished("error"))
+        assertTrue(TaskFlow.isFinished("cancelled"))
+        assertTrue(TaskFlow.shouldKeepPolling("queued"))
+        assertFalse(TaskFlow.shouldKeepPolling("done"))
+    }
+
+    @Test
+    fun submitHintExplainsQueuePosition() {
+        assertEquals("", TaskFlow.submitHint(ScanOut(taskId = "a")))
+        assertEquals("已排队，下一个就轮到", TaskFlow.submitHint(ScanOut(taskId = "a", queued = true, position = 1)))
+        assertEquals("已排队，前面还有 2 个扫描", TaskFlow.submitHint(ScanOut(taskId = "a", queued = true, position = 3)))
+        assertEquals("同样的扫描已经在队列里了，等它跑完", TaskFlow.submitHint(ScanOut(taskId = "a", merged = true)))
+    }
+
+    @Test
+    fun failedScanSaysWhyInsteadOfDone() {
+        assertEquals("扫描 完成：新增 3 个", TaskFlow.finishMessage("done", "新增 3 个", ""))
+        assertEquals("扫描 失败：路径不存在", TaskFlow.finishMessage("error", "", "路径不存在"))
+        assertEquals("扫描 已取消", TaskFlow.finishMessage("cancelled", "", ""))
+        // 后端只把原因写在 message 里时也要带出来
+        assertEquals("「旅行」扫描 失败：权限不足", TaskFlow.finishMessage("error", "权限不足", "", "「旅行」扫描"))
+    }
+
+    // ---------- 扫描结果文案 ----------
+
+    @Test
+    fun scanSummaryHidesZeroes() {
+        assertEquals("新增 3 · 更新 1 · 失败 1", ScanText.summary(3, 1, 90, 0, 1))
+        assertEquals("没有变化", ScanText.summary(0, 0, 12, 0, 0))
+        assertEquals("丢失 2", ScanText.summary(0, 0, 0, 2, 0))
+    }
+
+    @Test
+    fun dirResultPrefersNoVideoWhenNothingFound() {
+        assertEquals("没有视频", ScanText.dirResult(ScanDirResult(found = 0)))
+        assertEquals("没有变化", ScanText.dirResult(ScanDirResult(found = 5, skipped = 5)))
+        assertEquals("新增 2 · 更新 1", ScanText.dirResult(ScanDirResult(found = 3, added = 2, updated = 1)))
+        assertEquals("源文件夹「inbox」：新增 2", ScanText.dirResultLine(ScanDirResult(kind = "source", name = "inbox", found = 2, added = 2)))
+        assertEquals("标签「旅行」：没有视频", ScanText.dirResultLine(ScanDirResult(kind = "tag", name = "旅行")))
+    }
+
+    @Test
+    fun lastScanLineCombinesTimeAndResult() {
+        assertEquals("未扫描", ScanText.lastScanLine("", null))
+        assertEquals("扫于 今天 16:25 · 新增 2", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", LastScan(found = 2, added = 2), ))
+        assertEquals("扫于 今天 16:25 · 没有视频", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", LastScan(found = 0)))
+        // 扫过但后端没给摘要（老数据）→ 只显示时间
+        assertEquals("扫于 今天 16:25", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", null))
+    }
+
+    @Test
+    fun scanTimeIsShortAndNeverThrows() {
+        val today = Triple(2026, 11, 3)
+        assertEquals("今天 16:25", ScanTime.human("2026-11-03T16:25:39+08:00", today))
+        assertEquals("昨天 09:05", ScanTime.human("2026-11-02T09:05:00+08:00", today))
+        assertEquals("11-01 09:05", ScanTime.human("2026-11-01T09:05:00+08:00", today))
+        // 更早的日期只显示月-日（11-03 的昨天是 11-02，10-31 已经隔了两天）
+        assertEquals("10-31 23:59", ScanTime.human("2026-10-31T23:59:00+08:00", today))
+        // 垃圾输入原样返回，不崩
+        assertEquals("", ScanTime.human(""))
+        assertEquals("abc", ScanTime.human("abc"))
     }
 }

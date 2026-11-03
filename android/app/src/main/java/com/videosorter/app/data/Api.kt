@@ -7,6 +7,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
@@ -37,7 +40,15 @@ object AuthEvents {
 class Api(baseUrl: String, var token: String? = null) {
 
     val base: String = baseUrl.trimEnd('/')
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
+    // coerceInputValues：服务端把某个字段给成 null、而模型里它带默认值时，按默认值处理，
+    // 不要抛。踩过一次：标签的 last_scan_at 对「没扫过」返回 null，模型写成非空 String，
+    // 结果一个 null 让整个标签列表反序列化失败（界面上看着像「一个标签都没有」）。
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        explicitNulls = false
+        coerceInputValues = true
+    }
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -62,14 +73,34 @@ class Api(baseUrl: String, var token: String? = null) {
         return b.build()
     }
 
+    /**
+     * 从错误响应里取一句人话。
+     *
+     * 后端两种形态：业务错误是 `{"detail": "请填写这个标签的目标文件夹"}`（字符串）；
+     * Pydantic 校验失败是 `{"detail": [{"loc": [...], "msg": "Field required", ...}]}`（数组）。
+     * 以前只按字符串取，数组会抛异常被吞成「请求失败（422）」，用户完全看不出哪里填错了。
+     */
+    private fun errorDetail(text: String): String? {
+        val el = json.parseToJsonElement(text).jsonObject
+        val detail = el["detail"] ?: el["error"] ?: return null
+        if (detail is JsonPrimitive) return detail.content
+        val arr = detail as? JsonArray ?: return null
+        val first = arr.firstOrNull() as? JsonObject ?: return null
+        val field = (first["loc"] as? JsonArray)
+            ?.lastOrNull()?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "body" }
+        val msg = (first["msg"] as? JsonPrimitive)?.content ?: return null
+        return when {
+            field == null -> msg
+            msg == "Field required" -> "缺少必填项：$field"
+            else -> "$field：$msg"
+        }
+    }
+
     private suspend fun exec(request: Request): String = withContext(Dispatchers.IO) {
         client.newCall(request).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                val msg = runCatching {
-                    val obj = json.parseToJsonElement(text).jsonObject
-                    (obj["detail"] ?: obj["error"])?.jsonPrimitive?.content
-                }.getOrNull() ?: "请求失败（${resp.code}）"
+                val msg = runCatching { errorDetail(text) }.getOrNull() ?: "请求失败（${resp.code}）"
                 if (resp.code == 401) runCatching { AuthEvents.onUnauthorized?.invoke() }
                 throw ApiException(resp.code, msg)
             }
@@ -117,12 +148,21 @@ class Api(baseUrl: String, var token: String? = null) {
 
     suspend fun tags(): List<Tag> = getJson<TagList>("/api/tags").tags
 
-    suspend fun createTag(name: String, color: String, dirPath: String? = null): Tag =
+    /** 新建标签。dirPath 必填（后端 v1.3.9 起不给默认值），留空会被 400 挡回来。 */
+    suspend fun createTag(name: String, color: String, dirPath: String): Tag =
         sendJson(
             "/api/tags",
             "POST",
-            json.encodeToString(NewTagIn(name, color, dirPath?.takeIf { it.isNotBlank() })),
+            json.encodeToString(NewTagIn(name, color, dirPath.trim())),
         )
+
+    /**
+     * 新建标签时建议的目标文件夹（服务端按「根目录/标签名」→「首个源目录/标签名」推出来）。
+     * 手机端从播放页快捷建标签时没有输入框，靠它把 dir_path 填上。
+     * 返回空串表示服务端也算不出来（既没配根目录、也没有源目录），这时新建会失败。
+     */
+    suspend fun tagDefaultDir(name: String): String =
+        getJson<DefaultDirOut>("/api/tags/default-dir?name=${java.net.URLEncoder.encode(name, "UTF-8")}").dir
 
     suspend fun videos(
         filter: String = "all",
@@ -194,7 +234,7 @@ class Api(baseUrl: String, var token: String? = null) {
     }
 
     // 服务端是 POST /api/scan；tagIds 非空时只扫这些标签的文件夹（源目录不扫）
-    suspend fun scan(tagIds: List<Int>? = null, sourceIds: List<Int>? = null): String {
+    suspend fun scan(tagIds: List<Int>? = null, sourceIds: List<Int>? = null): ScanOut {
         val body = buildString {
             append("{")
             if (!tagIds.isNullOrEmpty()) append("\"tag_ids\":[").append(tagIds.joinToString(",")).append("]")
@@ -204,7 +244,7 @@ class Api(baseUrl: String, var token: String? = null) {
             }
             append("}")
         }
-        return sendJson<ScanOut>("/api/scan", "POST", body).taskId
+        return sendJson<ScanOut>("/api/scan", "POST", body)
     }
 
     // ---------- 源文件夹 / 上传目录 / 单条历史 ----------
