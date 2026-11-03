@@ -30,7 +30,7 @@ class TaskRegistry:
             self.tasks[tid] = {
                 "id": tid,
                 "kind": kind,
-                "status": "running",       # running | done | error | cancelled
+                "status": "running",       # queued | running | done | error | cancelled
                 "total": 0,
                 "done": 0,
                 "percent": 0.0,
@@ -97,7 +97,9 @@ class TaskRegistry:
     def cancel(self, tid: str) -> None:
         with self.lock:
             t = self.tasks.get(tid)
-            if t and t["status"] == "running":
+            # queued 也要能取消：队列消费线程取到任务时会先看这个标志，置上了就直接记为
+            # cancelled，不会真的开跑（scan_queue.cancel 还会顺手把它从待办里摘掉）。
+            if t and t["status"] in ("running", "queued"):
                 t["cancelled"] = True
                 t["message"] = "正在取消…"
 

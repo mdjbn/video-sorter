@@ -57,6 +57,11 @@
 .scanbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .scanbar .track { flex: 1; height: 5px; border-radius: 3px; background: rgba(var(--ink), .08); overflow: hidden; }
 .scanbar .track i { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+/* 「排队中 N 个扫描任务」小标签 */
+.scanbar .queue-hint { font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 20px; white-space: nowrap; color: var(--accent); background: var(--accent-dim); }
+
+/* 标签行里的「上次扫描」小字 */
+.trow .ct.scan-time { color: var(--muted-2); font-size: 11px; white-space: nowrap; }
 
 /* 视频库 */
 .lib-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }

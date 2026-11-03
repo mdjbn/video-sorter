@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
+from .concurrency import scan_pool
 from pathlib import Path
 from typing import Any
 
@@ -90,10 +90,14 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
             planned.setdefault(_key(p), (p, None))
         tasks.update(task_id, message=f"已发现 {len(planned)} 个视频（{root}）")
 
+    # 「上次扫描时间」只记**真的遍历过**的标签目录（目录存在且能读），
+    # 目录都不存在的不记——否则用户会以为那个标签查过了，其实一次都没查。
+    scanned_tag_ids: list[int] = []
     for tdir, tid in tag_dirs:
         if not tdir.exists():
             continue
         got = iter_videos(tdir)
+        scanned_tag_ids.append(tid)
         for p in got:
             prev = planned.get(_key(p))
             if prev is not None and prev[1] is None and not _under_prefix(str(p), str(tdir)):
@@ -136,77 +140,79 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
             item["direct"] = 1 if can_direct_play(p.suffix, meta.get("vcodec", ""), meta.get("acodec", "")) else 0
         return item
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for (p, tag_id), item in zip(files, pool.map(work, [f[0] for f in files])):
-            if tasks.is_cancelled(task_id):
-                break
-            spath = str(p)
-            seen.add(spath)
-            if item is None:
-                stats["failed"] += 1
-                tasks.step(task_id, f"跳过（无法读取）：{p.name}")
-                continue
-            if not item["need_probe"]:
-                old_row = item["old"]
-                if (old_row is not None and tag_id is None
-                        and str(old_row["status"]) == "organized"
-                        and not tag_dir_of(p)):
-                    # 记录是「已整理」，但文件其实还在源文件夹里、不在任何标签文件夹下：
-                    # 多半是标签默认目录（源目录/标签名）和用户自己的同名子目录撞名，纠正回来。
-                    fixed = "tagged" if old_row["tag_id"] is not None else "idle"
-                    db.execute(
-                        "UPDATE videos SET status=?, organized_at=NULL, scanned_at=? WHERE id=?",
-                        (fixed, now_iso(), old_row["id"]),
-                    )
-                    stats["updated"] += 1
-                    tasks.step(task_id, f"归位（不在标签文件夹里）：{p.name}")
-                    continue
-                if old_row is not None and tag_id is not None and (
-                        str(old_row["status"]) != "organized" or old_row["tag_id"] is None):
-                    # 文件位于标签文件夹里：说明它已经被整理过，补上「已整理 + 标签」
-                    # （tag_id 为空也要补：比如标签被删过再重建、或者换机后扫描到旧归档）
-                    db.execute(
-                        "UPDATE videos SET status='organized', tag_id=COALESCE(tag_id, ?), "
-                        "organized_at=COALESCE(organized_at, ?), scanned_at=? WHERE path=?",
-                        (tag_id, now_iso(), now_iso(), spath),
-                    )
-                    stats["updated"] += 1
-                    tasks.step(task_id, f"归类为标签文件夹：{p.name}")
-                elif old_row is not None and str(old_row["status"]) == "missing":
-                    # 文件重新出现但大小/mtime 未变：不需要重新探测，但状态要恢复
-                    db.execute(
-                        "UPDATE videos SET status=?, scanned_at=? WHERE path=?",
-                        ("organized" if tag_id is not None else "idle", now_iso(), spath),
-                    )
-                    stats["updated"] += 1
-                    tasks.step(task_id, f"恢复：{p.name}")
-                else:
-                    stats["skipped"] += 1
-                    tasks.step(task_id, f"未变化：{p.name}")
-                continue
-            # 先入库拿到真实 id，再用 id 命名缩略图（之前用时间戳当 id，同一毫秒内会撞名 →
-            # 多个视频指向同一张缩略图，表现为「封面和视频对不上」）
-            vid = _upsert(db, p, item, "", tag_id=tag_id)
-            if vid and tag_id is None and item["old"] is not None \
-                    and str(item["old"]["status"]) == "organized" and not tag_dir_of(p):
-                fixed = "tagged" if item["old"]["tag_id"] is not None else "idle"
-                db.execute("UPDATE videos SET status=?, organized_at=NULL WHERE id=?",
-                           (fixed, item["old"]["id"]))
-            if vid:
-                try:
-                    thumb_path = cfg.thumb_dir / f"{vid}.jpg"
-                    if make_thumb(tools, p, thumb_path, float(item.get("duration") or 0),
-                                  float(cfg.get("thumb_position", 0.0))):
-                        db.execute("UPDATE videos SET thumb=? WHERE id=?", (thumb_path.name, vid))
-                except Exception:
-                    pass
-            if item["old"] is None:
-                stats["added"] += 1
-                prefix = "新增（标签文件夹）" if tag_id is not None else "新增"
-                tasks.step(task_id, f"{prefix}：{p.name}")
-            else:
+    # 全局共享线程池：scan_workers 是**全局上限**，不是每个扫描各一份。
+    # 以前每次扫描自己开一个池，两个扫描并发就是 6 个 ffprobe 同时跑。
+    pool = scan_pool(workers)
+    for (p, tag_id), item in zip(files, pool.map(work, [f[0] for f in files])):
+        if tasks.is_cancelled(task_id):
+            break
+        spath = str(p)
+        seen.add(spath)
+        if item is None:
+            stats["failed"] += 1
+            tasks.step(task_id, f"跳过（无法读取）：{p.name}")
+            continue
+        if not item["need_probe"]:
+            old_row = item["old"]
+            if (old_row is not None and tag_id is None
+                    and str(old_row["status"]) == "organized"
+                    and not tag_dir_of(p)):
+                # 记录是「已整理」，但文件其实还在源文件夹里、不在任何标签文件夹下：
+                # 多半是标签默认目录（源目录/标签名）和用户自己的同名子目录撞名，纠正回来。
+                fixed = "tagged" if old_row["tag_id"] is not None else "idle"
+                db.execute(
+                    "UPDATE videos SET status=?, organized_at=NULL, scanned_at=? WHERE id=?",
+                    (fixed, now_iso(), old_row["id"]),
+                )
                 stats["updated"] += 1
-                tasks.step(task_id, f"更新：{p.name}")
+                tasks.step(task_id, f"归位（不在标签文件夹里）：{p.name}")
+                continue
+            if old_row is not None and tag_id is not None and (
+                    str(old_row["status"]) != "organized" or old_row["tag_id"] is None):
+                # 文件位于标签文件夹里：说明它已经被整理过，补上「已整理 + 标签」
+                # （tag_id 为空也要补：比如标签被删过再重建、或者换机后扫描到旧归档）
+                db.execute(
+                    "UPDATE videos SET status='organized', tag_id=COALESCE(tag_id, ?), "
+                    "organized_at=COALESCE(organized_at, ?), scanned_at=? WHERE path=?",
+                    (tag_id, now_iso(), now_iso(), spath),
+                )
+                stats["updated"] += 1
+                tasks.step(task_id, f"归类为标签文件夹：{p.name}")
+            elif old_row is not None and str(old_row["status"]) == "missing":
+                # 文件重新出现但大小/mtime 未变：不需要重新探测，但状态要恢复
+                db.execute(
+                    "UPDATE videos SET status=?, scanned_at=? WHERE path=?",
+                    ("organized" if tag_id is not None else "idle", now_iso(), spath),
+                )
+                stats["updated"] += 1
+                tasks.step(task_id, f"恢复：{p.name}")
+            else:
+                stats["skipped"] += 1
+                tasks.step(task_id, f"未变化：{p.name}")
+            continue
+        # 先入库拿到真实 id，再用 id 命名缩略图（之前用时间戳当 id，同一毫秒内会撞名 →
+        # 多个视频指向同一张缩略图，表现为「封面和视频对不上」）
+        vid = _upsert(db, p, item, "", tag_id=tag_id)
+        if vid and tag_id is None and item["old"] is not None \
+                and str(item["old"]["status"]) == "organized" and not tag_dir_of(p):
+            fixed = "tagged" if item["old"]["tag_id"] is not None else "idle"
+            db.execute("UPDATE videos SET status=?, organized_at=NULL WHERE id=?",
+                       (fixed, item["old"]["id"]))
+        if vid:
+            try:
+                thumb_path = cfg.thumb_dir / f"{vid}.jpg"
+                if make_thumb(tools, p, thumb_path, float(item.get("duration") or 0),
+                              float(cfg.get("thumb_position", 0.0))):
+                    db.execute("UPDATE videos SET thumb=? WHERE id=?", (thumb_path.name, vid))
+            except Exception:
+                pass
+        if item["old"] is None:
+            stats["added"] += 1
+            prefix = "新增（标签文件夹）" if tag_id is not None else "新增"
+            tasks.step(task_id, f"{prefix}：{p.name}")
+        else:
+            stats["updated"] += 1
+            tasks.step(task_id, f"更新：{p.name}")
 
     # 3) 标记丢失的文件（源文件夹与标签文件夹范围内的）
     #    以前这里直接跳过 organized，导致「整理过的文件被删掉」也一直显示在库里；
@@ -223,10 +229,14 @@ def scan_sources(db: Database, cfg: Config, tools: MediaTools, tasks: TaskRegist
             db.execute("UPDATE videos SET status='missing' WHERE id=?", (row["id"],))
             stats["missing"] += 1
 
+    # 「上次扫描时间」按目录各记各的：源文件夹记在自己那行、标签记在自己那行。
+    # 以前另有一个全局 settings.last_scan_at，只扫一个标签也会被刷新，看起来像源文件夹
+    # 刚查过——误导（而且两个扫描并发时后完成的会覆盖先完成的）。现在整库不留全局时间。
     stamp = now_iso()
     for r in rows:
         db.execute("UPDATE sources SET last_scan_at=? WHERE id=?", (stamp, r["id"]))
-    db.set_setting("last_scan_at", stamp)
+    for tid in scanned_tag_ids:
+        db.execute("UPDATE tags SET last_scan_at=? WHERE id=?", (stamp, tid))
     return warn_unwritable(tasks, task_id, stats)
 
 
@@ -286,18 +296,40 @@ def _upsert(db: Database, p: Path, item: dict[str, Any], thumb: str,
     old = item["old"]
     organized = tag_id is not None
     if old is None:
+        # ON CONFLICT 是兜底：`old` 来自开扫时的全库快照，如果这期间别的代码路径
+        # （并发扫描、或用户手动调接口）刚把同一个 path 插进来，裸 INSERT 会撞
+        # videos.path 的 UNIQUE 约束抛 IntegrityError，整轮扫描直接失败。
+        # 改成冲突即更新，最差也只是把这行刷新一遍，不会中断扫描。
         new_id = db.execute(
             """INSERT INTO videos (path, filename, ext, size, duration, width, height, vcodec, acodec,
                                    bitrate, thumb, tag_id, status, direct_play, mtime, scanned_at,
                                    organized_at, added_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(path) DO UPDATE SET
+                 filename=excluded.filename, ext=excluded.ext, size=excluded.size,
+                 duration=excluded.duration, width=excluded.width, height=excluded.height,
+                 vcodec=excluded.vcodec, acodec=excluded.acodec, bitrate=excluded.bitrate,
+                 thumb=CASE WHEN excluded.thumb<>'' THEN excluded.thumb ELSE videos.thumb END,
+                 tag_id=COALESCE(excluded.tag_id, videos.tag_id),
+                 status=CASE WHEN excluded.status='organized' THEN 'organized'
+                             WHEN videos.status='missing' THEN excluded.status
+                             ELSE videos.status END,
+                 direct_play=excluded.direct_play, mtime=excluded.mtime,
+                 scanned_at=excluded.scanned_at,
+                 organized_at=CASE WHEN excluded.organized_at IS NOT NULL
+                                   THEN COALESCE(videos.organized_at, excluded.organized_at)
+                                   ELSE videos.organized_at END""",
             (str(p), p.name, p.suffix.lower().lstrip("."), item["size"],
              float(item.get("duration") or 0), int(item.get("width") or 0), int(item.get("height") or 0),
              item.get("vcodec", ""), item.get("acodec", ""), int(item.get("bitrate") or 0),
              thumb, tag_id, "organized" if organized else "idle", item.get("direct", 1),
              item["mtime"], now, now if organized else None, now),
         )
-        return int(new_id or 0)
+        if new_id:
+            return int(new_id)
+        # 走了 ON CONFLICT 的 UPDATE 分支：lastrowid 不是这行的 id，按 path 查回来
+        row = db.query_one("SELECT id FROM videos WHERE path=?", (str(p),))
+        return int(row["id"]) if row else 0
     else:
         db.execute(
             """UPDATE videos SET size=?, duration=?, width=?, height=?, vcodec=?, acodec=?, bitrate=?,

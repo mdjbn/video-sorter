@@ -16,7 +16,10 @@ router = APIRouter(prefix="/api/tags", tags=["tags"])
 class TagIn(BaseModel):
     name: str
     color: str = "#8d98a8"
-    dir_path: str = ""
+    # 必填：标签的目标文件夹。留空会让「这个标签的文件到底在哪个目录」变成隐式推导
+    # （源目录/标签名），而那个默认位置恰好会落进源目录内部，导致同一个文件被源目录
+    # 和标签目录各扫一次。所以要求用户显式指定。
+    dir_path: str
 
 
 class TagPatch(BaseModel):
@@ -24,6 +27,41 @@ class TagPatch(BaseModel):
     color: str | None = None
     dir_path: str | None = None
     sort_order: int | None = None
+
+
+def _source_paths(st) -> list[str]:
+    return [str(r["path"]) for r in st.db.query("SELECT path FROM sources WHERE enabled=1")]
+
+
+def check_tag_dir(st, dir_path: str, *, exclude_tag_id: int | None = None) -> str:
+    """标签目录的合法性，返回规范化后的路径。
+
+    规则：必填；不能落在任何源目录里；不能和别的标签目录重叠（含互相包含）。
+    和源目录那条对称——两处扫描范围一旦重叠，同一个文件会被扫两次，并发时撞
+    videos.path 的 UNIQUE 约束。
+    """
+    from ..paths import norm_path, overlap_message, overlaps
+
+    raw = (dir_path or "").strip().strip('"')
+    if not raw:
+        raise HTTPException(status_code=400, detail="请填写这个标签的目标文件夹")
+    path = norm_path(raw)
+
+    for src in _source_paths(st):
+        if overlaps(path, src):
+            raise HTTPException(
+                status_code=400,
+                detail="标签目录不能放在源文件夹里：" + overlap_message(path, src, "源文件夹"))
+
+    for t in st.db.query("SELECT id, name, dir_path FROM tags"):
+        if exclude_tag_id is not None and int(t["id"]) == int(exclude_tag_id):
+            continue
+        d = resolve_tag_dir(st.db, st.cfg, {"dir_path": t["dir_path"], "name": t["name"]})
+        if d is not None and overlaps(path, str(d)):
+            raise HTTPException(
+                status_code=400,
+                detail="标签之间不能重叠：" + overlap_message(path, str(d), f"标签「{t['name']}」"))
+    return path
 
 
 def _serialize(row: Any, counts: dict[int, int], st) -> dict[str, Any]:
@@ -53,10 +91,8 @@ def create_tag(body: TagIn, user: dict[str, Any] = Depends(require_user)) -> dic
         raise HTTPException(status_code=400, detail="标签名不能为空")
     if st.db.query_one("SELECT id FROM tags WHERE name=?", (name,)):
         raise HTTPException(status_code=400, detail="已存在同名标签")
-    # dir_path 只在用户明确填写时落库；留空表示「跟随默认目录」，由 resolve_tag_dir 现场算。
-    # 以前这里会把 default_tag_dir() 的结果写死进 tags.dir_path，导致「先建标签、之后在设置里
-    # 改全局根目录」永远不生效（resolve_tag_dir 最优先用标签自己的 dir_path）。
-    dir_path = body.dir_path.strip()
+    # 目录必填且要合规（不在源目录里、不和别的标签目录重叠），见 check_tag_dir。
+    dir_path = check_tag_dir(st, body.dir_path)
     order = (st.db.query_one("SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM tags") or {"n": 1})["n"]
     tid = st.db.execute(
         "INSERT INTO tags (name, color, dir_path, sort_order, created_at) VALUES (?,?,?,?,?)",
@@ -107,6 +143,8 @@ def update_tag(tag_id: int, body: TagPatch, user: dict[str, Any] = Depends(requi
             raise HTTPException(status_code=400, detail="标签名不能为空")
         if st.db.query_one("SELECT id FROM tags WHERE name=? AND id<>?", (patch["name"], tag_id)):
             raise HTTPException(status_code=400, detail="已存在同名标签")
+    if "dir_path" in patch:
+        patch["dir_path"] = check_tag_dir(st, str(patch["dir_path"]), exclude_tag_id=tag_id)
     if not patch:
         return {"ok": True, "tag": _serialize(row, {}, st)}
     sets = ", ".join(f"{k}=?" for k in patch)

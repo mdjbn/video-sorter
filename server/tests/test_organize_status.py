@@ -30,7 +30,11 @@ def _wait_task(c, h, tid, timeout=60):
 
 
 def _prepared(env, count: int = 3):
-    """加源目录 → 扫描 → 给前 count 个视频打「旅行」标签（标签目录默认在源目录下）。"""
+    """加源目录 → 扫描 → 给前 count 个视频打「旅行」标签。
+
+    标签目录用 DEFAULT_TAGS 初始化时写好的 <data>/organized/旅行（在源目录之外，
+    1.3.9 起标签目录不允许放进源目录里）。
+    """
     c, h, src = env["client"], _login(env["client"]), env["src"]
     assert c.post("/api/sources", json={"path": str(src)}, headers=h).status_code == 200
     tid = c.post("/api/scan", json={}, headers=h).json()["task_id"]
@@ -123,7 +127,7 @@ def test_partial_failure_stays_done_with_summary(env, monkeypatch) -> None:
     assert result["task_status"] == "done"
     assert result["failed"][0]["video_id"] == vids[0]
     # 成功的两个确实搬到了标签目录
-    target = src / "旅行"
+    target = Path(tag["dir_path"])
     assert len(list(target.glob("*"))) == 2
 
 

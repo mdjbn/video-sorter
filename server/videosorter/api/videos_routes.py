@@ -142,7 +142,8 @@ def stats(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
         "SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NOT NULL AND status<>'missing'")["n"]
     untagged = st.db.query_one(
         "SELECT COUNT(*) AS n FROM videos WHERE tag_id IS NULL AND status<>'missing'")["n"]
-    last_scan = st.db.get_setting("last_scan_at") or ""
+    # 不再有全局「最近扫描」：时间戳按目录各记各的（sources.last_scan_at /
+    # tags.last_scan_at），前端分别在源文件夹卡片和标签行上显示。
     tags = [dict(r) for r in st.db.query(
         "SELECT t.id, t.name, t.color, "
         "SUM(CASE WHEN v.status<>'missing' THEN 1 ELSE 0 END) AS count FROM tags t "
@@ -156,7 +157,7 @@ def stats(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return {
         "total": total["n"], "bytes": total["bytes"], "tagged": tagged, "untagged": untagged,
         "organized": counts.get("organized", 0), "tagged_pending": counts.get("tagged", 0),
-        "missing": counts.get("missing", 0), "last_scan_at": last_scan,
+        "missing": counts.get("missing", 0),
         "tags": tags, "sources": srcs,
     }
 

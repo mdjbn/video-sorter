@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from 'vue-router'
 import Icon from '../components/Icon.vue'
 import DirPicker from '../components/DirPicker.vue'
-import { api, fmtDur, fmtSize, fmtTime, waitTask, type CacheInfo, type FailedFile, type OrganizeResult, type SkipSummary, type HistoryItem, type Plan, type PlanItem, type Source, type Stats, type Tag, type Unwritable, type Video } from '../api'
+import { api, fmtDur, fmtSize, fmtTime, waitTask, type CacheInfo, type FailedFile, type OrganizeResult, type SkipSummary, type HistoryItem, type Plan, type PlanItem, type ScanPending, type Source, type Stats, type Tag, type Unwritable, type Video } from '../api'
 import { isFnosHost, pickDirFromHost } from '../fnos'
 import { toast } from '../toast'
 import { nextThemeMode, setThemeMode, themeMode, THEME_LABEL, type ThemeMode } from '../theme'
@@ -329,6 +329,36 @@ function go(v: View) {
 const scan = reactive({ running: false, percent: 0, text: '' })
 type ScanPayload = { source_ids?: number[]; tag_ids?: number[] }
 
+/* 排队中的扫描（服务端串行执行，同一时刻只跑一个）。
+   以前这里用 scan.running 直接挡住第二次点击，但手机 App、另一个标签页、
+   直接调接口都绕得过去，服务端又没有互斥——两个扫描同时写库会撞
+   videos.path 的唯一约束，整轮报 IntegrityError。现在改成提交即排队。 */
+const scanQueue = ref<ScanPending[]>([])
+let queueTimer: number | undefined
+
+function queueHint(): string {
+  const n = scanQueue.value.length
+  if (!n) return ''
+  return `排队中 ${n} 个扫描任务`
+}
+
+async function refreshQueue() {
+  try {
+    const r = await api.scanQueue()
+    scanQueue.value = r.pending || []
+  } catch {
+    /* 队列接口失败不该打扰用户，下次轮询再来 */
+  }
+}
+
+/** 扫描任务结束后把排队列表刷新一下（同时兜住「别的标签页排的队」） */
+function pollQueue() {
+  window.clearInterval(queueTimer)
+  queueTimer = window.setInterval(() => {
+    if (!document.hidden) void refreshQueue()
+  }, 4000)
+}
+
 /* ---------------- 目录不可写（整理会失败）的提前提示 ---------------- */
 // 两处来源：扫描任务对象上的 unwritable、整理预览里的 unwritable，合并去重
 const unwritable = ref<Unwritable[]>([])
@@ -362,14 +392,21 @@ function dismissUnw() {
 }
 
 async function runScan(payload: ScanPayload = {}) {
-  if (scan.running) {
-    toast('正在扫描，稍等一下')
-    return
-  }
+  // 不再在这里挡第二次点击：服务端会排队串行执行，点几次都不会把库写坏。
+  // 只提示一下「已排队」，免得用户以为没点上。
   scan.running = true; scan.percent = 0; scan.text = '准备扫描…'
   try {
-    const { task_id, unwritable: scanUnw } = await api.scan(payload)
+    const { task_id, unwritable: scanUnw, queued, position, merged } = await api.scan(payload)
     mergeUnwritable(scanUnw)
+    if (merged) {
+      toast('同样的扫描已经在队列里了，等它跑完')
+      return
+    }
+    if (queued && position > 1) {
+      scan.text = `已排队，前面还有 ${position - 1} 个扫描`
+      toast(`已排队（第 ${position} 个），前面的扫描跑完就轮到它`)
+    }
+    void refreshQueue()
     let sawUnwritable = false
     const task = await waitTask(task_id, (t) => {
       scan.percent = t.percent || 0
@@ -398,11 +435,11 @@ async function runScan(payload: ScanPayload = {}) {
   } finally {
     scan.running = false
     setTimeout(() => { scan.percent = 0; scan.text = '' }, 6000)
+    void refreshQueue()
   }
 }
 // 标签行内的「扫描」：只扫这个标签对应的文件夹
 function scanTag(id: number) {
-  if (scan.running) { toast('正在扫描，稍等一下'); return }
   void runScan({ tag_ids: [id] })
 }
 const newSource = ref('')
@@ -1281,8 +1318,8 @@ function onResize() {
               <div class="m-desc">扫描源文件夹与标签文件夹、给视频打标签，然后一键把带标签的视频移动到对应文件夹。源文件夹的新增/移除在「视频库」页。</div>
             </div>
             <div class="sp" />
-            <button class="btn primary" :disabled="scan.running" @click="runScan()">
-              <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描全部' }}
+            <button class="btn primary" @click="runScan()">
+              <Icon name="refresh" :size="15" />扫描全部
             </button>
           </div>
 
@@ -1307,7 +1344,7 @@ function onResize() {
               <div class="stat" style="--c:rgba(76,201,240,.16)">
                 <div class="k">未打标签</div>
                 <div class="v">{{ stats?.untagged ?? 0 }} <small>个</small></div>
-                <div class="d">最近扫描 {{ stats?.last_scan_at ? fmtTime(stats.last_scan_at) : '尚未扫描' }}</div>
+                <div class="d">{{ scan.running ? (scan.text || '正在扫描…') : (queueHint() || '每个文件夹的上次扫描时间见源文件夹 / 标签列表') }}</div>
               </div>
             </div>
 
@@ -1353,8 +1390,8 @@ function onResize() {
             <div class="sp" />
             <input ref="fileInput" type="file" accept="video/*" multiple hidden @change="onFiles" />
             <button class="btn primary" @click="pickFiles"><Icon name="upload" :size="15" />上传视频</button>
-            <button class="btn ghost" :disabled="scan.running" @click="runScan()">
-              <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描' }}
+            <button class="btn ghost" @click="runScan()">
+              <Icon name="refresh" :size="15" />扫描
             </button>
           </div>
           <!-- 目标目录不可写：提前提示，避免整理时才知道失败 -->
@@ -1403,8 +1440,8 @@ function onResize() {
           <div class="card" style="margin-bottom:14px">
               <div class="card-head">
                 <h2>源文件夹</h2><div class="sp" /><span class="badge">{{ sources.length }} 个</span>
-                <button class="btn ghost sm" :disabled="scan.running" @click="runScan()">
-                  <Icon name="refresh" :size="14" />{{ scan.running ? '扫描中…' : '扫描' }}
+                <button class="btn ghost sm" @click="runScan()">
+                  <Icon name="refresh" :size="14" />扫描
                 </button>
               </div>
               <div class="card-body">
@@ -1433,9 +1470,10 @@ function onResize() {
                 <div class="m-desc" style="font-size:11.5px;margin-top:10px">
                   扫描会同时遍历上面的源文件夹，以及「标签管理」里每个标签的目标文件夹（整理过的视频就存放在那里）。
                 </div>
-                <div v-if="scan.running || scan.percent > 0" class="scanbar">
+                <div v-if="scan.running || scan.percent > 0 || queueHint()" class="scanbar">
                   <div class="track"><i :style="{ width: scan.percent + '%' }" /></div>
                   <span style="font-size:11.5px;color:var(--muted-2);min-width:120px">{{ scan.text }}</span>
+                  <span v-if="queueHint()" class="queue-hint">{{ queueHint() }}</span>
                 </div>
               </div>
             </div>
@@ -1525,8 +1563,8 @@ function onResize() {
               <div class="m-desc">每个标签对应一个目的文件夹；不填则默认在源目录下建同名文件夹。点「扫描」可同时扫描源文件夹与这些标签文件夹。</div>
             </div>
             <div class="sp" />
-            <button class="btn ghost" :disabled="scan.running" title="同时扫描源文件夹与各标签的目标文件夹" @click="runScan()">
-              <Icon name="refresh" :size="15" />{{ scan.running ? '扫描中…' : '扫描' }}
+            <button class="btn ghost" title="同时扫描源文件夹与各标签的目标文件夹" @click="runScan()">
+              <Icon name="refresh" :size="15" />扫描
             </button>
             <button class="btn primary" @click="openTag()"><Icon name="plus" :size="15" />新建标签</button>
           </div>
@@ -1544,13 +1582,14 @@ function onResize() {
               <input class="inline-name" v-model="draftOf(t).name" spellcheck="false" title="标签名称" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
               <button class="tag-color" :style="{ background: draftOf(t).color }" :title="`颜色 ${draftOf(t).color}（点击修改）`" @click.stop="toggleColorPop(t.id)" />
               <span class="ct">{{ t.count ?? 0 }} 个视频</span>
+              <span class="ct scan-time" :title="t.last_scan_at ? `上次扫描：${fmtTime(t.last_scan_at)}` : '还没扫过这个文件夹'">{{ t.last_scan_at ? '扫于 ' + fmtTime(t.last_scan_at) : '未扫描' }}</span>
               <input class="inline-dir" v-model="draftOf(t).dir_path" :placeholder="t.effective_dir" :title="t.dir_path || t.effective_dir" spellcheck="false" @input="queueSave(t.id)" @keyup.enter="saveTagInline(t.id)" />
               <button class="icon-act" title="选择目标文件夹" @click="chooseDir({ kind: 'tag', id: t.id })"><Icon name="folder" :size="15" /></button>
               <span class="save-hint">
                 <span v-if="tagState[t.id] === 'saving'">保存中…</span>
                 <span v-else-if="tagState[t.id] === 'err'" class="err">保存失败</span>
               </span>
-              <button class="icon-act" title="扫描这个标签的文件夹" :disabled="scan.running" @click="scanTag(t.id)"><Icon name="refresh" :size="15" /></button>
+              <button class="icon-act" title="扫描这个标签的文件夹" @click="scanTag(t.id)"><Icon name="refresh" :size="15" /></button>
               <button class="icon-act dg" title="删除" @click="delTag.tag = t; delTag.show = true"><Icon name="trash" :size="15" /></button>
 
               <div v-if="colorPop.id === t.id" class="color-pop" @click.stop>

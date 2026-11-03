@@ -37,6 +37,8 @@ export type Tag = {
   count: number
   default_dir: string
   effective_dir: string
+  /** 这个标签目录上次真正被扫描的时间；空串 = 没扫过（目录不存在时不记） */
+  last_scan_at: string
 }
 
 export type Source = {
@@ -59,9 +61,25 @@ export type Stats = {
   organized: number
   tagged_pending: number
   missing: number
-  last_scan_at: string
   tags: { id: number; name: string; color: string; count: number }[]
   sources: Source[]
+}
+
+/** 提交扫描后的回执：排队了没有、排第几个、是不是并入了一个已有的同类任务 */
+export type ScanAccepted = {
+  task_id: string
+  queued: boolean
+  position: number
+  merged: boolean
+  unwritable?: Unwritable[]
+}
+
+export type ScanPending = {
+  task_id: string
+  label: string
+  source_ids: number[]
+  tag_ids: number[]
+  created_at: string
 }
 
 /** 目录对「服务用户」不可写：kind 区分是源目录/标签目录/整理根目录 */
@@ -296,7 +314,9 @@ export const api = {
 
   // 扫描/任务
   scan: (body: { source_ids?: number[]; tag_ids?: number[]; full?: boolean } = {}) =>
-    post<{ task_id: string; unwritable?: Unwritable[] }>('/scan', body),
+    post<ScanAccepted>('/scan', body),
+  /** 当前扫描队列：正在跑的任务 + 排队等待的任务 */
+  scanQueue: () => get<{ running: string | null; pending: ScanPending[] }>('/scan/queue'),
   task: (id: string) => get<Task>(`/tasks/${id}`),
   cancelTask: (id: string) => post<{ ok: boolean }>(`/tasks/${id}/cancel`),
 

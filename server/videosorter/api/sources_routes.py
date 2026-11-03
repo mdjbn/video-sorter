@@ -21,6 +21,61 @@ class SourceIn(BaseModel):
     path: str
 
 
+def _tag_dirs(st) -> list[tuple[str, Path]]:
+    """所有标签的有效目录（[(标签名, 目录)]），用来做「源目录不能压住标签目录」的校验。"""
+    from ..organizer import resolve_tag_dir
+    out: list[tuple[str, Path]] = []
+    for t in st.db.query("SELECT name, dir_path FROM tags"):
+        d = resolve_tag_dir(st.db, st.cfg, {"dir_path": t["dir_path"], "name": t["name"]})
+        if d is not None:
+            out.append((str(t["name"]), Path(d)))
+    return out
+
+
+def _is_upload_source(st, source_id: int) -> bool:
+    row = st.db.query_one("SELECT kind FROM sources WHERE id=?", (source_id,))
+    return bool(row) and (row["kind"] or "") == "upload"
+
+
+def check_source_path(st, path: str, *, exclude_source_id: int | None = None,
+                      is_upload: bool = False) -> None:
+    """源目录的合法性：不能和其它源目录重叠，也不能落在任何标签目录里。
+
+    为什么必须在写入时就拦：扫描范围 = 所有源目录 + 所有标签目录。两处范围一旦
+    互相包含，同一个文件就会被扫两次——并发扫描时两边都 INSERT，撞 videos.path
+    的 UNIQUE 约束，整轮扫描报 IntegrityError（实测 3 个并发全量扫描，2 个直接失败）。
+
+    例外：**上传目录**（kind='upload'）默认就落在第一个源目录下面（按 README 的设计
+    「上传的视频先落到源目录/手机上传」）。它是系统自带的一条源目录，不是用户手工
+    添加的，所以对它放行「在另一个源目录内部」这一条；其余规则照常校验。
+    """
+    from ..paths import overlap_message, overlaps
+
+    for r in st.db.query("SELECT id, path FROM sources"):
+        if exclude_source_id is not None and int(r["id"]) == int(exclude_source_id):
+            continue
+        if is_upload:
+            # 上传目录是系统自带的一条源目录，默认就落在第一个源目录下面（README 的设计），
+            # 所以「被别的源目录包含」这一条对它放行；但它仍不能包含别人的目录，
+            # 那会把别人的文件扫两遍。
+            from ..paths import is_under
+            if is_under(path, r["path"]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="源文件夹不能重叠：" + overlap_message(path, r["path"], "源文件夹"))
+            continue
+        if overlaps(path, r["path"]):
+            raise HTTPException(
+                status_code=400,
+                detail="源文件夹不能重叠：" + overlap_message(path, r["path"], "源文件夹"))
+
+    for name, d in _tag_dirs(st):
+        if overlaps(path, str(d)):
+            raise HTTPException(
+                status_code=400,
+                detail="源文件夹不能放在标签目录里：" + overlap_message(path, str(d), f"标签「{name}」"))
+
+
 def upload_dir(st) -> Path:
     """当前生效的上传目录（与 upload_routes._default_dir 保持一致）。"""
     from .upload_routes import _default_dir
@@ -89,6 +144,7 @@ def add_source(body: SourceIn, user: dict[str, Any] = Depends(require_user)) -> 
     path = str(p.resolve())
     if st.db.query_one("SELECT id FROM sources WHERE path=?", (path,)):
         raise HTTPException(status_code=400, detail="这个目录已经添加过了")
+    check_source_path(st, path)
     if path == str(upload_dir(st)):
         raise HTTPException(status_code=400, detail="这就是上传目录，它已经在源文件夹里了")
     sid = st.db.execute("INSERT INTO sources (path, enabled, created_at) VALUES (?,1,?)", (path, now_iso()))
@@ -121,6 +177,9 @@ def update_source(source_id: int, body: SourceIn,
     if (row["kind"] or "") == "upload":
         if not os.access(path, os.W_OK):
             raise HTTPException(status_code=400, detail=f"目录不可写：{path}")
+        # 上传目录可以待在别的源目录里面（默认就是这样），但不能把它换成某个
+        # 源目录的上级——那样它会把别人的文件也扫一遍。
+        check_source_path(st, path, exclude_source_id=source_id, is_upload=True)
         st.cfg.update({"upload_dir": path})
         st.cfg.save()
         st.db.execute("UPDATE sources SET path=? WHERE id=?", (path, source_id))
@@ -128,6 +187,7 @@ def update_source(source_id: int, body: SourceIn,
     dup = st.db.query_one("SELECT id FROM sources WHERE path=? AND id<>?", (path, source_id))
     if dup:
         raise HTTPException(status_code=400, detail="这个目录已经添加过了")
+    check_source_path(st, path, exclude_source_id=source_id, is_upload=_is_upload_source(st, source_id))
     st.db.execute("UPDATE sources SET path=? WHERE id=?", (path, source_id))
     return {"ok": True, "source": {"id": source_id, "path": path, "kind": ""}}
 

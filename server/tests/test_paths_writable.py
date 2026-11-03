@@ -62,7 +62,9 @@ def _prepare(env, h, count: int = 3):
     assert videos, "扫描应当扫到 conftest 生成的视频"
     for v in videos[:count]:
         assert c.post(f"/api/videos/{v['id']}/tag", json={"tag_id": tag["id"]}, headers=h).status_code == 200
-    return tag, c.get("/api/videos", headers=h).json()["items"], Path(env["src"]) / "旅行"
+    # 标签目录用标签自己的 dir_path（1.3.9 起不允许放进源目录，DEFAULT_TAGS 给的是
+    # <data>/organized/旅行）
+    return tag, c.get("/api/videos", headers=h).json()["items"], Path(tag["dir_path"])
 
 
 def _ro_subdir(base: Path) -> Path:
@@ -148,20 +150,30 @@ def test_missing_tag_dir_under_unwritable_parent_is_reported(env, tmp_path) -> N
 @pytest.mark.skipif(os.name == "nt",
                     reason="Windows 上 chmod 0o555 不会让 os.access 返回 False，测不了只读目录")
 def test_duplicate_paths_are_reported_once(env, tmp_path) -> None:
-    """同一个目录既是源目录又是两个标签的目标目录时只报一次，且输出按路径排序。"""
+    """同一个目录被两个标签指向时只报一次，且输出按路径排序。
+
+    以前这里还能让同一个目录同时是「源目录」和「标签目录」；1.3.9 起被
+    「源目录与标签目录不能互相包含」这条规则挡掉了（会返回 400），所以只测标签之间
+    的重复。
+    """
     c, h = env["client"], _login(env["client"])
     st = _state()
     shared = _ro_subdir(tmp_path)
     try:
-        _add_source(env, h, shared)
+        _add_source(env, h)
         tags = c.get("/api/tags", headers=h).json()["tags"][:2]
-        for t in tags:  # 一个带尾部分隔符，验证归一化
-            assert c.put(f"/api/tags/{t['id']}", json={"dir_path": str(shared) + os.sep},
-                         headers=h).status_code == 200
+        # 第一个标签指到 shared（带尾部分隔符，验证归一化能认出来）
+        r = c.put(f"/api/tags/{tags[0]['id']}", json={"dir_path": str(shared) + os.sep}, headers=h)
+        assert r.status_code == 200, r.text
+        # 第二个标签再指同一目录 → 必须被「标签之间不能重叠」挡掉
+        r = c.put(f"/api/tags/{tags[1]['id']}", json={"dir_path": str(shared)}, headers=h)
+        assert r.status_code == 400, r.text
+        assert "标签之间不能重叠" in r.json()["detail"], r.json()
+        os.chmod(shared, 0o555)
         bad = organizer.check_roots_writable(st.db, st.cfg)
         hits = [b for b in bad if b["path"] == str(shared)]
         assert len(hits) == 1, bad
-        assert hits[0]["kind"] == "source", "同一路径既是源又是标签时按源判定"
+        assert hits[0]["kind"] == "tag", "这个目录现在只被标签指向，按标签判定"
         assert [b["path"] for b in bad] == sorted(b["path"] for b in bad), "输出要按路径排序才稳定"
     finally:
         os.chmod(shared, 0o755)

@@ -42,12 +42,13 @@ CREATE TABLE IF NOT EXISTS sources (
 );
 
 CREATE TABLE IF NOT EXISTS tags (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  name       TEXT UNIQUE NOT NULL,
-  color      TEXT NOT NULL,
-  dir_path   TEXT NOT NULL DEFAULT '',
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT UNIQUE NOT NULL,
+  color        TEXT NOT NULL,
+  dir_path     TEXT NOT NULL DEFAULT '',
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,
+  last_scan_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS videos (
@@ -127,7 +128,7 @@ class Database:
 
     # ---------- 连接 ----------
     def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), timeout=30)
+        conn = sqlite3.connect(str(self.path), timeout=60)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -173,12 +174,20 @@ class Database:
             scols = {r["name"] for r in c.execute("PRAGMA table_info(sources)").fetchall()}
             if "kind" not in scols:
                 c.execute("ALTER TABLE sources ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
+            # 老库升级：标签也记自己的「上次扫描时间」（1.3.9 起不再有全局 last_scan_at）
+            tcols = {r["name"] for r in c.execute("PRAGMA table_info(tags)").fetchall()}
+            if "last_scan_at" not in tcols:
+                c.execute("ALTER TABLE tags ADD COLUMN last_scan_at TEXT")
             row = c.execute("SELECT COUNT(*) AS n FROM tags").fetchone()
             if row and row["n"] == 0:
+                # 标签目录必须填（1.3.9 起 dir_path 是必填项）。默认落在数据目录下的
+                # organized/<标签名>：这块地方在数据目录里，天然不会和任何源目录重叠，
+                # 开箱即通过「标签目录不能嵌在源目录里」这条校验。
+                base = self.cfg.data_dir / "organized"
                 for i, (name, color) in enumerate(DEFAULT_TAGS):
                     c.execute(
                         "INSERT INTO tags (name, color, dir_path, sort_order, created_at) VALUES (?,?,?,?,?)",
-                        (name, color, "", i, now_iso()),
+                        (name, color, str(base / name), i, now_iso()),
                     )
 
     # ---------- settings ----------

@@ -99,8 +99,10 @@ const api = async (p, path, opt = {}) => p.evaluate(async (path, opt) => {
   await sleep(800);
   const trows = await p.$$eval('.trow', (e) => e.length);
   ok('标签管理显示 5 个标签', trows === 5, 'rows=' + trows);
+  // 标签行的目标文件夹是可直接编辑的输入框（.inline-dir），值在 value 上；
+  // 早期版本是只读的 .pth 文本，测试没跟着改，一直误报「没有目标文件夹」。
   const tagPaths = await p.$$eval('.trow', (rows) =>
-    rows.map((r) => (r.querySelector('.pth')?.textContent || '').replace(/\s+/g, ' ').trim()));
+    rows.map((r) => (r.querySelector('.inline-dir')?.value || '').replace(/\s+/g, ' ').trim()));
   ok('每个标签都有目标文件夹', tagPaths.length === 5 && tagPaths.every((t) => t.length > 3), tagPaths.slice(0, 2).join(' | '));
 
   // 整理记录 + 撤销（撤销后应回到「待整理」）

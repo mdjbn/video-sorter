@@ -61,14 +61,19 @@ def test_scan_covers_tag_folders(env):
 
 
 def test_tag_folder_inside_source_is_classified(env):
+    """标签文件夹在**源目录之外**时，里面的视频归类为「已整理」+ 补上标签。
+
+    1.3.9 起标签目录不允许放进源目录里了（两处扫描范围重叠会让同一个文件被扫两次，
+    并发时撞 videos.path 的 UNIQUE 约束）。所以这里改成源目录旁边的同级目录。
+    """
     client, src = env["client"], Path(env["src"])
     _login(client)
     tags = client.get("/api/tags").json()["tags"]
     food = next(t for t in tags if t["name"] == "美食")
     client.post("/api/sources", json={"path": str(src)})
-    inner = src / "美食"
-    inner.mkdir()
-    # 显式指定标签目标目录，避免依赖「第一个源目录」的默认规则
+    inner = Path(env["data"]).parent / "归档" / "美食"
+    inner.mkdir(parents=True)
+    # 显式指定标签目标目录，避免依赖默认规则
     client.put(f"/api/tags/{food['id']}", json={"dir_path": str(inner)})
     make_video(inner / "整理过的美食.mp4")
     make_video(src / "还没整理.mp4")

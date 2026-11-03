@@ -10,6 +10,7 @@ from .config import Config
 from .db import Database
 from .media import HlsManager, MediaTools
 from .discovery import DiscoveryService
+from .scan_queue import ScanQueue
 from .tasks import TaskRegistry
 
 
@@ -26,14 +27,19 @@ class AppState:
     # 转码缓存自动清理的守护线程（app.py 的 lifespan 里启动/停止）；单独放一个可选字段，
     # 免得动到上面的构造顺序和已有的位置参数调用方
     sweeper: Any = None
+    # 扫描队列：任务之间串行（同一时刻只有一个扫描在写库），任务内部目录并行。
+    # None 表示还没建（AppState.create 里会建）。
+    scan_queue: Any = None
 
     @classmethod
     def create(cls, cfg: Config, web_dir: Path | None = None) -> "AppState":
         db = Database(cfg)
         auth = AuthService(db)
         tools = MediaTools(cfg)
+        tasks = TaskRegistry()
         return cls(cfg=cfg, db=db, auth=auth, tools=tools,
-                   tasks=TaskRegistry(), hls=HlsManager(tools, cfg), web_dir=web_dir)
+                   tasks=tasks, hls=HlsManager(tools, cfg), web_dir=web_dir,
+                   scan_queue=ScanQueue(tasks))
 
 
 STATE: AppState | None = None
