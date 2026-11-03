@@ -1278,6 +1278,7 @@ const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeM
 
 /* ---------------- 更新日志（关于页只显示最近 5 条） ---------------- */
 const LOGS: { v: string; text: string }[] = [
+  { v: '1.3.9', text: '扫描不再互相打架：同时点好几次扫描会排队、一个跑完再跑下一个，不会再出现「唯一约束冲突」这种失败；排队中的任务可以取消，重复点同一个扫描不会重复排队而是直接复用。源文件夹和标签的目标文件夹都加了检查——源文件夹之间不能重叠、也不能放进标签目录里，标签目录不能放进源文件夹里、标签之间也不能重叠，标签的目标文件夹改成必填（建标签时会自动预填一个建议路径）。每个源文件夹和每个标签现在各自记录「上次扫描时间 + 结果」，扫完还会逐条告诉你每个目录发现了多少、有没有变化。设置页改成两列独立排布，卡片不会再被拉成一样高、中间留一大片空白；顺手修好「开了 GPU 转码后编码器下拉框显示空白」的问题。' },
   { v: '1.3.8', text: '手机 App 视频库更好用了：不再分「源文件夹 / 标签文件夹」两段卡片，所有视频排成一条连续列表；右上角新增排序按钮，可以按添加时间、文件名、时长、文件大小排序，同一个字段再点一次就在升序和降序之间切换。服务默认同时监听 IPv4 和 IPv6，家里宽带给的 IPv6 地址可以直接访问，不用再在路由器上折腾「只通 IPv4」的映射；机器没开 IPv6 时照旧只用 IPv4，不影响启动。' },
   { v: '1.3.7', text: '手机 App 体验改进：视频库来回切页不再跳回顶部（滚动位置会保留）；播放页点标签不再有点击水波，点下即亮；标签顺序可以在「设置 → 标签管理」里用每行右侧的上下箭头调整，点一下立刻保存；播放页右下角新增全屏按钮，横屏观看时只留视频，轻点屏幕或暂停会唤出标题、标签和进度条，返回键即可退出全屏；按住进度条预览时如果视频正好播完，不再直接跳到下一个，而是停在结尾，松手后从滑块位置继续播放。' },
   { v: '1.3.6', text: '整理失败会明确报错了：整批都没搬成功时不再假装「已完成」，而是标成失败并写清原因（例如「2 个视频全部整理失败：源文件已不存在」），网页和 App 里都能展开看到每个文件失败的原因；整理前先检查目标文件夹能不能写，不能写的目录会提前在视频库顶部和整理页用黄色提示条列出来（写明是哪个目录、为什么不可写），执行时直接跳过这些视频并在结果里说明，不再搬到一半才报错；转码缓存（NAS 上切出来的 HLS 分片）现在有上限也会过期了，默认超过 4 GB 或 7 天没看过就自动清理，设置页新增「缓存」卡片可以改上限、改过期时间，也能一键立即清理；安卓 App 的播放缓存上限从固定 512 MB 改成可选（256 MB / 512 MB / 1 GB / 2 GB / 4 GB），在「设置 → 缓存与储存 → 本机播放缓存」里改，缓存放不下时自动淘汰最久没看的。' },
@@ -2085,7 +2086,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.8' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.3.9' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
