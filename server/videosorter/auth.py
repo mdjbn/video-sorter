@@ -14,6 +14,10 @@ from .db import Database, now_iso
 ITERATIONS = 200_000
 TOKEN_BYTES = 32
 
+# 首装口令。上架审核（fnOS 应用中心自查第 2 条）对「装好就能用默认口令进」很敏感，
+# 所以只要还停在这个口令上，就要求先改密码 —— 见 must_change_password()。
+DEFAULT_PASSWORD = "admin1234"
+
 
 def hash_password(password: str, *, salt: bytes | None = None, iterations: int = ITERATIONS) -> str:
     salt = salt or secrets.token_bytes(16)
@@ -35,8 +39,9 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 class AuthService:
-    def __init__(self, db: Database, username: str = "admin", password: str = "admin1234"):
+    def __init__(self, db: Database, username: str = "admin", password: str = DEFAULT_PASSWORD):
         self.db = db
+        self._default_cache: bool | None = None
         self.ensure_user(username, password)
 
     def ensure_user(self, username: str, password: str) -> None:
@@ -58,6 +63,21 @@ class AuthService:
             return {"id": row["id"], "username": row["username"]}
         return None
 
+    def is_default_password(self) -> bool:
+        """当前口令是否仍是首装默认口令。
+
+        pbkdf2 一次要几十毫秒，而 require_user 每个请求都会问一次，所以结果缓存在进程里，
+        改密码时清掉。老库不额外存标记 —— 直接验证哈希，升级后也能正确判断出
+        「这个人早就改过密码了，别打扰他」。
+        """
+        if self._default_cache is None:
+            row = self.db.query_one("SELECT pass_hash FROM users LIMIT 1")
+            self._default_cache = bool(row) and verify_password(DEFAULT_PASSWORD, row["pass_hash"])
+        return bool(self._default_cache)
+
+    def must_change_password(self) -> bool:
+        return self.is_default_password()
+
     def change_password(self, old_password: str, new_password: str) -> tuple[bool, str]:
         row = self.db.query_one("SELECT * FROM users LIMIT 1")
         if not row:
@@ -67,6 +87,7 @@ class AuthService:
         if len(new_password) < 6:
             return False, "新密码至少 6 位"
         self.db.execute("UPDATE users SET pass_hash=? WHERE id=?", (hash_password(new_password), row["id"]))
+        self._default_cache = None
         self.revoke_all()
         return True, "密码已更新，请重新登录"
 

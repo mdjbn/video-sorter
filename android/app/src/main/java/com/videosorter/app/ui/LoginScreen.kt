@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -70,6 +71,13 @@ fun LoginScreen(
     var busy by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
+    // 首装默认口令：登录成功了也不放行，先让用户设一个新密码
+    var needNewPass by remember { mutableStateOf(false) }
+    var loggedApi by remember { mutableStateOf<Api?>(null) }
+    var newPass by remember { mutableStateOf("") }
+    var newPass2 by remember { mutableStateOf("") }
+    var passErr by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
     var scanNote by remember { mutableStateOf("") }
     val saved = remember { session.servers() }
 
@@ -91,6 +99,11 @@ fun LoginScreen(
                     err = "连不上服务器，请检查地址和端口"
                 } else {
                     val auth = api.login(user, pass)
+                    if (auth.mustChangePassword) {
+                        loggedApi = api
+                        needNewPass = true
+                        return@launch
+                    }
                     session.savePassword = savePass
                     session.keepLogin = keepLogin
                     session.setPassword(if (savePass) pass else "", base)
@@ -102,6 +115,76 @@ fun LoginScreen(
                 busy = false
             }
         }
+    }
+
+    fun saveNewPassword() {
+        if (saving) return
+        val api = loggedApi ?: return
+        passErr = ""
+        if (newPass.length < 6) {
+            passErr = "新密码至少 6 位"; return
+        }
+        if (newPass != newPass2) {
+            passErr = "两次输入的新密码不一致"; return
+        }
+        if (newPass == pass) {
+            passErr = "新密码不能和默认密码一样"; return
+        }
+        saving = true
+        scope.launch {
+            try {
+                api.changePassword(pass, newPass)
+                // 改密码会吊销所有令牌，所以拿新密码重新登录一次
+                api.login(user, newPass)
+                val base = Session.normalize(server)
+                session.savePassword = savePass
+                session.keepLogin = keepLogin
+                session.setPassword(if (savePass) newPass else "", base)
+                needNewPass = false
+                onLoggedIn(api, user)
+            } catch (e: Exception) {
+                passErr = e.message ?: "修改密码失败，请重试"
+            } finally {
+                saving = false
+            }
+        }
+    }
+
+    if (needNewPass) {
+        AlertDialog(
+            onDismissRequest = { /* 默认口令必须先改掉，不给关闭 */ },
+            title = { Text("设置新密码", color = t.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column {
+                    Text(
+                        "默认密码 admin1234 谁都知道，先改成自己的密码再进。",
+                        color = t.muted,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    GlassField(newPass, { newPass = it }, "新密码（至少 6 位）", password = true)
+                    Spacer(Modifier.height(10.dp))
+                    GlassField(newPass2, { newPass2 = it }, "再输一次", password = true, onDone = { saveNewPassword() })
+                    if (passErr.isNotBlank()) {
+                        Text(passErr, color = t.danger, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                Text(
+                    if (saving) "保存中…" else "保存并进入",
+                    color = if (saving) t.muted else t.accent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .clickable(enabled = !saving) { saveNewPassword() }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            },
+            containerColor = t.panel,
+        )
     }
 
     Box(
@@ -302,7 +385,7 @@ fun LoginScreen(
 
             Spacer(Modifier.height(18.dp))
             Text(
-                "默认账号 admin / admin1234\n数据都保存在服务器端，手机只是遥控器",
+                "首次使用：账号 admin，密码请向服务端管理员确认\n数据都保存在服务器端，手机只是遥控器",
                 color = t.muted2,
                 fontSize = 10.5.sp,
                 lineHeight = 16.sp,

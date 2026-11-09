@@ -312,7 +312,7 @@ const del = <T>(p: string) => request<T>(p, { method: 'DELETE' })
 export const api = {
   // 认证
   login: (username: string, password: string, remember = true) =>
-    post<{ token: string; user: { id: number; username: string } }>('/auth/login', { username, password, remember }),
+    post<{ token: string; user: { id: number; username: string }; must_change_password?: boolean }>('/auth/login', { username, password, remember }),
   logout: () => post<{ ok: boolean }>('/auth/logout'),
   me: () => get<{ user: { id: number; username: string } }>('/auth/me'),
   changePassword: (old_password: string, new_password: string) =>

@@ -20,7 +20,12 @@ data class LoginIn(val username: String, val password: String, val remember: Boo
 data class User(val id: Int = 0, val username: String = "admin")
 
 @Serializable
-data class AuthOut(val token: String = "", val user: User? = null)
+data class AuthOut(
+    val token: String = "",
+    val user: User? = null,
+    // 还在用首装默认口令（admin1234）时后端会返回 true，App 先弹「设置新密码」再放行
+    @SerialName("must_change_password") val mustChangePassword: Boolean = false,
+)
 
 @Serializable
 data class Counts(

@@ -76,17 +76,71 @@ def _default_dir(st) -> Path:
     return st.cfg.data_dir / "uploads"
 
 
+# 文件名里允许出现的路径分隔符 / 控制字符一律替换掉；再挡住 "." ".." 这类会改变落点的名字。
+_CTRL = "".join(chr(c) for c in range(32)) + "\x7f"
+_BAD_NAME = str.maketrans({"/": "_", "\\": "_"})
+MAX_NAME = 120
+
+
+def safe_upload_name(raw: str | None) -> str:
+    """把客户端给的文件名收敛成一个只能当「同一目录下的文件名」用安全名字。
+
+    只保留最后一段（浏览器有时会带上完整路径），去掉路径分隔符、控制字符和首尾空白，
+    挡掉 "." ".." 以及以点开头的隐藏名，超长的按 120 字符截断（保留扩展名）。
+    返回空串表示这个名字不能用，调用方应改成按时间戳命名。
+    """
+    name = (raw or "").strip()
+    if not name:
+        return ""
+    # 有些客户端会把路径一起塞进 filename（Windows 上是反斜杠），先取最后一段
+    name = name.replace("\\", "/").rsplit("/", 1)[-1]
+    name = name.translate(_BAD_NAME)
+    name = "".join(ch for ch in name if ch not in _CTRL).strip().strip(".")
+    if name in ("", ".", ".."):
+        return ""
+    stem, dot, ext = name.rpartition(".")
+    if dot and len(name) > MAX_NAME:
+        name = stem[: MAX_NAME - len(ext) - 1] + "." + ext
+    elif len(name) > MAX_NAME:
+        name = name[:MAX_NAME]
+    return name
+
+
+def safe_dir(raw: str) -> Path | None:
+    """校验客户端指定的上传目录：必须是绝对路径、且不含 ".." 段。
+
+    单用户场景下允许写到任意绝对路径（用户自己的源目录本来就在别处），
+    但不接受相对路径与带 ".." 的路径，避免被拼到意外位置。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    parts = Path(text).expanduser().parts
+    if ".." in parts:
+        return None
+    p = Path(text).expanduser()
+    return p if p.is_absolute() else None
+
+
 @router.post("")
 async def upload(file: UploadFile = File(...),
                  dir: str = Form(""),
                  tag_id: str = Form(""),
                  user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
-    name = (file.filename or "video.mp4").replace("/", "_").replace("\\", "_")
+    name = safe_upload_name(file.filename)
+    if not name:
+        # 名字不可用时按时间给一个，别让上传因为一个怪异文件名整个失败
+        name = f"upload_{now_iso().replace(':', '').replace('-', '').replace('T', '_')}.mp4"
     ext = Path(name).suffix.lower().lstrip(".")
     if f".{ext}" not in VIDEO_EXTS:
         raise HTTPException(400, f"不支持的文件类型：{ext or '未知'}")
-    target_dir = Path(dir).expanduser() if dir.strip() else _default_dir(st)
+    if dir.strip():
+        target_dir = safe_dir(dir)
+        if target_dir is None:
+            raise HTTPException(400, f"上传目录不合法：{dir}")
+    else:
+        target_dir = _default_dir(st)
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:

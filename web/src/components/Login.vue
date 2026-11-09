@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import { api, ApiError } from '../api'
 import { THEME_LABEL, THEME_ORDER, themeMode, setThemeMode, type ThemeMode } from '../theme'
 import Icon from './Icon.vue'
@@ -14,6 +14,13 @@ const err = ref('')
 const shake = ref(false)
 const busy = ref(false)
 const userInput = ref<HTMLInputElement | null>(null)
+
+// 还在用首装默认口令时，登录成功后不直接放行，先让用户设一个新密码
+const mustChange = ref(false)
+const pendingUser = ref<{ id: number; username: string } | null>(null)
+const newPass = ref('')
+const newPass2 = ref('')
+const newInput = ref<HTMLInputElement | null>(null)
 
 onMounted(() => userInput.value?.focus())
 
@@ -32,9 +39,49 @@ async function submit() {
   busy.value = true
   try {
     const res = await api.login(username.value.trim(), password.value, remember.value)
+    if (res.must_change_password) {
+      // 默认口令还没改：留在这张卡片上，改成自己的密码再进
+      pendingUser.value = res.user
+      mustChange.value = true
+      await nextTick()
+      newInput.value?.focus()
+      return
+    }
     emit('ok', res.user)
   } catch (e) {
     err.value = e instanceof ApiError ? e.message : '登录失败，请检查服务器是否在运行'
+    fail()
+  } finally {
+    busy.value = false
+  }
+}
+
+async function submitNewPassword() {
+  if (busy.value) return
+  err.value = ''
+  if (newPass.value.length < 6) {
+    err.value = '新密码至少 6 位'
+    fail()
+    return
+  }
+  if (newPass.value !== newPass2.value) {
+    err.value = '两次输入的新密码不一致'
+    fail()
+    return
+  }
+  if (newPass.value === password.value) {
+    err.value = '新密码不能和默认密码一样'
+    fail()
+    return
+  }
+  busy.value = true
+  try {
+    // 改密码会吊销所有令牌，所以改完要拿新密码重新登录一次
+    await api.changePassword(password.value, newPass.value)
+    const res = await api.login(username.value.trim(), newPass.value, remember.value)
+    emit('ok', res.user)
+  } catch (e) {
+    err.value = e instanceof ApiError ? e.message : '修改密码失败，请重试'
     fail()
   } finally {
     busy.value = false
@@ -59,6 +106,46 @@ defineExpose({ submit })
           <div class="sub">VIDEO SORTER</div>
         </div>
       </div>
+      <template v-if="mustChange">
+        <p class="lead">
+          首次使用请设置一个新密码。默认密码 <code>admin1234</code> 谁都知道，改完才能真正用起来。
+        </p>
+
+        <label class="lbl">新密码</label>
+        <div class="pass-wrap">
+          <input
+            id="loginNewPass"
+            ref="newInput"
+            v-model="newPass"
+            class="field"
+            type="password"
+            autocomplete="new-password"
+            placeholder="至少 6 位"
+          />
+        </div>
+
+        <label class="lbl">确认新密码</label>
+        <div class="pass-wrap">
+          <input
+            id="loginNewPass2"
+            v-model="newPass2"
+            class="field"
+            type="password"
+            autocomplete="new-password"
+            placeholder="再输一次"
+            @keyup.enter="submitNewPassword"
+          />
+        </div>
+
+        <div class="err">{{ err }}</div>
+
+        <button id="btnSetPassword" class="btn primary login-btn" type="button" :disabled="busy" @click="submitNewPassword">
+          <Icon v-if="busy" name="refresh" :size="15" class="spin" />
+          {{ busy ? '保存中…' : '保存并进入' }}
+        </button>
+      </template>
+
+      <template v-else>
       <p class="lead">登录后进入播放页，边看边打标签，点「整理」按标签把视频移动到对应文件夹。</p>
 
       <label class="lbl">用户名</label>
@@ -105,7 +192,9 @@ defineExpose({ submit })
           </button>
         </div>
       </div>
-      <div class="hint">默认账号 <code>admin</code> / <code>admin1234</code>，首次登录后请在「登录管理」里修改。</div>
+      </template>
+
+      <div class="hint">首次使用请用默认账号 <code>admin</code> / <code>admin1234</code> 登录，系统会要求先设置自己的密码。</div>
     </form>
   </div>
 </template>

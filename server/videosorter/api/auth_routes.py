@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from ..state import get_state
-from .deps import current_token, require_user
+from .deps import current_token, require_user, require_user_allow_default
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -36,7 +36,9 @@ def login(body: LoginIn, response: Response) -> dict[str, Any]:
     max_age = 7 * 24 * 3600 if body.remember else None
     response.set_cookie("vs_token", token, httponly=True, samesite="lax", max_age=max_age, path="/")
     return {"ok": True, "token": token, "user": user,
-            "expires_in": max_age or 0, "remember": body.remember}
+            "expires_in": max_age or 0, "remember": body.remember,
+            # 还在用首装默认口令：网页/App 拿到 true 就直接弹「改密码」，改完才放行
+            "must_change_password": st.auth.must_change_password()}
 
 
 @router.post("/logout")
@@ -53,11 +55,13 @@ def logout(request: Request, response: Response) -> dict[str, Any]:
 def me(request: Request, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     st = get_state()
     return {"user": user, "sessions": st.auth.sessions(current_token(request)),
-            "version": st.cfg.version}
+            "version": st.cfg.version,
+            "must_change_password": st.auth.must_change_password()}
 
 
 @router.post("/password")
-def change_password(body: PasswordIn, user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
+def change_password(body: PasswordIn,
+                    user: dict[str, Any] = Depends(require_user_allow_default)) -> dict[str, Any]:
     st = get_state()
     ok, msg = st.auth.change_password(body.old_password, body.new_password)
     if not ok:

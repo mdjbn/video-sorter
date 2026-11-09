@@ -26,6 +26,14 @@ const api = async (p, path, opt = {}) => p.evaluate(async (path, opt) => {
   await p.type('#loginPass', 'admin1234');
   await p.click('#btnLogin');
   await sleep(1200);
+  // 全新实例还在用默认口令：会先要求设一个新密码，设完才放行
+  if (await p.$('#loginNewPass')) {
+    ok('默认口令登录后要求先设新密码', true);
+    await p.type('#loginNewPass', 'nas-2026-ok');
+    await p.type('#loginNewPass2', 'nas-2026-ok');
+    await p.click('#btnSetPassword');
+    await sleep(2200);
+  }
   ok('登录后进入播放页', (await p.$('.stage')) !== null);
 
   // 准备数据：添加源 + 扫描
