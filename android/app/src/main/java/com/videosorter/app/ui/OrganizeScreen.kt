@@ -111,6 +111,8 @@ fun OrganizeScreen(
     val chosen = items.filter { it.tagId in selected }
     val chosenBytes = chosen.sumOf { it.size }
     val chosenGroups = groups.filter { it.tagId in selected }
+    // 右栏「本次整理」每组的展开状态（按标签 id 记，切换勾选后仍保留）
+    val expandedGroups = remember { androidx.compose.runtime.mutableStateMapOf<Int, Boolean>() }
 
     fun undo(r: BatchRec) {
         scope.launch {
@@ -206,7 +208,7 @@ fun OrganizeScreen(
             if (wide) {
                 Row(Modifier.fillMaxWidth().weight(1f)) {
                     // 左栏：统计 + 标签组（可勾选）
-                    Column(Modifier.width(400.dp).fillMaxSize()) {
+                    Column(Modifier.width(LEFT_COLUMN_WIDTH).fillMaxSize()) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -266,7 +268,13 @@ fun OrganizeScreen(
                                 )
                             }
                         } else {
-                            items(chosenGroups, key = { "d-${it.tagId}" }) { g -> ChosenDetail(g) }
+                            items(chosenGroups, key = { "d-${it.tagId}" }) { g ->
+                                ChosenDetail(
+                                    g = g,
+                                    expanded = expandedGroups[g.tagId] == true,
+                                    onToggle = { expandedGroups[g.tagId] = expandedGroups[g.tagId] != true },
+                                )
+                            }
                         }
                         if (records.isNotEmpty()) {
                             item(key = "rec-head") {
@@ -345,13 +353,17 @@ fun OrganizeScreen(
                 )
         )
 
-        // 底部 CTA
+        // 底部 CTA。分栏时收窄到只占右栏（左边 400dp 是标签组列表，按钮压上去会挡住勾选）
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(start = side, end = side, bottom = 92.dp)
+                .padding(
+                    start = if (wide) LEFT_COLUMN_WIDTH + 22.dp else side,
+                    end = if (wide) 22.dp else side,
+                    bottom = 92.dp,
+                )
         ) {
             if (chosen.isNotEmpty()) {
                 Text(
@@ -627,7 +639,7 @@ private fun GroupRow(g: OrgGroup, on: Boolean, showNames: Boolean = true, onClic
 
 /** 右栏里的一组详情：目标文件夹 + 这一组全部视频名。 */
 @Composable
-private fun ChosenDetail(g: OrgGroup) {
+private fun ChosenDetail(g: OrgGroup, expanded: Boolean, onToggle: () -> Unit) {
     val t = tokens()
     val c = hexColor(g.color)
     Column(
@@ -653,7 +665,9 @@ private fun ChosenDetail(g: OrgGroup) {
             modifier = Modifier.padding(top = 6.dp),
         )
         Spacer(Modifier.height(8.dp))
-        g.items.forEach { it ->
+        // 组里视频多的时候整屏都是文件名，默认只列前 5 个，需要时再展开
+        val shown = if (expanded) g.items else g.items.take(CHOSEN_PREVIEW)
+        shown.forEach { it ->
             Text(
                 "· ${it.name}",
                 color = t.ink(0.5f),
@@ -663,8 +677,27 @@ private fun ChosenDetail(g: OrgGroup) {
                 modifier = Modifier.padding(top = 3.dp),
             )
         }
+        if (g.items.size > CHOSEN_PREVIEW) {
+            val rest = g.items.size - CHOSEN_PREVIEW
+            Text(
+                if (expanded) "收起" else "展开全部（还有 $rest 个）",
+                color = t.accent,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 4.dp, vertical = 3.dp),
+            )
+        }
     }
 }
+
+private const val CHOSEN_PREVIEW = 5
+
+/** 分栏时左栏宽度（标签组列表），CTA 与右栏都按它对齐 */
+private val LEFT_COLUMN_WIDTH = 400.dp
 
 @Composable
 private fun EmptyPlan() {
