@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -133,9 +135,38 @@ fun SettingsScreen(
     onSubPage: (Boolean) -> Unit = {},
 ) {
     var page by remember { mutableStateOf(SetPage.HOME) }
-    BackHandler(enabled = page != SetPage.HOME) { page = SetPage.HOME }
-    LaunchedEffect(page) { onSubPage(page != SetPage.HOME) }
+    // 平板横屏：左边设置项导航、右边直接展开对应的二级页面（和网页端一样的主从布局）。
+    // 判据用「短边 >= 600dp」区分平板和手机：手机横屏只有 390dp 高，塞一列 300dp 的导航太挤，
+    // 那边继续用两列卡片的老布局。
+    val win = winSize()
+    val split = win.wide && win.landscape && win.hDp >= 600
+    // 分栏时没有「主页」这一步，默认选中第一个设置项
+    val active = if (split && page == SetPage.HOME) SetPage.SERVER else page
+    BackHandler(enabled = !split && page != SetPage.HOME) { page = SetPage.HOME }
+    LaunchedEffect(page) { onSubPage(!split && page != SetPage.HOME) }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onSubPage(false) } }
+
+    val toastEach: (String) -> Unit = onToastEach ?: onToast
+
+    if (split) {
+        SettingsSplit(
+            active = active,
+            api = api,
+            session = session,
+            tags = tags,
+            themeMode = themeMode,
+            onThemeChange = onThemeChange,
+            onToast = onToast,
+            toastEach = toastEach,
+            onSwitchServer = onSwitchServer,
+            onRefresh = onRefresh,
+            onOpenVideo = onOpenVideo,
+            onOpenTransfer = onOpenTransfer,
+            onLogout = onLogout,
+            onPick = { page = it },
+        )
+        return
+    }
 
     // 进/退二级页面都走横向滑入滑出（返回时反向）
     AnimatedContent(
@@ -151,8 +182,6 @@ fun SettingsScreen(
         },
         label = "settings-page",
     ) { p ->
-        // 逐目录扫描结果一次好几条，必须排队播；没传就退回普通 toast
-        val toastEach: (String) -> Unit = onToastEach ?: onToast
         when (p) {
             SetPage.HOME -> SettingsHome(
             api = api,
@@ -173,6 +202,204 @@ fun SettingsScreen(
             SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) { page = SetPage.HOME }
             SetPage.CACHE -> CachePage(api, onToast) { page = SetPage.HOME }
             SetPage.ABOUT -> AboutPage { page = SetPage.HOME }
+        }
+    }
+}
+
+/**
+ * 横屏平板的主从布局：左边一列设置项，右边直接显示选中项的二级页面。
+ *
+ * 和手机上的「点进去、再返回」是两套交互，但右侧内容复用同一批页面组件
+ * （通过 [LocalSplitPane] 让它们去掉返回箭头和状态栏内边距）。
+ */
+@Composable
+private fun SettingsSplit(
+    active: SetPage,
+    api: Api,
+    session: Session,
+    tags: List<Tag>,
+    themeMode: String,
+    onThemeChange: (String) -> Unit,
+    onToast: (String) -> Unit,
+    toastEach: (String) -> Unit,
+    onSwitchServer: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onOpenVideo: (Int) -> Unit,
+    onOpenTransfer: () -> Unit,
+    onLogout: () -> Unit,
+    onPick: (SetPage) -> Unit,
+) {
+    val t = tokens()
+    Row(
+        Modifier
+            .fillMaxSize()
+            .background(t.bg)
+            .statusBarsPadding(),
+    ) {
+        SettingsNav(
+            active = active,
+            session = session,
+            tags = tags,
+            themeMode = themeMode,
+            onThemeChange = onThemeChange,
+            onToast = onToast,
+            onOpenTransfer = onOpenTransfer,
+            onLogout = onLogout,
+            onPick = onPick,
+        )
+        Box(Modifier.width(1.dp).fillMaxHeight().background(t.line))
+        // 底部 76dp 留给悬浮胶囊栏，否则长列表最后几行会被它压住
+        Box(Modifier.weight(1f).fillMaxHeight().padding(bottom = 76.dp)) {
+            CompositionLocalProvider(LocalSplitPane provides true) {
+                when (active) {
+                    // 分栏模式下 active 不会是 HOME（上面已经把它换成了 SERVER），这里只是让 when 完整
+                    SetPage.HOME,
+                    SetPage.SERVER -> ServerPage(api, session, onToast, onSwitchServer) {}
+                    SetPage.ACCOUNT -> AccountPage(api, session, onToast, onLogout) {}
+                    SetPage.SOURCES -> SourcesPage(api, onToast, toastEach, onRefresh) {}
+                    SetPage.TAGS -> TagsPage(api, tags, onToast, toastEach, onRefresh) {}
+                    SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) {}
+                    SetPage.CACHE -> CachePage(api, onToast) {}
+                    SetPage.ABOUT -> AboutPage {}
+                }
+            }
+        }
+    }
+}
+
+/** 左侧设置项导航（只在分栏模式下用）。 */
+@Composable
+private fun SettingsNav(
+    active: SetPage,
+    session: Session,
+    tags: List<Tag>,
+    themeMode: String,
+    onThemeChange: (String) -> Unit,
+    onToast: (String) -> Unit,
+    onOpenTransfer: () -> Unit,
+    onLogout: () -> Unit,
+    onPick: (SetPage) -> Unit,
+) {
+    val t = tokens()
+    val entries: List<NavEntry> = listOf(
+        NavEntry(SetPage.SERVER, Icons.Rounded.SwapHoriz, "服务器", session.current),
+        NavEntry(SetPage.ACCOUNT, Icons.Rounded.Person, "账号", "改用户名 / 改密码 / 登录设备"),
+        NavEntry(SetPage.SOURCES, Icons.Rounded.FolderOpen, "源文件夹", "管理要整理的目录"),
+        NavEntry(SetPage.TAGS, Icons.Rounded.Label, "标签管理", "${tags.size} 个标签 · 每个标签一个目标文件夹"),
+        NavEntry(SetPage.HISTORY, Icons.Rounded.History, "播放历史", "小卡片 · 单条或多选删除"),
+        NavEntry(SetPage.CACHE, Icons.Rounded.Storage, "缓存与储存", "封面与转码缓存"),
+        NavEntry(SetPage.ABOUT, Icons.Rounded.Info, "关于项目", "v${BuildConfig.VERSION_NAME} · MIT"),
+    )
+    Column(
+        Modifier
+            .width(300.dp)
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text(
+            "设置",
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold,
+            color = t.text,
+            modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 10.dp),
+        )
+        entries.forEach { e ->
+            NavItem(e.page, e.icon, e.label, e.subtitle, selected = e.page == active) { onPick(e.page) }
+            // 上传下载是独立页面（不属于 SetPage），插在播放历史后面
+            if (e.page == SetPage.HISTORY) {
+                NavItem(
+                    page = SetPage.HISTORY,
+                    icon = Icons.Rounded.Download,
+                    label = "上传下载",
+                    subtitle = "传输进度与历史",
+                    selected = false,
+                    onClick = onOpenTransfer,
+                )
+            }
+        }
+
+        // 外观主题：三个胶囊，放在导航列底部
+        Spacer(Modifier.height(14.dp))
+        Text(
+            "外观主题",
+            color = t.muted2,
+            fontSize = 10.5.sp,
+            modifier = Modifier.padding(start = 8.dp, bottom = 6.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            ThemeChip("浅色", themeMode == "light", Modifier.weight(1f)) { onThemeChange("light") }
+            ThemeChip("深色", themeMode == "dark", Modifier.weight(1f)) { onThemeChange("dark") }
+            ThemeChip("跟随", themeMode == "auto", Modifier.weight(1f)) { onThemeChange("auto") }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        NavItem(SetPage.CACHE, Icons.Rounded.Logout, "退出登录", null, danger = true) {
+            onToast("已退出登录")
+            onLogout()
+        }
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+private data class NavEntry(
+    val page: SetPage,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val label: String,
+    val subtitle: String?,
+)
+
+/** 导航列里的一行：选中项用主题色底 + 主题色文字。 */
+@Composable
+private fun NavItem(
+    page: SetPage,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    subtitle: String?,
+    selected: Boolean = false,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val t = tokens()
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .clip(shape)
+            .background(if (selected) t.accentDim else Color.Transparent)
+            .then(if (selected) Modifier.border(1.dp, t.accent.copy(alpha = 0.35f), shape) else Modifier)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (danger) t.danger else if (selected) t.accent else t.ink(0.62f),
+            modifier = Modifier.size(17.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                color = if (danger) t.danger else if (selected) t.accent else t.ink(0.9f),
+                fontSize = 12.5.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            )
+            if (!subtitle.isNullOrEmpty()) {
+                Spacer(Modifier.height(1.dp))
+                Text(
+                    subtitle,
+                    color = t.muted2,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

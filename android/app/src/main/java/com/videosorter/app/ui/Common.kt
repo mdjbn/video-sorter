@@ -195,6 +195,15 @@ fun EmptyNote(text: String) {
     }
 }
 
+/**
+ * 横屏平板的分栏模式标记。
+ *
+ * 分栏时右侧详情页是「一直挂着」的，不该再出现返回箭头（左边导航栏就是它的返回路径），
+ * 也不该再加状态栏内边距（外层已经加过）。用 CompositionLocal 传下去，
+ * 免得给七八个页面的函数签名都加一个参数。
+ */
+val LocalSplitPane = androidx.compose.runtime.compositionLocalOf { false }
+
 /** 二级页面外壳：返回 + 标题 + 内容（可滚动）。 */
 @Composable
 fun SubScaffold(
@@ -204,19 +213,28 @@ fun SubScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = tokens()
-    Column(Modifier.fillMaxSize().background(t.bg).statusBarsPadding()) {
+    val split = LocalSplitPane.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(t.bg)
+            .then(if (split) Modifier else Modifier.statusBarsPadding())
+    ) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 14.dp, top = 6.dp, bottom = 10.dp),
+            Modifier.fillMaxWidth().padding(start = if (split) 20.dp else 12.dp, end = 14.dp, top = 6.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(
-                Modifier.size(32.dp).clip(RoundedCornerShape(11.dp))
-                    .background(t.ink(0.06f)).border(1.dp, t.line2, RoundedCornerShape(11.dp))
-                    .clickable { onBack() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = t.ink(0.8f), modifier = Modifier.size(17.dp))
+            // 分栏模式下左边导航栏就是返回路径，这里不再放返回箭头
+            if (!split) {
+                Box(
+                    Modifier.size(32.dp).clip(RoundedCornerShape(11.dp))
+                        .background(t.ink(0.06f)).border(1.dp, t.line2, RoundedCornerShape(11.dp))
+                        .clickable { onBack() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = t.ink(0.8f), modifier = Modifier.size(17.dp))
+                }
             }
             Text(title, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = t.text, modifier = Modifier.weight(1f))
             if (actions != null) actions()
