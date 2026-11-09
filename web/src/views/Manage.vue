@@ -1278,6 +1278,7 @@ const themeTitle = computed(() => `切换主题 · 当前：${THEME_LABEL[themeM
 
 /* ---------------- 更新日志（关于页只显示最近 5 条） ---------------- */
 const LOGS: { v: string; text: string }[] = [
+  { v: '1.4.1', text: '首次使用更安全：默认口令 admin / admin1234 登录后，会先要求设置自己的密码，改完才让进（网页和手机 App 都一样）；上传加了两道路径校验，文件名里的 ../ 和奇怪的目录参数会被挡掉。' },
   { v: '1.4.0', text: '手机 App 适配平板设备：跟随设备旋转（手机也不再锁竖屏）；横屏时视频库变成多列网格；设置页改成「左边导航 + 右边内容」的主从分栏，上传下载也在右侧直接展开；整理页改成左右两栏，左边勾选标签组、右边看目标路径与视频清单；各页面内容限宽居中，底部弹层限宽。' },
   { v: '1.3.9', text: '扫描不再互相打架：同时点好几次扫描会排队、一个跑完再跑下一个，不会再出现「唯一约束冲突」这种失败；排队中的任务可以取消，重复点同一个扫描不会重复排队而是直接复用。源文件夹和标签的目标文件夹都加了检查——源文件夹之间不能重叠、也不能放进标签目录里，标签目录不能放进源文件夹里、标签之间也不能重叠，标签的目标文件夹改成必填（建标签时会自动预填一个建议路径）。每个源文件夹和每个标签现在各自记录「上次扫描时间 + 结果」，扫完还会逐条告诉你每个目录发现了多少、有没有变化。设置页改成两列独立排布，卡片不会再被拉成一样高、中间留一大片空白；顺手修好「开了 GPU 转码后编码器下拉框显示空白」的问题。' },
   { v: '1.3.8', text: '手机 App 视频库更好用了：不再分「源文件夹 / 标签文件夹」两段卡片，所有视频排成一条连续列表；右上角新增排序按钮，可以按添加时间、文件名、时长、文件大小排序，同一个字段再点一次就在升序和降序之间切换。服务默认同时监听 IPv4 和 IPv6，家里宽带给的 IPv6 地址可以直接访问，不用再在路由器上折腾「只通 IPv4」的映射；机器没开 IPv6 时照旧只用 IPv4，不影响启动。' },
@@ -2087,7 +2088,7 @@ function onResize() {
             <div class="card">
               <div class="card-head"><h2>项目信息</h2></div>
               <div class="card-body">
-                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.4.0' }}</span></div>
+                <div class="kv"><span class="k">版本</span><span class="v">{{ info?.version || '1.4.1' }}</span></div>
                 <div class="kv"><span class="k">项目仓库</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter" target="_blank" rel="noopener">mdjbn/video-sorter</a></span></div>
                 <div class="kv"><span class="k">问题反馈</span><span class="v"><a class="repo-a" href="https://github.com/mdjbn/video-sorter/issues" target="_blank" rel="noopener">GitHub Issues</a></span></div>
                 <div class="kv"><span class="k">开源许可</span><span class="v">MIT</span></div>
