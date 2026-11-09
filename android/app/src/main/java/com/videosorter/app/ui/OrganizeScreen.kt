@@ -314,7 +314,12 @@ fun OrganizeScreen(
                         loading -> item { Text("加载中…", color = t.muted, fontSize = 12.sp) }
                         items.isEmpty() -> item { EmptyPlan() }
                         else -> items(groups, key = { it.tagId }) { g ->
-                            GroupRow(g, g.tagId in selected) {
+                            GroupRow(
+                                g = g,
+                                on = g.tagId in selected,
+                                expanded = expandedGroups[g.tagId] == true,
+                                onToggleNames = { expandedGroups[g.tagId] = expandedGroups[g.tagId] != true },
+                            ) {
                                 touched = true
                                 selected = if (g.tagId in selected) selected - g.tagId else selected + g.tagId
                             }
@@ -570,7 +575,14 @@ private fun FailBlock(state: OrganizeFailState, onDismiss: () -> Unit) {
 
 /** 一组待整理的标签：勾选框 + 标签色块 + 名称/数量/目标目录 + 前几个文件名。 */
 @Composable
-private fun GroupRow(g: OrgGroup, on: Boolean, showNames: Boolean = true, onClick: () -> Unit) {
+private fun GroupRow(
+    g: OrgGroup,
+    on: Boolean,
+    showNames: Boolean = true,
+    expanded: Boolean = false,
+    onToggleNames: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     val t = tokens()
     val c = hexColor(g.color)
     Column(
@@ -620,7 +632,8 @@ private fun GroupRow(g: OrgGroup, on: Boolean, showNames: Boolean = true, onClic
         }
         // 分栏布局里文件名由右栏「本次整理」逐条列出，左栏重复列一遍只会把卡片撑高、盖住下面的组
         if (showNames) {
-            g.items.take(3).forEach { it ->
+            val shown = if (expanded) g.items else g.items.take(GROUP_PREVIEW)
+            shown.forEach { it ->
                 Text(
                     "· ${it.name}",
                     color = t.ink(0.5f),
@@ -630,12 +643,26 @@ private fun GroupRow(g: OrgGroup, on: Boolean, showNames: Boolean = true, onClic
                     modifier = Modifier.padding(start = 58.dp, top = 5.dp),
                 )
             }
-            if (g.items.size > 3) {
-                Text("· 还有 ${g.items.size - 3} 个…", color = t.muted2, fontSize = 10.sp, modifier = Modifier.padding(start = 58.dp, top = 4.dp))
+            if (g.items.size > GROUP_PREVIEW && onToggleNames != null) {
+                val rest = g.items.size - GROUP_PREVIEW
+                Text(
+                    if (expanded) "收起" else "展开全部（还有 $rest 个）",
+                    color = t.accent,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .padding(start = 58.dp, top = 6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        // 自己吃掉点击，别让外层卡片把它当成「勾选/取消勾选」
+                        .clickable(onClick = onToggleNames)
+                        .padding(horizontal = 4.dp, vertical = 3.dp),
+                )
             }
         }
     }
 }
+
+private const val GROUP_PREVIEW = 3
 
 /** 右栏里的一组详情：目标文件夹 + 这一组全部视频名。 */
 @Composable
