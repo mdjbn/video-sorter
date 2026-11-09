@@ -336,6 +336,7 @@ fun MainScreen(
                     onSwitchServer = onSwitchServer,
                     onOpenTransfer = { transferOpen = true },
                     onSubPage = { settingsSub = it },
+                    onChanged = { scope.launch { reload(silent = true) } },
                     onOpenVideo = { id ->
                         val idx = videos.indexOfFirst { it.id == id }
                         if (idx >= 0) {

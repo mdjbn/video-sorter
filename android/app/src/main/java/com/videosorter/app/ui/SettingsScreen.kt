@@ -112,7 +112,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class SetPage { HOME, SERVER, ACCOUNT, SOURCES, TAGS, HISTORY, CACHE, ABOUT }
+private enum class SetPage { HOME, SERVER, ACCOUNT, SOURCES, TAGS, HISTORY, TRANSFER, CACHE, ABOUT }
 
 private val REPO_URL = "https://github.com/mdjbn/video-sorter"
 
@@ -133,6 +133,8 @@ fun SettingsScreen(
     onOpenTransfer: () -> Unit,
     onOpenVideo: (Int) -> Unit,
     onSubPage: (Boolean) -> Unit = {},
+    /** 上传/删除文件后刷新视频库（分栏里直接展开上传下载页时要用） */
+    onChanged: () -> Unit = {},
 ) {
     var page by remember { mutableStateOf(SetPage.HOME) }
     // 平板横屏：左边设置项导航、右边直接展开对应的二级页面（和网页端一样的主从布局）。
@@ -162,6 +164,7 @@ fun SettingsScreen(
             onRefresh = onRefresh,
             onOpenVideo = onOpenVideo,
             onOpenTransfer = onOpenTransfer,
+            onChanged = onChanged,
             onLogout = onLogout,
             onPick = { page = it },
         )
@@ -201,6 +204,12 @@ fun SettingsScreen(
             SetPage.TAGS -> TagsPage(api, tags, onToast, toastEach, onRefresh) { page = SetPage.HOME }
             SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) { page = SetPage.HOME }
             SetPage.CACHE -> CachePage(api, onToast) { page = SetPage.HOME }
+            SetPage.TRANSFER -> TransferScreen(
+                api = api,
+                onBack = { page = SetPage.HOME },
+                onToast = onToast,
+                onChanged = onChanged,
+            )
             SetPage.ABOUT -> AboutPage { page = SetPage.HOME }
         }
     }
@@ -226,6 +235,7 @@ private fun SettingsSplit(
     onRefresh: () -> Unit,
     onOpenVideo: (Int) -> Unit,
     onOpenTransfer: () -> Unit,
+    onChanged: () -> Unit,
     onLogout: () -> Unit,
     onPick: (SetPage) -> Unit,
 ) {
@@ -243,14 +253,17 @@ private fun SettingsSplit(
             themeMode = themeMode,
             onThemeChange = onThemeChange,
             onToast = onToast,
-            onOpenTransfer = onOpenTransfer,
             onLogout = onLogout,
             onPick = onPick,
         )
         Box(Modifier.width(1.dp).fillMaxHeight().background(t.line))
         // 底部 76dp 留给悬浮胶囊栏，否则长列表最后几行会被它压住
+        val paneW = (winSize().wDp - 300 - 1).coerceAtLeast(320)
         Box(Modifier.weight(1f).fillMaxHeight().padding(bottom = 76.dp)) {
-            CompositionLocalProvider(LocalSplitPane provides true) {
+            CompositionLocalProvider(
+                LocalSplitPane provides true,
+                LocalPaneWidthDp provides paneW,
+            ) {
                 when (active) {
                     // 分栏模式下 active 不会是 HOME（上面已经把它换成了 SERVER），这里只是让 when 完整
                     SetPage.HOME,
@@ -259,6 +272,13 @@ private fun SettingsSplit(
                     SetPage.SOURCES -> SourcesPage(api, onToast, toastEach, onRefresh) {}
                     SetPage.TAGS -> TagsPage(api, tags, onToast, toastEach, onRefresh) {}
                     SetPage.HISTORY -> HistoryPage(api, onToast, onOpenVideo) {}
+                    SetPage.TRANSFER -> TransferScreen(
+                        api = api,
+                        onBack = {},
+                        onToast = onToast,
+                        onChanged = onChanged,
+                        embedded = true,
+                    )
                     SetPage.CACHE -> CachePage(api, onToast) {}
                     SetPage.ABOUT -> AboutPage {}
                 }
@@ -276,7 +296,6 @@ private fun SettingsNav(
     themeMode: String,
     onThemeChange: (String) -> Unit,
     onToast: (String) -> Unit,
-    onOpenTransfer: () -> Unit,
     onLogout: () -> Unit,
     onPick: (SetPage) -> Unit,
 ) {
@@ -287,6 +306,7 @@ private fun SettingsNav(
         NavEntry(SetPage.SOURCES, Icons.Rounded.FolderOpen, "源文件夹", "管理要整理的目录"),
         NavEntry(SetPage.TAGS, Icons.Rounded.Label, "标签管理", "${tags.size} 个标签 · 每个标签一个目标文件夹"),
         NavEntry(SetPage.HISTORY, Icons.Rounded.History, "播放历史", "小卡片 · 单条或多选删除"),
+        NavEntry(SetPage.TRANSFER, Icons.Rounded.Download, "上传下载", "传输进度与历史"),
         NavEntry(SetPage.CACHE, Icons.Rounded.Storage, "缓存与储存", "封面与转码缓存"),
         NavEntry(SetPage.ABOUT, Icons.Rounded.Info, "关于项目", "v${BuildConfig.VERSION_NAME} · MIT"),
     )
@@ -306,17 +326,6 @@ private fun SettingsNav(
         )
         entries.forEach { e ->
             NavItem(e.page, e.icon, e.label, e.subtitle, selected = e.page == active) { onPick(e.page) }
-            // 上传下载是独立页面（不属于 SetPage），插在播放历史后面
-            if (e.page == SetPage.HISTORY) {
-                NavItem(
-                    page = SetPage.HISTORY,
-                    icon = Icons.Rounded.Download,
-                    label = "上传下载",
-                    subtitle = "传输进度与历史",
-                    selected = false,
-                    onClick = onOpenTransfer,
-                )
-            }
         }
 
         // 外观主题：三个胶囊，放在导航列底部

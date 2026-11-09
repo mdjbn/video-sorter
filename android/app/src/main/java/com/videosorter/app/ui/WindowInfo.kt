@@ -27,6 +27,15 @@ data class WinSize(val wDp: Int, val hDp: Int) {
     val landscape: Boolean get() = wDp > hDp
 }
 
+/**
+ * 分栏模式下「右侧那一栏」的宽度（dp）。不在分栏里就是 null。
+ *
+ * 右侧页面用的 [centeredSidePadding] 原本按整块屏幕算留白 —— 分栏后屏幕 1205dp
+ * 里有 300dp 被左边导航占走，再按整屏算就会在窄栏里又缩一圈，内容被挤成细条。
+ * 分栏容器把自己剩的宽度塞进来，各页面就自动按栏宽排版了。
+ */
+val LocalPaneWidthDp = androidx.compose.runtime.compositionLocalOf<Int?> { null }
+
 @Composable
 fun winSize(): WinSize {
     val c = LocalConfiguration.current
@@ -60,7 +69,8 @@ fun ReadableWidth(
  */
 @Composable
 fun centeredSidePadding(maxContent: Dp = 720.dp, base: Dp = 18.dp): Dp {
-    val w = winSize().wDp
+    // 在分栏右侧时按栏宽算，否则按整屏算
+    val w = LocalPaneWidthDp.current ?: winSize().wDp
     val need = maxContent.value + base.value * 2
     return if (w <= need) base else ((w - maxContent.value) / 2).dp
 }

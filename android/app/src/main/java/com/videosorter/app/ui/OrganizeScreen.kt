@@ -110,6 +110,20 @@ fun OrganizeScreen(
 
     val chosen = items.filter { it.tagId in selected }
     val chosenBytes = chosen.sumOf { it.size }
+    val chosenGroups = groups.filter { it.tagId in selected }
+
+    fun undo(r: BatchRec) {
+        scope.launch {
+            runCatching { api.undo(r.id) }
+                .onSuccess {
+                    onToast("已撤销 · 搬回 ${r.files} 个视频")
+                    onOrganized()
+                    touched = false
+                    loadPlan()
+                }
+                .onFailure { onToast(it.message ?: "撤销失败") }
+        }
+    }
 
     suspend fun run() {
         if (running || chosen.isEmpty()) return
@@ -171,12 +185,16 @@ fun OrganizeScreen(
 
     // 宽窗口下内容夹在 760dp 内居中，否则「源 → 目标」两个路径会被拉到屏幕两端
     val side = centeredSidePadding(maxContent = 760.dp, base = 18.dp)
+    // 平板横屏：左栏勾选要整理的标签组、右栏看选中组的详情与最近整理，比单列窄条好读
+    val win = winSize()
+    val wide = win.wide && win.landscape && win.hDp >= 600
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = side, end = side, top = 14.dp, bottom = 12.dp),
+                    .padding(start = if (wide) 20.dp else side, end = if (wide) 20.dp else side, top = 14.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
                 Column {
@@ -185,136 +203,127 @@ fun OrganizeScreen(
                 }
             }
 
-            LazyColumn(
-                contentPadding = PaddingValues(start = side, end = side, top = 6.dp, bottom = 170.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.padding(bottom = 6.dp)) {
-                        SmallStat("待整理", "${items.size}", Modifier.weight(1f))
-                        SmallStat("文件夹", "${groups.size}", Modifier.weight(1f))
-                        SmallStat("总大小", sizeText(items.sumOf { it.size }), Modifier.weight(1f))
-                    }
-                }
-                if (failState.visible()) {
-                    item(key = "organize-failed") {
-                        FailBlock(state = failState, onDismiss = { failState.clear() })
-                    }
-                }
-                when {
-                    err != null -> item { Text(err!!, color = t.danger, fontSize = 12.sp) }
-                    loading -> item { Text("加载中…", color = t.muted, fontSize = 12.sp) }
-                    items.isEmpty() -> item {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(t.ink(0.04f))
-                                .border(1.dp, t.line, RoundedCornerShape(14.dp))
-                                .padding(vertical = 26.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
+            if (wide) {
+                Row(Modifier.fillMaxWidth().weight(1f)) {
+                    // 左栏：统计 + 标签组（可勾选）
+                    Column(Modifier.width(400.dp).fillMaxSize()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(9.dp),
                         ) {
-                            Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = t.muted2, modifier = Modifier.size(26.dp))
-                            Spacer(Modifier.height(10.dp))
-                            Text("没有需要整理的视频", color = t.ink(0.8f), fontSize = 13.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Text("先去播放页给视频打标签", color = t.muted2, fontSize = 11.sp)
+                            SmallStat("待整理", "${items.size}", Modifier.weight(1f))
+                            SmallStat("文件夹", "${groups.size}", Modifier.weight(1f))
+                            SmallStat("总大小", sizeText(items.sumOf { it.size }), Modifier.weight(1f))
+                        }
+                        LazyColumn(
+                            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 120.dp),
+                            verticalArrangement = Arrangement.spacedBy(9.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            if (failState.visible()) {
+                                item(key = "organize-failed") {
+                                    FailBlock(state = failState, onDismiss = { failState.clear() })
+                                }
+                            }
+                            when {
+                                err != null -> item { Text(err!!, color = t.danger, fontSize = 12.sp) }
+                                loading -> item { Text("加载中…", color = t.muted, fontSize = 12.sp) }
+                                items.isEmpty() -> item { EmptyPlan() }
+                                else -> items(groups, key = { it.tagId }) { g ->
+                                    GroupRow(g, g.tagId in selected) {
+                                        touched = true
+                                        selected = if (g.tagId in selected) selected - g.tagId else selected + g.tagId
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    else -> items(groups, key = { it.tagId }) { g ->
-                        val on = g.tagId in selected
-                        val c = hexColor(g.color)
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Brush.linearGradient(listOf(t.ink(0.055f), t.ink(0.022f))))
-                                .border(1.dp, if (on) t.accent.copy(alpha = 0.35f) else t.line, RoundedCornerShape(14.dp))
-                                .clickable {
-                                    touched = true
-                                    selected = if (on) selected - g.tagId else selected + g.tagId
-                                }
-                                .padding(12.dp),
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Box(
-                                    Modifier
-                                        .size(19.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(if (on) t.accent else Color.Transparent)
-                                        .border(1.5.dp, if (on) t.accent else t.ink(0.3f), RoundedCornerShape(6.dp)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (on) Text("✓", color = Color(0xFF04160D), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                                Box(
-                                    Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .background(c.copy(alpha = 0.16f)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Box(Modifier.size(8.dp).clip(RoundedCornerShape(3.dp)).background(c))
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(g.name, color = t.text, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                                        Spacer(Modifier.weight(1f))
-                                        Text("${g.items.size} 个", color = t.muted2, fontSize = 11.sp)
-                                    }
-                                    Text(
-                                        tailPath(g.dir),
-                                        color = t.muted2,
-                                        fontSize = 9.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(top = 3.dp),
-                                    )
+                    Box(Modifier.width(1.dp).fillMaxSize().background(t.line))
+
+                    // 右栏：选中组的目标文件夹与视频清单 + 最近整理
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 6.dp, bottom = 120.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f).fillMaxSize(),
+                    ) {
+                        item(key = "chosen-head") {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("本次整理", color = t.ink(0.9f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.weight(1f))
+                                if (chosen.isNotEmpty()) {
+                                    Text("${chosen.size} 个 · ${sizeText(chosenBytes)}", color = t.muted2, fontSize = 11.sp)
                                 }
                             }
-                            g.items.take(3).forEach { it ->
+                        }
+                        if (chosen.isEmpty()) {
+                            item(key = "chosen-empty") {
                                 Text(
-                                    "· ${it.name}",
-                                    color = t.ink(0.5f),
-                                    fontSize = 10.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(start = 58.dp, top = 5.dp),
+                                    "左边勾选要整理的标签组，这里会列出每个视频要搬到哪里",
+                                    color = t.muted2,
+                                    fontSize = 11.5.sp,
+                                    modifier = Modifier.padding(vertical = 14.dp),
                                 )
                             }
-                            if (g.items.size > 3) {
-                                Text("· 还有 ${g.items.size - 3} 个…", color = t.muted2, fontSize = 10.sp, modifier = Modifier.padding(start = 58.dp, top = 4.dp))
+                        } else {
+                            items(chosenGroups, key = { "d-${it.tagId}" }) { g -> ChosenDetail(g) }
+                        }
+                        if (records.isNotEmpty()) {
+                            item(key = "rec-head") {
+                                Text(
+                                    "最近整理",
+                                    color = t.muted2,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 2.dp, start = 2.dp),
+                                )
+                            }
+                            items(records, key = { "rec-${it.id}" }) { r ->
+                                RecRow(rec = r, onUndo = { undo(r) })
                             }
                         }
                     }
                 }
-                if (records.isNotEmpty()) {
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(start = side, end = side, top = 6.dp, bottom = 170.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
                     item {
-                        Text(
-                            "最近整理",
-                            color = t.muted2,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 2.dp),
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.padding(bottom = 6.dp)) {
+                            SmallStat("待整理", "${items.size}", Modifier.weight(1f))
+                            SmallStat("文件夹", "${groups.size}", Modifier.weight(1f))
+                            SmallStat("总大小", sizeText(items.sumOf { it.size }), Modifier.weight(1f))
+                        }
                     }
-                    items(records, key = { "rec-${it.id}" }) { r ->
-                        RecRow(
-                            rec = r,
-                            onUndo = {
-                                scope.launch {
-                                    runCatching { api.undo(r.id) }
-                                        .onSuccess {
-                                            onToast("已撤销 · 搬回 ${r.files} 个视频")
-                                            onOrganized()
-                                            touched = false
-                                            loadPlan()
-                                        }
-                                        .onFailure { onToast(it.message ?: "撤销失败") }
-                                }
-                            },
-                        )
+                    if (failState.visible()) {
+                        item(key = "organize-failed") {
+                            FailBlock(state = failState, onDismiss = { failState.clear() })
+                        }
+                    }
+                    when {
+                        err != null -> item { Text(err!!, color = t.danger, fontSize = 12.sp) }
+                        loading -> item { Text("加载中…", color = t.muted, fontSize = 12.sp) }
+                        items.isEmpty() -> item { EmptyPlan() }
+                        else -> items(groups, key = { it.tagId }) { g ->
+                            GroupRow(g, g.tagId in selected) {
+                                touched = true
+                                selected = if (g.tagId in selected) selected - g.tagId else selected + g.tagId
+                            }
+                        }
+                    }
+                    if (records.isNotEmpty()) {
+                        item {
+                            Text(
+                                "最近整理",
+                                color = t.muted2,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 2.dp),
+                            )
+                        }
+                        items(records, key = { "rec-${it.id}" }) { r ->
+                            RecRow(rec = r, onUndo = { undo(r) })
+                        }
                     }
                 }
             }
@@ -544,5 +553,132 @@ private fun FailBlock(state: OrganizeFailState, onDismiss: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** 一组待整理的标签：勾选框 + 标签色块 + 名称/数量/目标目录 + 前几个文件名。 */
+@Composable
+private fun GroupRow(g: OrgGroup, on: Boolean, onClick: () -> Unit) {
+    val t = tokens()
+    val c = hexColor(g.color)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.linearGradient(listOf(t.ink(0.055f), t.ink(0.022f))))
+            .border(1.dp, if (on) t.accent.copy(alpha = 0.35f) else t.line, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier
+                    .size(19.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (on) t.accent else Color.Transparent)
+                    .border(1.5.dp, if (on) t.accent else t.ink(0.3f), RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (on) Text("✓", color = Color(0xFF04160D), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(c.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(8.dp).clip(RoundedCornerShape(3.dp)).background(c))
+            }
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(g.name, color = t.text, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    Text("${g.items.size} 个", color = t.muted2, fontSize = 11.sp)
+                }
+                Text(
+                    tailPath(g.dir),
+                    color = t.muted2,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+        }
+        g.items.take(3).forEach { it ->
+            Text(
+                "· ${it.name}",
+                color = t.ink(0.5f),
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 58.dp, top = 5.dp),
+            )
+        }
+        if (g.items.size > 3) {
+            Text("· 还有 ${g.items.size - 3} 个…", color = t.muted2, fontSize = 10.sp, modifier = Modifier.padding(start = 58.dp, top = 4.dp))
+        }
+    }
+}
+
+/** 右栏里的一组详情：目标文件夹 + 这一组全部视频名。 */
+@Composable
+private fun ChosenDetail(g: OrgGroup) {
+    val t = tokens()
+    val c = hexColor(g.color)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(t.ink(0.035f))
+            .border(1.dp, t.line, RoundedCornerShape(14.dp))
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(8.dp).clip(RoundedCornerShape(3.dp)).background(c))
+            Text(g.name, color = t.text, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Text("${g.items.size} 个 · ${sizeText(g.items.sumOf { it.size })}", color = t.muted2, fontSize = 10.5.sp)
+        }
+        Text(
+            g.dir,
+            color = t.ink(0.6f),
+            fontSize = 10.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        Spacer(Modifier.height(8.dp))
+        g.items.forEach { it ->
+            Text(
+                "· ${it.name}",
+                color = t.ink(0.5f),
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 3.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyPlan() {
+    val t = tokens()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(t.ink(0.04f))
+            .border(1.dp, t.line, RoundedCornerShape(14.dp))
+            .padding(vertical = 26.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Rounded.FolderOpen, contentDescription = null, tint = t.muted2, modifier = Modifier.size(26.dp))
+        Spacer(Modifier.height(10.dp))
+        Text("没有需要整理的视频", color = t.ink(0.8f), fontSize = 13.sp)
+        Spacer(Modifier.height(4.dp))
+        Text("先去播放页给视频打标签", color = t.muted2, fontSize = 11.sp)
     }
 }

@@ -126,6 +126,11 @@ fun TransferScreen(
     onToast: (String) -> Unit,
     /** 上传/删除后通知外层刷新视频库（删除文件后列表要立刻少一条） */
     onChanged: () -> Unit = {},
+    /**
+     * 在设置页的分栏右侧展开时用：不要返回箭头、不要状态栏内边距、按当前栏宽排版。
+     * 手机上是独立全屏页，平板分栏里是设置页右边的一栏，两种都要能用。
+     */
+    embedded: Boolean = false,
 ) {
     val t = tokens()
     val ctx = LocalContext.current
@@ -141,7 +146,8 @@ fun TransferScreen(
     val picked = remember { mutableStateListOf<TransferItem>() }
     var pendingDelete by remember { mutableStateOf<List<TransferItem>?>(null) }
 
-    BackHandler(enabled = true) { onBack() }
+    // 分栏里返回箭头由左边导航负责，别让返回键把整个设置页关掉
+    BackHandler(enabled = !embedded) { onBack() }
 
     fun reloadHistory() {
         hist = TransferStore.load(ctx)
@@ -268,24 +274,32 @@ fun TransferScreen(
     }
 
     Box(Modifier.fillMaxSize().background(t.bg)) {
-        // 宽窗口（平板横屏）内容夹在 780dp 内居中，和二级页面保持一致
-        val side = centeredSidePadding(maxContent = 780.dp, base = 18.dp)
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        // 宽窗口（平板横屏）内容夹在 780dp 内居中，和二级页面保持一致；
+        // 分栏右侧按栏宽算（centeredSidePadding 内部已经认 LocalPaneWidthDp），这里直接用默认
+        val side = if (embedded) 18.dp else centeredSidePadding(maxContent = 780.dp, base = 18.dp)
+        Column(Modifier.fillMaxSize().then(if (embedded) Modifier else Modifier.statusBarsPadding())) {
             // 页头
             Row(
-                Modifier.fillMaxWidth().padding(start = side - 6.dp, end = side, top = 6.dp, bottom = 10.dp),
+                Modifier.fillMaxWidth().padding(
+                    start = if (embedded) 20.dp else side - 6.dp,
+                    end = if (embedded) 14.dp else side,
+                    top = 6.dp,
+                    bottom = 10.dp,
+                ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Box(
-                    Modifier.size(32.dp).clip(RoundedCornerShape(11.dp))
-                        .background(t.ink(0.06f)).border(1.dp, t.line2, RoundedCornerShape(11.dp))
-                        .clickable { onBack() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = t.ink(0.8f), modifier = Modifier.size(17.dp))
+                if (!embedded) {
+                    Box(
+                        Modifier.size(32.dp).clip(RoundedCornerShape(11.dp))
+                            .background(t.ink(0.06f)).border(1.dp, t.line2, RoundedCornerShape(11.dp))
+                            .clickable { onBack() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", tint = t.ink(0.8f), modifier = Modifier.size(17.dp))
+                    }
                 }
-                Text("传输", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = t.text)
+                Text(if (embedded) "上传下载" else "传输", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = t.text)
                 if (selecting) {
                     Spacer(Modifier.weight(1f))
                     Text("已选 ${picked.size}", color = t.muted2, fontSize = 11.5.sp)
