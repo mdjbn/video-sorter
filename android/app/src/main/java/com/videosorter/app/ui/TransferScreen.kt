@@ -268,10 +268,12 @@ fun TransferScreen(
     }
 
     Box(Modifier.fillMaxSize().background(t.bg)) {
+        // 宽窗口（平板横屏）内容夹在 780dp 内居中，和二级页面保持一致
+        val side = centeredSidePadding(maxContent = 780.dp, base = 18.dp)
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             // 页头
             Row(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 18.dp, top = 6.dp, bottom = 10.dp),
+                Modifier.fillMaxWidth().padding(start = side - 6.dp, end = side, top = 6.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -294,7 +296,7 @@ fun TransferScreen(
 
             // 分段
             Row(
-                Modifier.padding(horizontal = 18.dp).fillMaxWidth()
+                Modifier.padding(horizontal = side).fillMaxWidth()
                     .clip(RoundedCornerShape(13.dp))
                     .background(t.ink(0.05f))
                     .padding(4.dp),
@@ -304,7 +306,13 @@ fun TransferScreen(
                 SegButton("下载到手机", tab == 1, Modifier.weight(1f)) { exitSelect(); tab = 1 }
             }
 
-            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(18.dp)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = side, vertical = 18.dp)
+            ) {
                 if (tab == 0) {
                     GroupCard {
                         SettingRow(

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -213,9 +214,12 @@ fun SheetHost(state: SheetState) {
                 enter = slideInVertically(animationSpec = tween(240)) { it },
                 exit = slideOutVertically(animationSpec = tween(200)) { it },
             ) {
+                // 平板 / 手机横屏：底部弹层限宽 560dp 居中，否则输入框会被拉到 1200dp 宽
+                val sheetWidth =
+                    if (winSize().wide) Modifier.widthIn(max = 560.dp).fillMaxWidth()
+                    else Modifier.fillMaxWidth()
                 Column(
-                    Modifier
-                        .fillMaxWidth()
+                    sheetWidth
                         .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                         .background(t.panel)
                         .border(

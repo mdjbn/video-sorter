@@ -20,9 +20,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -101,11 +104,13 @@ fun ListScreen(
     toast: (String) -> Unit,
     sheets: SheetState,
     // 列表滚动状态由 MainScreen 持有：切到别的 tab 再回来位置不变（AnimatedContent 会重建本组件）
-    listState: LazyListState,
+    listState: LazyGridState,
     // 排序（服务端排序）：字段 + 方向
     sortKey: String = "added",
     sortAsc: Boolean = true,
     onSort: (String, Boolean) -> Unit = { _, _ -> },
+    // 窗口是否够宽（>= 600dp）：够宽就排成多列封面网格，否则保持单列横排
+    wide: Boolean = false,
 ) {
     val t = tokens()
 
@@ -296,21 +301,37 @@ fun ListScreen(
                 if (videos.isEmpty()) "还没有视频，去网页端扫描源文件夹" else "没有符合筛选条件的视频"
             )
 
-            else -> LazyColumn(
+            // 不再按「源文件夹 / 标签文件夹」分组：都在同一个视频库里，谁在哪儿不该让人操心，
+            // 而且分组会把排序结果切成两截。统一按当前排序规则排。
+            //
+            // 版式随窗口宽度走：
+            //   · 手机（< 600dp）：单列「横向行」卡片，缩略图在左、信息在右 —— 和以前完全一样
+            //   · 平板 / 手机横屏（>= 600dp）：多列「封面卡片」，用 GridCells.Adaptive 自动算列数
+            //     （平板竖屏 2 列、平板横屏 4 列、手机横屏 3 列左右），不做手机/平板两套代码
+            else -> LazyVerticalGrid(
                 state = listState,
+                columns = if (wide) GridCells.Adaptive(minSize = 250.dp) else GridCells.Fixed(1),
                 contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(if (wide) 10.dp else 9.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                // 不再按「源文件夹 / 标签文件夹」分组：都在同一个视频库里，谁在哪儿不该让人操心，
-                // 而且分组会把排序结果切成两截。统一按当前排序规则显示成一条列表。
                 items(shown, key = { it.id }) { v ->
-                    VideoRow(
-                        v = v,
-                        thumb = api.thumbUrl(v),
-                        onClick = { onOpen(v.id) },
-                        onTagClick = { openTagSheet(v) },
-                    )
+                    if (wide) {
+                        VideoCard(
+                            v = v,
+                            thumb = api.thumbUrl(v),
+                            onClick = { onOpen(v.id) },
+                            onTagClick = { openTagSheet(v) },
+                        )
+                    } else {
+                        VideoRow(
+                            v = v,
+                            thumb = api.thumbUrl(v),
+                            onClick = { onOpen(v.id) },
+                            onTagClick = { openTagSheet(v) },
+                        )
+                    }
                 }
             }
         }
@@ -338,6 +359,108 @@ private fun FilterChipView(label: String, on: Boolean, dot: Color? = null, onCli
             fontSize = 11.5.sp,
             fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
         )
+    }
+}
+
+/**
+ * 宽窗口用的「封面卡片」：上方 16:9 封面（时长角标 + 观看进度条），下方文件名、标签、体积。
+ *
+ * 和 [VideoRow] 是同一份数据的两种排法——手机上横向铺开更省纵向空间，
+ * 平板上纵向叠起来才能在一屏里放进十几个视频。
+ */
+@Composable
+private fun VideoCard(
+    v: Video,
+    thumb: String,
+    onClick: () -> Unit,
+    onTagClick: () -> Unit,
+) {
+    val t = tokens()
+    val tagColor = if (!v.tagColor.isNullOrEmpty()) hexColor(v.tagColor!!) else t.muted
+    val shape = RoundedCornerShape(15.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(t.ink(0.06f), t.ink(0.022f))))
+            .border(1.dp, t.line, shape)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(gradientFor(v.id))
+        ) {
+            if (thumb.isNotEmpty()) {
+                AsyncImage(
+                    model = thumb,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(5.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 4.dp, vertical = 1.dp)
+            ) {
+                Text(fmtDuration(v.duration), color = Color.White, fontSize = 9.5.sp)
+            }
+            val pos = v.position
+            if (pos != null && v.duration > 0) {
+                val frac = (pos / v.duration).toFloat().coerceIn(0f, 1f)
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Color.Black.copy(alpha = 0.4f))
+                ) {
+                    Box(Modifier.fillMaxWidth(frac).height(3.dp).background(t.accent))
+                }
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(
+            v.name,
+            color = t.ink(0.88f),
+            fontSize = 12.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            Modifier.padding(horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (v.tagName != null) {
+                TagPill(v.tagName, tagColor)
+            } else {
+                Row(
+                    Modifier
+                        .height(19.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(t.ink(0.05f))
+                        .border(1.dp, t.ink(0.10f), RoundedCornerShape(5.dp))
+                        .clickable(onClick = onTagClick)
+                        .padding(horizontal = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("+ 标记", color = t.muted, fontSize = 10.sp)
+                }
+            }
+            StatusPill(v.isOrganized)
+            Spacer(Modifier.weight(1f))
+            Text(sizeText(v.size), color = t.muted2, fontSize = 10.sp)
+        }
     }
 }
 

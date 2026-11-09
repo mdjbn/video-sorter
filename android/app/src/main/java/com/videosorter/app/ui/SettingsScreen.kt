@@ -191,18 +191,16 @@ private fun SettingsHome(
     onOpen: (SetPage) -> Unit,
 ) {
     val t = tokens()
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(t.bg)
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 120.dp),
-    ) {
-        Text("设置", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = t.text)
-        Spacer(Modifier.height(14.dp))
+    val win = winSize()
+    // 只有横屏且够宽（平板横屏 1205dp / 手机横屏 800+dp）才排两列：
+    // 平板竖屏 752dp 也满足 wide，但两列会挤成 180dp 一条，反而难读
+    val twoColumns = win.wide && win.landscape
+    val side = centeredSidePadding(
+        maxContent = if (twoColumns) 1040.dp else 720.dp,
+        base = 18.dp,
+    )
 
-        // 外观主题
+    val themeCard: @Composable () -> Unit = {
         GroupCard {
             Column(Modifier.padding(14.dp)) {
                 Text("外观主题", color = t.ink(0.9f), fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
@@ -214,17 +212,15 @@ private fun SettingsHome(
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
-
-        // 连接
+    }
+    val connectCard: @Composable () -> Unit = {
         GroupCard {
             SettingRow(Icons.Rounded.SwapHoriz, "服务器", session.current, onClick = { onOpen(SetPage.SERVER) })
             RowDivider()
             SettingRow(Icons.Rounded.Person, "账号", "改用户名 / 改密码 / 登录设备") { onOpen(SetPage.ACCOUNT) }
         }
-        Spacer(Modifier.height(12.dp))
-
-        // 内容
+    }
+    val contentCard: @Composable () -> Unit = {
         GroupCard {
             SettingRow(Icons.Rounded.FolderOpen, "源文件夹", "管理要整理的目录") { onOpen(SetPage.SOURCES) }
             RowDivider()
@@ -232,25 +228,61 @@ private fun SettingsHome(
             RowDivider()
             SettingRow(Icons.Rounded.History, "播放历史", "小卡片 · 单条或多选删除") { onOpen(SetPage.HISTORY) }
         }
-        Spacer(Modifier.height(12.dp))
-
-        // 系统
+    }
+    val systemCard: @Composable () -> Unit = {
         GroupCard {
             SettingRow(Icons.Rounded.Download, "上传下载", "进度与历史 · 上传/下载路径") { onOpenTransfer() }
             RowDivider()
             SettingRow(Icons.Rounded.Storage, "缓存与储存", "封面与转码缓存") { onOpen(SetPage.CACHE) }
         }
-        Spacer(Modifier.height(12.dp))
-
+    }
+    val aboutCard: @Composable () -> Unit = {
         GroupCard {
             SettingRow(Icons.Rounded.Info, "关于项目", "v${BuildConfig.VERSION_NAME} · MIT") { onOpen(SetPage.ABOUT) }
         }
-        Spacer(Modifier.height(12.dp))
-
+    }
+    val logoutCard: @Composable () -> Unit = {
         GroupCard {
             SettingRow(Icons.Rounded.Logout, "退出登录", danger = true, chevron = false) {
                 onToast("已退出登录")
                 onLogout()
+            }
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(t.bg)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(start = side, end = side, top = 18.dp, bottom = 120.dp),
+    ) {
+        Text("设置", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = t.text)
+        Spacer(Modifier.height(14.dp))
+
+        if (twoColumns) {
+            // 两列：左边是「我这台机器怎么连、管哪些目录」，右边是「外观、系统、关于」
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    connectCard()
+                    contentCard()
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    themeCard()
+                    systemCard()
+                    aboutCard()
+                    logoutCard()
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                themeCard()
+                connectCard()
+                contentCard()
+                systemCard()
+                aboutCard()
+                logoutCard()
             }
         }
     }

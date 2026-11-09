@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -219,7 +221,11 @@ fun SubScaffold(
             Text(title, fontSize = 19.sp, fontWeight = FontWeight.Bold, color = t.text, modifier = Modifier.weight(1f))
             if (actions != null) actions()
         }
-        Column(Modifier.fillMaxSize(), content = content)
+        // 二级页面（源文件夹 / 标签 / 缓存 / 传输…）内容限宽 780dp 居中，
+        // 免得在平板横屏上的一行文本横跨 1200dp
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Column(Modifier.fillMaxHeight().widthIn(max = 780.dp), content = content)
+        }
     }
 }
 

@@ -121,12 +121,14 @@ fun LoginScreen(
                     )
                 )
         )
+        // 平板上把登录表单夹在 460dp 内居中：拉满一整屏的输入框又长又难对
+        val side = centeredSidePadding(maxContent = 460.dp, base = 26.dp)
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 26.dp)
-                .padding(top = 64.dp, bottom = 32.dp),
+                .padding(horizontal = side)
+                .padding(top = if (winSize().landscape) 24.dp else 64.dp, bottom = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // 品牌

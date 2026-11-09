@@ -169,12 +169,14 @@ fun OrganizeScreen(
         }
     }
 
+    // 宽窗口下内容夹在 760dp 内居中，否则「源 → 目标」两个路径会被拉到屏幕两端
+    val side = centeredSidePadding(maxContent = 760.dp, base = 18.dp)
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 12.dp),
+                    .padding(start = side, end = side, top = 14.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
                 Column {
@@ -184,7 +186,7 @@ fun OrganizeScreen(
             }
 
             LazyColumn(
-                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 170.dp),
+                contentPadding = PaddingValues(start = side, end = side, top = 6.dp, bottom = 170.dp),
                 verticalArrangement = Arrangement.spacedBy(9.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
@@ -340,7 +342,7 @@ fun OrganizeScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(start = 18.dp, end = 18.dp, bottom = 92.dp)
+                .padding(start = side, end = side, bottom = 92.dp)
         ) {
             if (chosen.isNotEmpty()) {
                 Text(

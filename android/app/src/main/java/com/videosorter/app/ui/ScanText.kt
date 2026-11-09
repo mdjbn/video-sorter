@@ -78,9 +78,16 @@ object ScanText {
         return "$kind「${d.name}」：${dirResult(d)}"
     }
 
-    /** 上次扫描的那一句（时间 + 结果），没扫过返回「未扫描」。 */
-    fun lastScanLine(lastScanAt: String?, lastScan: LastScan?): String {
-        val whenText = if (lastScanAt.isNullOrBlank()) "" else ScanTime.human(lastScanAt)
+    /**
+     * 上次扫描的那一句（时间 + 结果），没扫过返回「未扫描」。
+     * @param todayYmd 只在单测里传，用来固定「今天」是哪天（默认取设备当前日期）
+     */
+    fun lastScanLine(
+        lastScanAt: String?,
+        lastScan: LastScan?,
+        todayYmd: Triple<Int, Int, Int>? = null,
+    ): String {
+        val whenText = if (lastScanAt.isNullOrBlank()) "" else ScanTime.human(lastScanAt, todayYmd)
         if (whenText.isEmpty()) return "未扫描"
         val result = when {
             lastScan == null -> null

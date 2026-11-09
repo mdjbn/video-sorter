@@ -419,11 +419,15 @@ class LogicTest {
 
     @Test
     fun lastScanLineCombinesTimeAndResult() {
-        assertEquals("未扫描", ScanText.lastScanLine("", null))
-        assertEquals("扫于 今天 16:25 · 新增 2", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", LastScan(found = 2, added = 2), ))
-        assertEquals("扫于 今天 16:25 · 没有视频", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", LastScan(found = 0)))
+        // 「今天」必须靠参数固定，否则这条断言只在 2026-11-03 当天成立（踩过一次）
+        val today = Triple(2026, 11, 3)
+        assertEquals("未扫描", ScanText.lastScanLine("", null, today))
+        assertEquals("扫于 今天 16:25 · 新增 2", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", LastScan(found = 2, added = 2), today))
+        assertEquals("扫于 今天 16:25 · 没有视频", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", LastScan(found = 0), today))
         // 扫过但后端没给摘要（老数据）→ 只显示时间
-        assertEquals("扫于 今天 16:25", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", null))
+        assertEquals("扫于 今天 16:25", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", null, today))
+        // 隔天就应显示具体日期，不能再是「今天」
+        assertEquals("扫于 11-03 16:25 · 新增 2", ScanText.lastScanLine("2026-11-03T16:25:39+08:00", LastScan(found = 2, added = 2), Triple(2026, 11, 9)))
     }
 
     @Test

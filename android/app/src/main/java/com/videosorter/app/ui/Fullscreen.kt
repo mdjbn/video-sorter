@@ -18,10 +18,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 /**
  * 播放页的「横屏全屏」。
  *
- * 需求是「只加全屏按钮，不跟随手机旋转」：整个 App 已经不锁方向了（Manifest 里去掉了
- * screenOrientation），但方向完全由这里按 [fullscreen] 状态强制指定——
- * 全屏时 SCREEN_ORIENTATION_LANDSCAPE，退出时 SCREEN_ORIENTATION_PORTRAIT。
- * 因为其他地方从不调整方向，所以列表/设置/登录页永远保持竖屏，旋手机也不会转。
+ * 方向策略（v1.4.0 起）：**全 App 跟随设备旋转**。
+ * 平板横屏、手机横过来都要能用，所以不再无条件锁竖屏——只有点了「横屏全屏」时才强制
+ * 转成横屏，退出全屏时交还给系统（SCREEN_ORIENTATION_UNSPECIFIED），设备怎么拿就怎么显示：
+ *   · 手机开着自动旋转 → 跟着手转；关着自动旋转 → 保持竖屏（系统行为，我们不再干预）
+ *   · 平板横着拿 → 一直是横屏
  *
  * 系统栏（状态栏 + 导航栏）在全屏时隐藏，退出时恢复。
  */
@@ -32,11 +33,11 @@ fun FullscreenEffect(fullscreen: Boolean) {
     // 状态变化时读最新的值，避免回调里拿到旧的 lambda
     val current by rememberUpdatedState(fullscreen)
 
-    // 方向：跟随 fullscreen 状态
+    // 方向：全屏时强制横屏；退出全屏交还给系统，让平板/手机按自己拿的方向显示
     LaunchedEffect(fullscreen) {
         activity.requestedOrientation =
             if (fullscreen) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
     // 系统栏：隐藏 / 恢复。退出页面时一定还原，否则返回列表页会没有状态栏
@@ -56,7 +57,8 @@ fun FullscreenEffect(fullscreen: Boolean) {
             // 离开播放页/退出全屏时恢复系统栏，避免「退出 App 后别的页面没有状态栏」
             controller.show(WindowInsetsCompat.Type.systemBars())
             WindowCompat.setDecorFitsSystemWindows(window, true)
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            // 离开播放页时把方向控制权还给系统（不能再锁竖屏，否则平板横屏会被掰回来）
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 }
