@@ -30,20 +30,34 @@
 | Windows 单机使用 | `VideoSorter-<版本>-x64-setup.exe`（NSIS）或 `VideoSorter-<版本>-x64.msi` | 内嵌 Python 服务与网页端，双击即用 |
 | 安卓手机 | `videosorter-<版本>-arm64-v8a.apk` / `-armeabi-v7a.apk` | 统一签名的正式包，可直接覆盖升级（需允许「安装未知应用」） |
 
+当前版本 **v1.4.1**（上架前的安全加固：默认口令强制改密、上传路径校验；1.4.0 是安卓平板适配）。
+
 > 安卓包从 **1.3.4** 起改用固定证书签名，以后升级可直接覆盖安装。**已经装了 1.3.4 之前旧包的手机，需要卸载一次再装**（旧包是每次构建随机签名，装不上新包）。
 
-> 手机端连接同一台服务器：打开 App →「扫描局域网」或手填 `http://<服务器IP>:8080` → 登录
-> （默认 `admin` / `admin1234`，登录管理里可改）。
+> 手机端连接同一台服务器：打开 App →「扫描局域网」或手填 `http://<服务器IP>:8080` → 登录。
+> 默认账号是 `admin` / `admin1234`，**但首次登录会先要求你设置自己的密码**（网页端和 App 一样），
+> 改完才进主界面 —— 默认口令谁都知道，不让它一直挂在公网上。
 
 ## 功能
 
-- **扫描**：多个源文件夹、递归扫描 20+ 种视频格式，自动用 ffmpeg 抽封面、读时长/分辨率/编码，按 mtime+size 增量更新。
+- **扫描**：多个源文件夹、递归扫描 20+ 种视频格式，自动用 ffmpeg 抽封面（默认取第一帧）、读时长/分辨率/编码，按 mtime+size 增量更新。
+  **扫描任务是串行队列**（同参数自动合并、可取消），所以连着点几次「扫描」不会再把数据库顶出 `UNIQUE constraint failed`；
+  每个源文件夹和每个标签目录都会记下「最后扫描时间 + 最近一次结果」，网页端页头有常驻的扫描面板（进度、排队、最近 8 次记录）。
+- **目录规则**（保存时就会拦）：源文件夹之间不能互相包含；源不能放进标签目录、标签不能放进源目录；标签之间也不能重叠。
+  标签的目的文件夹是**必填**，留空默认落到 `<数据目录>/organized/<标签名>`。
 - **播放页（主页面）**：登录后直接进入；滚轮/上下滑切换视频，单击暂停，长按 2× 加速，长按左右拖动调速，进度条可拖，自动记录播放进度（下次接着看）。侧栏两个页签：**播放列表**（搜索/筛选/标签）+ **整理**（勾选标签，预览要移动的文件，一键整理）。
-- **标签**：默认 5 个（旅行/美食/运动/学习/待整理），可增删改、改颜色、给每个标签指定绝对目的文件夹。
+- **标签**：默认 5 个（旅行/美食/运动/学习/待整理），可增删改、改颜色、给每个标签指定绝对目的文件夹；
+  排序可拖（网页端按住行、手机端长按行），顺序会存到后端，三端一致。
 - **整理**：按标签移动到对应文件夹；重名自动加 ` (1)`；跨盘自动「复制→校验→删除」；整批记录可**撤销**；单文件失败不中断整批。
-- **管理页**：概览（统计/源文件夹/扫描/标签分布/最近整理）、视频库（筛选/搜索/批量打标签）、标签管理、整理（预览+执行+记录+撤销）、播放历史、登录管理（改用户名/密码、登录会话）、关于。
+  - **整理前先查可写性**：目标目录不存在或服务用户没有写权限，会在视频库顶部和整理页亮一条黄色提示条（写明哪个目录、什么原因），执行时自动跳过这些项并在结果里说明。
+  - **失败会如实报错**：如果一个都没搬成，任务状态直接是失败并写明原因（「N 个视频全部整理失败：…」），可以展开看每个文件的失败原因，不再假装「已完成」。
+- **缓存有上限**：转码产生的 HLS 分片默认超过 **4 GB** 或 **7 天**没看就自动清理（设置页可改上限/过期时间，也能一键清理）。安卓端本机播放缓存也是可选的 256 MB / 512 MB / 1 GB / 2 GB / 4 GB，超了淘汰最久没看的。
+- **管理页**：概览（统计/源文件夹/扫描/标签分布/最近整理）、视频库（筛选/搜索/排序/批量打标签）、标签管理、整理（预览+执行+记录+撤销）、播放历史、缓存、登录管理（改用户名/密码、登录会话）、关于。
 - **三档主题**：深色 / 浅色 / 跟随系统，网页端和手机端共用同一份偏好键 `vs-theme`。
 - **播放兼容**：MP4/MOV/WebM（H.264 + AAC）直接 `<video>` 播放并支持 Range 拖拽；其它（MKV/AVI/HEVC…）自动用 ffmpeg 切成 HLS 边转边播。
+  有显卡时优先 GPU 硬解/硬转码（NVENC / QSV / AMF / VideoToolbox），转码并发默认限 2 路，卡死有看门狗。
+- **适配平板**：手机端不再锁竖屏，跟随设备旋转；横屏时视频库变多列网格、设置页变「左边设置项 / 右边展开二级菜单」的主从分栏、
+  整理页变左右两栏（左边选标签组、右边看这次要动哪些文件），播放页右下角有全屏按钮（只有播放页进横屏全屏）。
 
 ## 快速开始
 
@@ -63,7 +77,7 @@ chmod +x run.sh          # 拷贝到服务器后常见 Permission denied，先�
 ./run.sh --port 8080     # 自定义端口
 ```
 
-打开 `http://<服务器IP>:8080`，默认账号 **admin / admin1234**（登录后请在「登录管理」里改掉）。
+打开 `http://<服务器IP>:8080`，默认账号 **admin / admin1234**，首次登录会强制你先设置一个新密码，改完才进主界面。
 
 ### 启动（Windows）
 
@@ -113,8 +127,12 @@ compose、环境变量、目录权限等完整说明见 [packaging/docker/README
 
 ```bash
 bash packaging/fnos/build.sh
-# 产物：dist/fnos/videosorter.fpk（约 3.5 MB）
+# 产物：dist/fnos/videosorter-<版本>-x86.fpk（约 30 MB）
+# 想打 arm 包：VS_ARCH=arm bash packaging/fnos/build.sh
 ```
+
+> 打 fpk 前请先清空 `dist/android/`：脚本会把那个目录里的 `videosorter-*.apk` 全部塞进包里，
+> 留着旧版本会让包白白大一圈（也见过匹配不到时打出个 3.7 MB 的空包）。
 
 安装：fnOS「应用中心」→ 手动安装 → 选择 `videosorter.fpk` → 等待启动完成，
 桌面会出现「视频整理」图标，也可以直接访问 `http://<NAS>:8610`。
@@ -142,16 +160,18 @@ bash packaging/fnos/build.sh
 server/                 Python 后端（FastAPI + SQLite）
   videosorter/
     config.py           配置读写（跨平台数据目录）
+    paths.py            目录规则（规范路径 / 包含 / 重叠判断）
     db.py               SQLite schema 与访问层（WAL）
     auth.py             PBKDF2 密码 + 令牌
     media.py            ffmpeg/ffprobe 封装、缩略图、HLS 转码
     scanner.py          递归扫描 + 增量更新
-    organizer.py        整理计划、移动文件（原子/跨盘）、撤销
+    organizer.py        整理计划、可写性预检、移动文件（原子/跨盘）、撤销
+    cache.py            HLS 转码缓存的按容量/按时间清理（后台每小时一次）
     tasks.py            后台任务注册表（扫描/整理/转码进度）
-    api/                各路由：auth/settings/tags/sources/scan/videos/stream/organize/upload
+    api/                各路由：auth/settings/tags/sources/scan/videos/stream/organize/upload/cache
     app.py              FastAPI 装配 + 静态托管网页端
     __main__.py         CLI 入口（python -m videosorter）
-  tests/                pytest 接口测试（15 项，含 Range 与 HLS）
+  tests/                pytest 接口测试（192 项，含 Range、HLS、整理状态、目录规则、上传安全）
 web/                    网页端（Vue 3 + Vite + TypeScript）
   src/views/Player.vue  播放页（主页面）
   src/views/Manage.vue  管理页（7 个子视图）
@@ -174,8 +194,12 @@ docs/                   架构与部署文档、截图
   "allow_lan": true,
   "theme": "auto",
   "transcode": true,
+  "transcode_encoder": "auto",
   "transcode_preset": "veryfast",
-  "thumb_position": 0.15,
+  "transcode_jobs": 2,
+  "hls_cache_limit_mb": 4096,
+  "hls_cache_max_age_hours": 168,
+  "thumb_position": 0.0,
   "scan_workers": 3,
   "upload_dir": "",
   "discovery": true,
@@ -185,6 +209,10 @@ docs/                   架构与部署文档、截图
 
 - `root_dir`：整理根目录。留空时，标签没写绝对路径就落到「源文件所在目录/标签名」。
 - `transcode`：关闭后，不能直接播放的格式会提示「无法直接播放」而不是转码。
+- `transcode_encoder`：`auto` 表示有显卡就用硬编（NVENC / QSV / AMF / VideoToolbox），也可写死 `libx264`。
+- `transcode_jobs`：同时转码的路数上限，默认 2。不限的话拖几下进度条就会同时起好几个 ffmpeg，NAS 直接卡死。
+- `hls_cache_limit_mb` / `hls_cache_max_age_hours`：转码缓存上限与保留时长，超限按「最久没看」从旧到新删；设 `0` 表示该项不清理。
+- `thumb_position`：封面取第几帧（0~1），默认 `0.0` 取第一帧。
 - `upload_dir`：手机上传文件的落盘目录；留空则用「整理根目录/手机上传」（再退到第一个源目录/手机上传）。
 - `discovery` / `discovery_port`：局域网发现（UDP 38080）。开着时手机 App 点「扫描局域网」就能找到服务器，不用手输 IP。
 - 命令行参数：`--host --port --data-dir --web-dir --open --reload --log-level`。
@@ -193,7 +221,7 @@ docs/                   架构与部署文档、截图
 
 ```bash
 # 后端
-cd server && .venv/bin/python -m pytest -q          # 15 项接口测试
+cd server && .venv/bin/python -m pytest -q          # 192 项测试
 .venv/bin/python -m videosorter --port 8080 --web-dir ../web/dist
 
 # 网页端热更新（/api 自动代理到 8080）
@@ -202,7 +230,8 @@ cd web && npm install && npm run dev
 
 ## 手机端 / Windows 端
 
-- **Android**：`android/` 是 Kotlin + Compose + Media3 工程，竖向滑动切视频、打标签、整理、上传下载、多服务器切换；登录页可「扫描局域网」自动填服务器地址（靠后端的 UDP 发现）。构建见 [docs/build.md](docs/build.md)（本机需 Android SDK；仓库里配了 GitHub Actions 出 APK）。
+- **Android**：`android/` 是 Kotlin + Compose + Media3 工程，竖向滑动切视频、打标签、整理、上传下载、多服务器切换；登录页可「扫描局域网」自动填服务器地址（靠后端的 UDP 发现）。
+  不锁方向，手机和平板都跟随系统旋转：宽屏（≥600dp）下视频库自动变多列网格，设置页在主从分栏里展开二级菜单，整理页左右分栏；播放页右下角有全屏按钮，只有播放页会进横屏全屏。构建见 [docs/build.md](docs/build.md)（本机需 Android SDK；仓库里配了 GitHub Actions 出 APK）。
 - **Windows**：`src-tauri/` 用 Tauri 2 把同一份 Python 后端打成 sidecar，装完即是「自带服务」的桌面应用，可整理本机磁盘。
   PyInstaller 不能交叉编译，所以安装包统一由 GitHub Actions 的 `windows-latest` 编译（发版时自动出 NSIS + MSI）；
   想在 Windows 上自己出绿色版就跑 `packaging\build-portable.bat`，得到 `dist\portable\videosorter-server\`，双击「启动.bat」即用。
@@ -224,6 +253,16 @@ cd web && npm install && npm run dev
 | --- | --- |
 | ![手机整理](docs/screenshots/mobile-organize-light.png) | ![手机设置](docs/screenshots/mobile-settings-light.png) |
 
+平板横屏（Samsung Galaxy Tab S7+ / Android 16，v1.4.0 起的适配）：
+
+| 视频库（多列网格） | 设置（主从分栏） |
+| --- | --- |
+| ![平板视频库](docs/screenshots/v140-tablet-landscape-list.png) | ![平板设置](docs/screenshots/v140-tablet-settings-split.png) |
+
+| 整理（左右两栏） | 上传下载（在设置右侧展开） |
+| --- | --- |
+| ![平板整理](docs/screenshots/v140-tablet-organize-columns.png) | ![平板上传下载](docs/screenshots/v140-tablet-settings-transfer.png) |
+
 网页端（截图由无头浏览器对运行中的服务实拍，见 `docs/screenshots/`；片子是 Mixkit 的免费素材）：
 
 | 播放页（深色） | 播放页（浅色） |
@@ -241,10 +280,10 @@ cd web && npm install && npm run dev
 ## 测试
 
 ```bash
-# 后端：20 项测试（接口 + 打包目录探测，含 Range、HLS 转码、局域网发现）
+# 后端：192 项测试（接口 + 打包目录探测，含 Range、HLS 转码、整理状态、目录规则、上传安全、局域网发现）
 cd server && .venv/bin/python -m pytest -q
 
-# 安卓：8 项纯 JVM 单元测试（地址归一化 / 主题循环 / 模型解析 / 局域网回包解析）
+# 安卓：34 项纯 JVM 单元测试（地址归一化 / 主题循环 / 模型解析 / 局域网回包解析 / 扫描文案 / 整理摘要）
 cd android && gradle testDebugUnitTest
 
 # 网页端端到端（一条命令：自动生成样片 → 起服务 → 真实浏览器点一遍 → 关服务）
@@ -252,7 +291,9 @@ cd android && gradle testDebugUnitTest
 bash tools/e2e-web.sh
 ```
 
-实测结果：后端 47 passed、安卓单测 8 passed、网页端 E2E 21 项全绿（CI 里也跑：`.github/workflows/e2e.yml`）；手机端已在真机上跑通「局域网发现 → 登录 → 上传 → 播放（含 HLS 转码）→ 打标签 → 整理 → 下载」。
+实测结果（v1.4.1）：后端 **192 passed**、安卓单测 **34 passed**、网页端 E2E **22 项**全绿
+（CI 里也跑：`.github/workflows/backend.yml`、`e2e.yml`、`android.yml`）；
+手机端与平板都已在真机上跑通「局域网发现 → 登录（含首次强制改密）→ 上传 → 播放（含 HLS 转码）→ 打标签 → 整理 → 下载」。
 
 ## 在 fNOS 上开发的小提示
 
@@ -264,6 +305,10 @@ bash tools/e2e-web.sh
 ## 安全说明
 
 - 单人使用：一个账号 + PBKDF2 密码哈希，登录态是 HttpOnly Cookie（7 天），所有 `/api/*`（除登录/健康检查）都要求登录。
+- **默认口令不能长期使用**：后端在登录/`me` 响应里带回 `must_change_password`，网页端把登录卡片切成「设置新密码」，
+  手机端弹一个关不掉的对话框，改完才放行。判断方式是直接校验当前密码哈希是否还是默认口令，老库升级后同样有效。
+- **路径都做了约束**：上传的文件名只取最后一段、挡掉 `../` 与控制字符（不可用时按时间戳命名），上传目录必须是绝对路径且不能含 `..`；
+  视频只通过后端流式读取，不暴露任意路径。
 - 默认监听 `0.0.0.0`，请只在可信局域网使用；公网部署请放到反向代理 + HTTPS 后面。
 - 视频文件只通过后端流式读取，不暴露任意路径；目录选择器的 `/api/fs/list` 仅返回目录名。
 
